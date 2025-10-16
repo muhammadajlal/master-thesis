@@ -1,1 +1,1 @@
-﻿# IMU Online HWR — Attention Decoder
+﻿# Improve IMU-Based Handwriting Recognition with Attention
