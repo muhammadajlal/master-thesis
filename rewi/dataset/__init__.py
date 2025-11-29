@@ -102,8 +102,19 @@ class HRDataset(Dataset):
             label = anno['label']
 
         # label pre-processing: single-character tokenization
-        label = [self.categories.index(char) for char in label]  # ctc encode
-        label = torch.tensor(label, dtype=torch.int32)
+        #label = [self.categories.index(char) for char in label]  # ctc encode
+        #label = torch.tensor(label, dtype=torch.int32)
+
+        # In HRDataset.__init__ store tokenizer if provided
+        # self.tokenizer = BPETokenizer(cfgs.tokenizer.model)  # pass via constructor
+        # In __getitem__:
+        if hasattr(self, 'tokenizer') and self.tokenizer is not None:
+            ids = self.tokenizer.encode(label)                 # list[int], no BOS/EOS here
+            label = torch.tensor(ids, dtype=torch.int32)
+        else:
+            label = [self.categories.index(c) for c in label]
+            label = torch.tensor(label, dtype=torch.int32)
+
 
         # sequence pre-processing
         seq = self._process(seq, len(label))

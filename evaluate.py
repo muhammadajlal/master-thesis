@@ -26,6 +26,53 @@ def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
     '''
     cer, wer = {}, {}
 
+    # ✅ CHANGED: make the glob recursive so it works for nested fold_X/0..4/ layouts
+    pattern = 'test_*.json' if cfgs['test'] else 'train_*.json'        # <-- ADDED (pulled out for clarity)
+    paths_result = glob(
+        os.path.join(cfgs['dir_work'], '**', pattern), recursive=True   # <-- CHANGED '**' + recursive=True
+    )
+
+    if paths_result:
+        for i, path_result in enumerate(sorted(paths_result)):
+            with open(path_result, 'r') as f:
+                result_fd = json.load(f)
+
+            if cfgs['test']:
+                result_best = result_fd['-1']['evaluation']
+            else:
+                epoch_best = result_fd['best']['character_error_rate'][0]
+                result_best = result_fd[str(epoch_best)]['evaluation']
+
+            cer[str(i)] = result_best['character_error_rate']
+            wer[str(i)] = result_best['word_error_rate']
+
+        results['cer'] = {
+            'raw': cer,
+            'mean': np.mean(list(cer.values())).item(),
+            'std': np.std(list(cer.values())).item(),
+        }
+        results['wer'] = {
+            'raw': wer,
+            'mean': np.mean(list(wer.values())).item(),
+            'std': np.std(list(wer.values())).item(),
+        }
+        results = {k: v for k, v in sorted(results.items())}
+
+    return results
+
+"""def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
+    '''Calculate the mean and standard deviation of the results of cross
+    validation.
+
+    Args:
+        cfgs (dict): Configurations.
+        results (dict, optional): Current results. Defaults to {}.
+
+    Returns:
+        dict: Updated results.
+    '''
+    cer, wer = {}, {}
+
     if paths_result := glob(
         os.path.join(
             cfgs['dir_work'],
@@ -58,7 +105,7 @@ def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
         }
         results = {k: v for k, v in sorted(results.items())}
 
-    return results
+    return results"""
 
 
 def get_macs_params(cfgs: dict, results: dict = {}) -> dict:

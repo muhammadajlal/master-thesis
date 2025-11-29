@@ -20,7 +20,7 @@ def smooth_probs(probs: torch.Tensor, alpha: float = 1e-6) -> torch.Tensor:
 
     return probs
 
-
+# original rewi loss
 class CTCLoss(nn.Module):
     '''Custom CTCLoss with probability smoothing.
 
@@ -87,3 +87,62 @@ class CTCLoss(nn.Module):
         )
 
         return loss
+
+"""
+# original rewi loss
+import math
+import torch.nn.functional as F
+
+class CTCLoss(nn.Module):
+
+    #Expects LOGITS of shape (T, N, C) or (T, C).
+    #Applies log_softmax internally. Optional prob-smoothing done in log-space.
+    
+    def __init__(
+        self,
+        alpha_smooth: float = 0.0,   # start with 0.0; you can re-enable later
+        blank: int = 0,
+        reduction: str = 'mean',
+        zero_infinity: bool = True,  # safer to avoid NaNs when lengths mismatch
+    ) -> None:
+        super().__init__()
+        self.alpha_smooth = float(alpha_smooth)
+        self.blank = blank
+        self.reduction = reduction
+        self.zero_infinity = zero_infinity
+
+    def forward(
+        self,
+        logits: torch.Tensor,        # (T, N, C) or (T, C) — LOGITS, not probs
+        targets: torch.Tensor,
+        input_lengths: torch.Tensor,
+        target_lengths: torch.Tensor,
+    ) -> torch.Tensor:
+
+        # 1) Stable log-softmax
+        log_probs = F.log_softmax(logits, dim=-1)
+
+        # 2) Optional smoothing in log-space:
+        # log( (1-a)*p + a*1/V ) = logaddexp( log(1-a)+log p , log(a)+log(1/V) )
+        if self.alpha_smooth > 0.0:
+            V = log_probs.size(-1)
+            log_one_minus_a = math.log1p(-self.alpha_smooth)
+            log_a = math.log(self.alpha_smooth)
+            log_unif = -math.log(V)
+            log_probs = torch.logaddexp(
+                log_probs + log_one_minus_a,
+                log_a + log_unif
+            )
+
+        # 3) Torch CTC expects (T, N, C)
+        loss = F.ctc_loss(
+            log_probs,
+            targets,
+            input_lengths,
+            target_lengths,
+            blank=self.blank,
+            reduction=self.reduction,
+            zero_infinity=self.zero_infinity,
+        )
+        return loss"""
+
