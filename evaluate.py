@@ -135,7 +135,7 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
     results['macs'] = int(macs)
     results['params'] = int(params)
     results = {k: v for k, v in sorted(results.items())}
-
+    print(model.decoder)  # should show LSTM(... hidden_size=320, num_layers=2, bidirectional=True)
     return results
 
 

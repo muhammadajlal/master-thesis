@@ -11,14 +11,14 @@ set -euo pipefail
 set -x
 
 # ---- user knobs ----
-DATASET=${DATASET:-wi_word_hw6_meta}
-FOLD=${FOLD:-3}   # set at submit time: sbatch --export=ALL,FOLD=4 rewi_single.sbatch
+DATASET=${DATASET:-wi_sent_hw6_meta}
+FOLD=${FOLD:-4}   # set at submit time: sbatch --export=ALL,FOLD=4 rewi_single.sbatch
 # --------------------
 
 WORK=/home/woody/iwso/iwso214h
 PROJ=$WORK/imu-hwr/work/REWI_work
 DATA=$WORK/imu-hwr/data/${DATASET}
-BASE_OUT=$WORK/imu-hwr/results/hwr2/blconv_ARDecoder_tokenizer/transformer_m__${DATASET}
+BASE_OUT=$WORK/imu-hwr/results/hwr2/blconv_bilstm_wide_no_tokenizer/bilstm_wide__${DATASET}
 OUTDIR="${BASE_OUT}/fold_${FOLD}"
 mkdir -p "$OUTDIR"
 

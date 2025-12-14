@@ -44,10 +44,14 @@ def build_encoder(in_chan: int, arch: str, len_seq: int = 0) -> nn.Module:
             raise ValueError(f"Unknown encoder arch: {arch}")
 
 
-def build_decoder(dim_in: int, num_cls: int, arch: str, len_seq: int = 0) -> nn.Module:
+def build_decoder(dim_in: int, num_cls: int, arch: str, len_seq: int = 0, 
+                  use_gated_attention: bool = False, 
+                  gating_type: str = "elementwise") -> nn.Module:
     match arch:
         case 'bilstm_b':
             return LSTM(dim_in, num_cls)
+        case 'bilstm_wide':  # width-only, ~Transformer-S size on char setup
+            return LSTM(dim_in, num_cls, hidden_size=164, num_layers=3, r_drop=0.2)
         case 'bilstm_s':
             return LSTM(dim_in, num_cls, 64, 2)
         case 'cldnn':
@@ -77,11 +81,17 @@ def build_decoder(dim_in: int, num_cls: int, arch: str, len_seq: int = 0) -> nn.
 
         # AR Transformer decoders (cross-attention)
         case 'ar_transformer_s':
-            return ARDecoder(vocab_size=num_cls, d_model=256, nhead=4, layers=4, dim_ff=1024, pdrop=0.1)
+            return ARDecoder(vocab_size=num_cls, d_model=256, nhead=4, layers=4, 
+                             dim_ff=1024, pdrop=0.1, use_gated_attention=use_gated_attention,
+                             gating_type=gating_type,)
         case 'ar_transformer_m':
-            return ARDecoder(vocab_size=num_cls, d_model=384, nhead=6, layers=6, dim_ff=1536, pdrop=0.12)
+            return ARDecoder(vocab_size=num_cls, d_model=384, nhead=6, layers=6, 
+                             dim_ff=1536, pdrop=0.12, use_gated_attention=use_gated_attention,
+                             gating_type=gating_type,)
         case 'ar_transformer_l':
-            return ARDecoder(vocab_size=num_cls, d_model=512, nhead=8, layers=8, dim_ff=2048, pdrop=0.15)
+            return ARDecoder(vocab_size=num_cls, d_model=512, nhead=8, layers=8, 
+                             dim_ff=2048, pdrop=0.15, use_gated_attention=use_gated_attention,
+                             gating_type=gating_type,)
         case _:
             raise ValueError(f"Unknown decoder arch: {arch}")
 
@@ -93,7 +103,11 @@ class BaseModel(nn.Module):
       - AR pipeline (BLConv + ARDecoder with cross-attention)
     """
 
-    def __init__(self, arch_en: str, arch_de: str, in_chan: int, num_cls: int, len_seq: int = 0) -> None:
+    def __init__(self, arch_en: str, arch_de: str, in_chan: int, 
+                 num_cls: int, len_seq: int = 0, 
+                 use_gated_attention: bool = False,
+                 gating_type: str = "elementwise") -> None:
+        
         super().__init__()
         self.arch_en = arch_en
         self.arch_de = arch_de
@@ -103,7 +117,8 @@ class BaseModel(nn.Module):
 
         self.encoder = build_encoder(in_chan, arch_en, len_seq)
         self.decoder = build_decoder(self.encoder.dim_out, num_cls, arch_de,
-                                     len_seq // self.encoder.ratio_ds if arch_en != 'trans' else 0)
+                                     len_seq // self.encoder.ratio_ds if arch_en != 'trans' else 0,
+                                     use_gated_attention=use_gated_attention, gating_type=gating_type,)
 
         # If AR decoder d_model != encoder dim, add a projection
         self.mem_proj = None
@@ -112,6 +127,8 @@ class BaseModel(nn.Module):
             enc_dim = self.encoder.dim_out
             if enc_dim != dec_dim:
                 self.mem_proj = nn.Linear(enc_dim, dec_dim)
+
+        
 
     def _encode_with_mask(self, x: torch.Tensor, in_lengths: torch.Tensor | None):
         # infer raw lengths if not provided (before encoder)

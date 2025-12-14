@@ -4,3 +4,5 @@ Python Interpreter path: CTLR + Shift + P -> Select python interpreter -> enter 
 
 Or use the command
 source /apps/python/3.12-conda/bin/activate /home/woody/iwso/iwso214h/imu-hwr/envs/rewi
+
+python evaluate.py -c configs/train.yaml

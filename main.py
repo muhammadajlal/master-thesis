@@ -315,6 +315,8 @@ def main(cfgs: argparse.Namespace) -> None:
         cfgs.num_channel,
         cfgs.vocab_dec,      # use vocab_dec from cfgs
         cfgs.len_seq,
+        use_gated_attention=getattr(cfgs, "use_gated_attention", False),    # ✅ pass use_gated_attention from cfgs
+        gating_type=getattr(cfgs, "gating_type", "elementwise"),            # ✅ pass gating_type from cfgs
     ).to(cfgs.device)
 
     # Datasets: hand tokenizer to datasets
