@@ -13,7 +13,7 @@ from .previous.cldnn import CLDNNDec, CLDNNEnc
 from .previous.ott import OttBiLSTM, OttCNN
 from .transformer import Transformer
 from .conformer_en import ConformerEncoder
-from .ARDecoder import ARDecoder   
+from .ARDecoder import ARDecoder
 
 
 def build_encoder(in_chan: int, arch: str, len_seq: int = 0) -> nn.Module:

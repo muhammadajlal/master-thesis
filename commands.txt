@@ -6,3 +6,5 @@ Or use the command
 source /apps/python/3.12-conda/bin/activate /home/woody/iwso/iwso214h/imu-hwr/envs/rewi
 
 python evaluate.py -c configs/train.yaml
+
+For the Qualitative analsysis we need to run the python main.py -c configs/test.yaml with qualitative=true

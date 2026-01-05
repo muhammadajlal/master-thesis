@@ -35,6 +35,10 @@ MANIFEST
 *.manifest
 *.spec
 
+# Direcotories
+/inference_results*/
+/*analysis_outputs*/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

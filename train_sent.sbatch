@@ -12,7 +12,7 @@ set -euo pipefail
 set -x
 
 # ---- Params you can tweak ----
-DATASET=${DATASET:-wi_word_hw6_meta}
+DATASET=${DATASET:-wi_sent_hw6_meta}
 
 # Toggle tokenizer/BPE usage: "true"/"false" or "1"/"0"
 USE_BPE=${USE_BPE:-false}
@@ -73,7 +73,7 @@ export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
 
 # Make a per-fold temp config and patch it safely with Python (PyYAML)
 TMPCFG="${SLURM_TMPDIR:-/tmp}/train_${DATASET}_fold${FOLD}.yaml"
-cp "$PROJ/configs/train.yaml" "$TMPCFG"
+cp "$PROJ/configs/train_sent.yaml" "$TMPCFG"
 
 python3 - <<PY
 import yaml
