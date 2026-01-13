@@ -1,0 +1,78 @@
+# =========================
+# LM Beam Search Evaluation Config
+# Uses beam search (num_beams=4) to evaluate trained T5-small model
+# =========================
+
+# Evaluation mode
+test: true
+epoch: 1
+
+# decoder architecture (must match training)
+arch_de: "t5-small"
+
+# Encoder settings (must match training)
+arch_en: "blconv_b"
+num_channel: 13
+len_seq: 0
+d_cnn: 512
+
+# Pretrained LM settings
+lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+lm_train_lm: false
+lm_proj_dropout: 0.0
+
+# BEAM SEARCH DECODING (the key settings for this experiment)
+lm_num_beams: 8
+lm_length_penalty: 1.2       # try 0.8, 1.0, 1.2
+lm_max_new_tokens: 64
+lm_min_new_tokens: 0
+
+# Label settings
+lm_max_label_len: 128
+
+# Checkpoint to evaluate (OVERRIDE per fold in sbatch)
+# Point to best checkpoint from your training run
+checkpoint: null
+
+# Data paths (OVERRIDE per fold in sbatch)
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/multimodal_t5_small_beam4_eval
+
+# Runtime
+device: cuda
+seed: 42
+num_worker: 16
+cache: false
+size_batch: 64
+idx_fold: 0
+
+# Encoder freeze state (doesn't matter for eval, but needed for model build)
+freeze: false
+
+# CTC settings (compatibility)
+ctc_decoder: best_path
+
+# Disable qualitative analysis for this run
+qualitative: false
+
+# Evaluation frequency (for test mode, just needs to be set)
+freq_eval: 1
+freq_log: 100
+
+# Tokenizer settings (legacy; LM uses internal tokenizer)
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+# Gating (ignored for LM mode)
+use_gated_attention: false
+gating_type: elementwise
+
+# Concatenation (disabled for eval)
+concat:
+  enabled: false
+
+# Labels (word-level)
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]

@@ -1,0 +1,45 @@
+arch_de: ar_transformer_s # decoder architecture
+arch_en: blconv_b
+aug: true # whether to perform data augmentation for train set
+cache: false # whether to cache the whole dataset into rams
+# Bypassed by SLURM script env variable
+checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv_ARDecoder_no_tokenizer/ar_transformer_s__wi_word_hw6_meta/fold_0/0/checkpoints/299.pth # path to checkpoint to load
+ctc_decoder: best_path
+device: cpu
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta 
+# Bypassed by SLURM script env variable
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/qualitative_outputs_new # Bypassed by SLURM script env variable
+
+
+qualitative: true
+qual_task: word
+# indices per fold (empty list => no figs for that fold)
+qual_indices_by_fold:
+  0: [1, 2, 236, 1001, 145, 175, 2809, 1406]
+  1: []
+  2: []
+  3: []
+  4: []
+
+qual_csv: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/quant_all_val_predictions_new.csv
+qual_outdir: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/qualitative_analysis_outputs/fold_0
+qual_seed: 42
+qual_n_correct: 5
+qual_n_nearmiss: 5
+qual_n_catastrophic: 5
+qual_use_gradcam: true
+qual_gradcam_layer: layers.11.pwconv
+
+epoch: 1
+freq_eval: 1 # frequency (epoch) to evaulate model performance on val set
+freq_log: 300 # frequency (iteration) to log information
+idx_fold: 0 # cross validation fold index. 0 for non-cross validation. -1 for train for all cross-validation folds automatically
+len_seq: 0
+num_channel: 13
+num_worker: 16
+seed: 42
+size_batch: 64
+test: true
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"] # including seperation label for CTC
+# categories: ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(",")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "]

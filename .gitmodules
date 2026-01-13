@@ -1,0 +1,3 @@
+[submodule "vendor/rewi"]
+	path = vendor/rewi
+	url = https://github.com/jindongli24/REWI.git
