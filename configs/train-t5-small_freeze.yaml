@@ -1,0 +1,106 @@
+# =========================
+# Multimodal probe: CNN encoder + ByT5-small decoder (projection-only training)
+# Word dataset (WI)
+# =========================
+
+# decoder architecture
+arch_de: "t5-small"
+
+# MUST set this to encoder.dim_out for blconv_b after you print it once.
+# (Do NOT guess; update after logging encoder output dimension.)
+d_cnn: 512
+
+# Pretrained LM settings (probe defaults)
+lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+lm_train_lm: false       # true: fine-tune entire LM from epoch 0; false: freeze LM weights
+lm_unfreeze_epoch: 9999999999999   # At which epoch to unfreeze LM if lm_train_lm is false initially
+lm_proj_dropout: 0.1
+lm_num_beams: 1             # probe: greedy first
+lm_max_new_tokens: 64
+lm_length_penalty: 1.0
+lm_min_new_tokens: 0
+
+# Label/tokenization guardrails
+# ByT5 is byte-level, so "word" can still be many tokens; this prevents rare outliers
+# from dominating memory/compute and makes train/eval consistent.
+lm_max_label_len: 128
+
+# AMP for LM training (V100: start with false for stability; fp16 if enabled)
+lm_use_amp: false
+
+# Encoder
+arch_en: "blconv_b"
+num_channel: 13
+len_seq: 0
+# Freeze encoder weights (projection-only probe)
+freeze: false
+# Augmentation (probe: off for clean signal; turn on later if promising)
+aug: false
+# CTC settings (not used in LM probe directly; keep for compatibility)
+ctc_decoder: best_path
+
+# Data / paths
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/multimodal_t5_small_FreezeLM/t5-small__onhw_wi_word_rh
+checkpoint: null
+
+# Runtime
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+
+# Probe training schedule (short, fast feedback)
+epoch: 300
+epoch_warmup: 30
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+
+# Save only best checkpoints during training (reduces disk usage)
+# Writes: checkpoints/best_cer.pth and checkpoints/best_wer.pth
+save_best_only: true
+test: false
+
+# Optimization
+# End-to-end training: use discriminative LRs (LM usually needs a much smaller LR)
+lr_enc: 0.0003
+lr_proj: 0.001
+lr_lm: 0.000003
+lm_lr_unfreeze_mult: 20
+weight_decay: 0.01
+
+# Base LR (used only in non LM-mode)
+lr: 0.0001
+size_batch: 64
+
+
+
+# Tokenizer settings (legacy; LM uses ByT5 tokenizer internally)
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+# Gating (only for AR transformer decoders; ignored here)
+use_gated_attention: false
+gating_type: elementwise
+
+# Input concatenation (probe: disabled)
+concat:
+  enabled: false
+  items_min: 2
+  items_max: 6
+  max_T: 4096
+  same_writer: true
+  writer_key: "id_writer"
+  p_concat: 0.5
+  use_separator: false
+  disable_base_aug_in_concat: true
+
+# Labels (word-level)
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"] # including seperation label "" for CTC
+
+# For sentence-level dataset
+#categories: ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(",")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "] 
