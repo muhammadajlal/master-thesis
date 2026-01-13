@@ -38,7 +38,7 @@ MANIFEST
 # Direcotories
 /inference_results*/
 /*analysis_outputs*/
-/assets/
+/assets
 /bpe*.model
 /bpe*.vocab
 /bpe*.txt
