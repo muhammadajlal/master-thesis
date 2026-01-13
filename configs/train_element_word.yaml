@@ -5,9 +5,9 @@ cache: true # whether to cache the whole dataset into rams
 checkpoint: null # path to checkpoint to load
 ctc_decoder: best_path
 device: cuda
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/element_word_no_tokenizer_init/ar_transformer_s__wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/element_word_onhw500
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_onhw_wd_word_rh
 
 epoch: 300
@@ -19,7 +19,7 @@ freq_log: 50 # frequency (iteration) to log information
 freq_save: 5 # frequency (epoch) to save model checkpoint
 idx_fold: 0 # cross validation fold index. 0 for non-cross validation. -1 for train for all cross-validation folds automatically
 len_seq: 0
-lr: 0.0007
+lr: 0.0008
 num_channel: 13
 num_worker: 16
 seed: 42

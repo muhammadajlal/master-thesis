@@ -8,7 +8,9 @@ import torch
 import yaml
 from thop import profile
 
-from rewi.model import BaseModel
+from rewi.model import BaseModel, build_encoder
+from rewi.model.multimodal_lm_model import MultimodalLMModel
+from rewi.model.pretrainedLM import LMConfig
 
 import time
 
@@ -119,23 +121,56 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
     Returns:
         dict: Updated results.
     '''
-    model = BaseModel(
-        cfgs['arch_en'],
-        cfgs['arch_de'],
-        cfgs['num_channel'],
-        len(cfgs['categories']),
-        cfgs['len_seq'],
-    ).eval()
-    model.infer()
-    x = torch.randn(
-        1, cfgs['num_channel'], 1024 if 'word' in cfgs['dir_dataset'] else 4096
-    )
-    macs, params = profile(model, inputs=(x,))
+    lm_mode = cfgs.get('arch_de') in {'byt5_small', 't5-small'}
+
+    if lm_mode:
+        # Build encoder + LM wrapper mirroring main.py
+        encoder = build_encoder(cfgs['num_channel'], cfgs['arch_en'], cfgs['len_seq'])
+        ratio_ds = int(getattr(encoder, 'ratio_ds', 1))
+
+        lm_cfg = LMConfig(
+            name=cfgs.get('lm_name', 'google/byt5-small'),
+            train_lm=bool(cfgs.get('lm_train_lm', False)),
+            max_new_tokens=int(cfgs.get('lm_max_new_tokens', 128)),
+            num_beams=int(cfgs.get('lm_num_beams', 1)),
+            length_penalty=float(cfgs.get('lm_length_penalty', 1.0)),
+            min_new_tokens=int(cfgs.get('lm_min_new_tokens', 0)),
+        )
+
+        d_cnn = int(cfgs.get('d_cnn', 0))
+        model = MultimodalLMModel(
+            encoder=encoder,
+            ratio_ds=ratio_ds,
+            d_cnn=d_cnn,
+            lm_cfg=lm_cfg,
+            proj_dropout=float(cfgs.get('lm_proj_dropout', 0.0)),
+            freeze_encoder=bool(cfgs.get('freeze', True)),
+        ).eval()
+
+        # Dummy inputs for profiling (word vs sentence length heuristic)
+        T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+        x = torch.randn(1, cfgs['num_channel'], T)
+        len_x = torch.tensor([T], dtype=torch.long)
+        labels = torch.zeros((1, 8), dtype=torch.long)  # small label length to keep thop fast
+
+        macs, params = profile(model, inputs=(x, len_x, labels), verbose=False)
+    else:
+        model = BaseModel(
+            cfgs['arch_en'],
+            cfgs['arch_de'],
+            cfgs['num_channel'],
+            len(cfgs['categories']),
+            cfgs['len_seq'],
+        ).eval()
+        model.infer()
+        x = torch.randn(
+            1, cfgs['num_channel'], 1024 if 'word' in cfgs['dir_dataset'] else 4096
+        )
+        macs, params = profile(model, inputs=(x,))
 
     results['macs'] = int(macs)
     results['params'] = int(params)
     results = {k: v for k, v in sorted(results.items())}
-    print(model.decoder)  # should show LSTM(... hidden_size=320, num_layers=2, bidirectional=True)
     return results
 
 

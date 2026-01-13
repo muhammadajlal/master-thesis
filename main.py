@@ -1,16 +1,15 @@
 import argparse
+import contextlib
 import os
 import warnings
 from loguru import logger
 import numpy as np
 import json
-import os
 import time
 
 import torch
 import torch.nn as nn
 import yaml
-from loguru import logger
 from torch.amp import GradScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
@@ -20,12 +19,129 @@ from rewi.dataset.utils import fn_collate
 from rewi.evaluate import evaluate
 from rewi.loss import CTCLoss
 from rewi.manager import RunManager
-from rewi.model import BaseModel
+from rewi.model import BaseModel, build_encoder  # Import build_encoder for LM mode
 from rewi.utils import seed_everything, seed_worker
 from rewi.visualize import visualize
 from rewi.ctc_decoder import BestPath
 from rewi.tokenizer import BPETokenizer
-from rewi.dataset_concat import ConcatWordDataset, concat_collate  # <-- your wrapper + collate
+from rewi.dataset_concat import ConcatWordDataset, concat_collate
+
+# -------------------------
+# Add imports for new LM components
+# -------------------------
+from rewi.model.multimodal_lm_model import MultimodalLMModel
+from rewi.model.pretrainedLM import LMConfig
+from rewi.dataset.lm_collate import lm_collate
+
+def train_one_epoch_lm(dataloader, model, optimizer, scaler, lr_scheduler, man, epoch):
+    man.initialize_epoch(epoch, len(dataloader), False)
+    model.train()
+
+    use_amp = bool(getattr(man.cfgs, "lm_use_amp", False))
+    amp_dtype = torch.float16  # V100-friendly; bf16 is not recommended on V100
+
+    for idx, (x, len_x, labels, _texts) in enumerate(dataloader):
+        x = x.to(man.cfgs.device)
+        len_x = len_x.to(man.cfgs.device)
+        labels = labels.to(man.cfgs.device)
+
+        # Skip degenerate batches (all tokens ignored)
+        if labels.numel() == 0 or (labels != -100).sum().item() == 0:
+            logger.warning(
+                "All labels are -100 (ignored). Skipping batch. epoch={} iter={}",
+                epoch,
+                idx,
+            )
+            continue
+
+        optimizer.zero_grad(set_to_none=True)
+
+        # Forward (AMP)
+        autocast_ctx = (
+            torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp)
+            if x.is_cuda
+            else contextlib.nullcontext()
+        )
+        with autocast_ctx:
+            out = model(x, len_x, labels=labels)
+            loss = out.loss
+
+        # HARD GUARD: never step on NaN/Inf
+        if not torch.isfinite(loss):
+            logger.warning(
+                "Non-finite loss. epoch={} iter={} lr={} loss={}",
+                epoch, idx, lr_scheduler.get_last_lr()[0], loss
+            )
+            optimizer.zero_grad(set_to_none=True)
+            if scaler is not None:
+                scaler.update()
+            continue
+
+        # Backward + step
+        if scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if not torch.isfinite(grad_norm):
+                logger.warning(
+                    "Non-finite grad norm. epoch={} iter={} lr={} grad_norm={}",
+                    epoch, idx, lr_scheduler.get_last_lr()[0], grad_norm
+                )
+                optimizer.zero_grad(set_to_none=True)
+                scaler.update()
+                continue
+
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if not torch.isfinite(grad_norm):
+                logger.warning(
+                    "Non-finite grad norm. epoch={} iter={} lr={} grad_norm={}",
+                    epoch, idx, lr_scheduler.get_last_lr()[0], grad_norm
+                )
+                optimizer.zero_grad(set_to_none=True)
+                continue
+
+            optimizer.step()
+
+        lr_scheduler.step()
+        man.update_iteration(idx, float(loss.item()), lr_scheduler.get_last_lr()[0])
+
+    man.summarize_epoch()
+    if not bool(getattr(man.cfgs, "save_best_only", False)) and man.check_step(epoch + 1, 'save'):
+        man.save_checkpoint(model.state_dict(), optimizer.state_dict(), lr_scheduler.state_dict())
+
+
+@torch.no_grad()
+def test_lm(dataloader, model, man, e):
+    model.eval()
+    man.initialize_epoch(e, len(dataloader), True)
+
+    preds, labels_txt = [], []
+
+    for idx, (x, len_x, labels_hf, texts) in enumerate(dataloader):
+        x = x.to(man.cfgs.device)
+        len_x = len_x.to(man.cfgs.device)
+        labels_hf = labels_hf.to(man.cfgs.device)
+
+        out = model(x, len_x, labels=labels_hf)
+        loss = float(out.loss.detach().cpu())
+
+        # Track something so summarize_epoch works
+        man.update_iteration(idx, loss, lr=0.0)
+
+        hyp = model.generate(x, len_x)
+        preds.extend(hyp)
+        labels_txt.extend(list(texts))
+        
+    man.summarize_epoch()
+    if man.check_step(e + 1, 'eval'):
+        results_eval = evaluate(preds, labels_txt)
+        man.update_evaluation(results_eval, preds[:20], labels_txt[:20])
 # Runtime Levenshtein (raw + normalized)
 try:
     import Levenshtein
@@ -571,7 +687,7 @@ def train_one_epoch(
     man.summarize_epoch()
 
     # save checkpoints every freq_save epoch
-    if man.check_step(epoch + 1, 'save'):
+    if not bool(getattr(man.cfgs, "save_best_only", False)) and man.check_step(epoch + 1, 'save'):
         man.save_checkpoint(
             model.state_dict(),
             optimizer.state_dict(),
@@ -908,8 +1024,6 @@ def test(
                     ensure_ascii=False
                 )
 
-
-
 def main(cfgs: argparse.Namespace) -> None:
     '''Main function for training and evaluation.
 
@@ -917,8 +1031,9 @@ def main(cfgs: argparse.Namespace) -> None:
         cfgs (argparse.Namespace): Configurations.
     '''
 
-    # 1) AR mode
+    # 1) Training Regime
     AR_MODE = cfgs.arch_de in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
+    LM_MODE = cfgs.arch_de in {"byt5_small", "t5-small"}  # Add LM_MODE flag
 
     # 2) Tokenizer setup (BPE optional) — define tok BEFORE using it
     tok = None
@@ -948,30 +1063,80 @@ def main(cfgs: argparse.Namespace) -> None:
     seed_everything(cfgs.seed)
     ctc_decoder = BestPath(cfgs.categories)
 
-    model = BaseModel(
-        cfgs.arch_en,
-        cfgs.arch_de,
-        cfgs.num_channel,
-        cfgs.vocab_dec,      # use vocab_dec from cfgs
-        cfgs.len_seq,
-        use_gated_attention=getattr(cfgs, "use_gated_attention", False),    # ✅ pass use_gated_attention from cfgs
-        gating_type=getattr(cfgs, "gating_type", "elementwise"),            # ✅ pass gating_type from cfgs
-    ).to(cfgs.device)
+    LM_MODE = cfgs.arch_de in {"byt5_small", "t5-small"}
+
+    if LM_MODE:
+        encoder = build_encoder(cfgs.num_channel, cfgs.arch_en, cfgs.len_seq).to(cfgs.device)
+        ratio_ds = int(getattr(encoder, "ratio_ds", 1))
+
+        lm_cfg = LMConfig(
+            name=getattr(cfgs, "lm_name", "google/byt5-small"),
+            train_lm=getattr(cfgs, "lm_train_lm", False),
+            max_new_tokens=int(getattr(cfgs, "lm_max_new_tokens", 128)),
+            num_beams=int(getattr(cfgs, "lm_num_beams", 1)),
+            length_penalty=float(getattr(cfgs, "lm_length_penalty", 1.0)),
+            min_new_tokens=int(getattr(cfgs, "lm_min_new_tokens", 0)),
+        )
+
+        # Recommended: d_cnn=0 => projection uses LazyLinear and auto-infers (e.g., 512)
+        d_cnn = int(getattr(cfgs, "d_cnn", 0))
+
+        model = MultimodalLMModel(
+            encoder=encoder,
+            ratio_ds=ratio_ds,
+            d_cnn=d_cnn,
+            lm_cfg=lm_cfg,
+            proj_dropout=float(getattr(cfgs, "lm_proj_dropout", 0.0)),
+            freeze_encoder=bool(getattr(cfgs, "freeze", True)),
+        ).to(cfgs.device)
+
+
+    else:
+        # Original BaseModel build for AR/CTC modes
+        model = BaseModel(
+            cfgs.arch_en,
+            cfgs.arch_de,
+            cfgs.num_channel,
+            cfgs.vocab_dec,      # use vocab_dec from cfgs
+            cfgs.len_seq,
+            use_gated_attention=getattr(cfgs, "use_gated_attention", False),    # ✅ pass use_gated_attention from cfgs
+            gating_type=getattr(cfgs, "gating_type", "elementwise"),            # ✅ pass gating_type from cfgs
+        ).to(cfgs.device)
 
     # Datasets: hand tokenizer to datasets
     dataset_test = HRDataset(
-        os.path.join(cfgs.dir_dataset, 'val.json'),
-        cfgs.categories,
-        model.ratio_ds,
-        cfgs.idx_fold,
-        cfgs.len_seq,
-        cache=cfgs.cache,
+    os.path.join(cfgs.dir_dataset, 'val.json'),
+    cfgs.categories,
+    model.ratio_ds,
+    cfgs.idx_fold,
+    cfgs.len_seq,
+    cache=cfgs.cache,
     )
-    dataset_test.tokenizer = tok
 
-    dataloader_test = DataLoader(
-        dataset_test, cfgs.size_batch, num_workers=cfgs.num_worker, collate_fn=fn_collate,
-    )
+    collate_test = fn_collate
+    if LM_MODE:
+        hf_tok = model.lm.tokenizer
+        collate_test = lambda batch: lm_collate(
+            batch,
+            base_collate_fn=fn_collate,
+            hf_tokenizer=hf_tok,
+            categories=cfgs.categories,
+            pad_id=cfgs.PAD_ID,
+            # add a real max length to silence truncation warnings + stabilize memory
+            max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+        )
+
+        dataloader_test = DataLoader(
+            dataset_test,
+            cfgs.size_batch,
+            num_workers=cfgs.num_worker,
+            collate_fn=collate_test,
+        )
+
+    else:
+        dataloader_test = DataLoader(
+            dataset_test, cfgs.size_batch, num_workers=cfgs.num_worker, collate_fn=fn_collate
+        )
 
     fn_loss = (nn.CrossEntropyLoss(ignore_index=cfgs.PAD_ID, label_smoothing=0.1)
                if AR_MODE else CTCLoss())
@@ -1012,6 +1177,19 @@ def main(cfgs: argparse.Namespace) -> None:
             collate_train = fn_collate
             train_batch_size = cfgs.size_batch
 
+        # Wrap collate for LM mode
+        if LM_MODE:
+            base_collate = collate_train
+            hf_tok = model.lm.tokenizer  # from PretrainedLMDecoder
+            collate_train = lambda batch: lm_collate(
+                batch,
+                base_collate_fn=base_collate,
+                hf_tokenizer=hf_tok,
+                categories=cfgs.categories,
+                pad_id=cfgs.PAD_ID,
+                max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+            )
+
         dataloader_train = DataLoader(
             dataset_train,
             batch_size=train_batch_size,
@@ -1021,6 +1199,7 @@ def main(cfgs: argparse.Namespace) -> None:
             worker_init_fn=seed_worker,
             generator=torch.Generator().manual_seed(cfgs.seed),
         )
+
 
         # Log dataloader class information (base or concatenated)
         cc = getattr(cfgs, "concat", {}) or {}
@@ -1036,14 +1215,17 @@ def main(cfgs: argparse.Namespace) -> None:
         # Probe the very first batch safely
         try:
             _x, _y, _len_x, _len_y = next(iter(dataloader_train))
+            
+            def _safe_tolist(x):
+                return x.tolist() if hasattr(x, "tolist") else list(x)
 
             # basic shapes + first few lengths
             logger.info(
                 "[ConcatProbe] x={} y={} | len_x[:8]={} | len_y[:8]={}",
                 tuple(_x.shape),
                 tuple(_y.shape),
-                _len_x[:8].tolist(),
-                _len_y[:8].tolist(),
+                _safe_tolist(_len_x[:8]),
+                _safe_tolist(_len_y[:8]),
             )
 
             # summary stats
@@ -1073,19 +1255,102 @@ def main(cfgs: argparse.Namespace) -> None:
         except Exception as e:
             logger.warning("[ConcatProbe] could not fetch base sample: {}", e)
 
+    # ---- Discriminative LR for full multimodal fine-tuning ----
+    if LM_MODE:
+        def _iter_schedulers(sched):
+            # SequentialLR stores underlying schedulers in `_schedulers`.
+            if hasattr(sched, "_schedulers"):
+                return list(getattr(sched, "_schedulers"))
+            return [sched]
 
+        def _find_group_idx_by_name(opt: torch.optim.Optimizer, name: str) -> int | None:
+            for i, g in enumerate(opt.param_groups):
+                if g.get("name") == name:
+                    return i
+            return None
 
+        def _log_lm_state(tag: str, opt: torch.optim.Optimizer) -> None:
+            # Count trainable params on decoder side
+            hf = model.lm.lm
+            trainable = 0
+            total = 0
+            for n, p in hf.named_parameters():
+                if n.startswith("decoder.") or n.startswith("lm_head") or n.startswith("shared"):
+                    total += p.numel()
+                    if p.requires_grad:
+                        trainable += p.numel()
+            idx = _find_group_idx_by_name(opt, "lm_dec")
+            lr = opt.param_groups[idx]["lr"] if idx is not None else None
+            logger.info("[LM][{}] lm_dec trainable={}/{} params | opt_lr={}", tag, trainable, total, lr)
+
+        def _set_group_lr_and_base(opt: torch.optim.Optimizer, sched, idx: int, new_lr: float) -> None:
+            opt.param_groups[idx]["lr"] = float(new_lr)
+            # Make the change stick across future scheduler.step() calls.
+            for s in _iter_schedulers(sched):
+                if hasattr(s, "base_lrs") and idx < len(s.base_lrs):
+                    s.base_lrs[idx] = float(new_lr)
+
+        # Suggested defaults if not present in YAML
+        lr_enc  = float(getattr(cfgs, "lr_enc",  1e-4))
+        lr_proj = float(getattr(cfgs, "lr_proj", 1e-4))
+        lr_lm   = float(getattr(cfgs, "lr_lm",   1e-5))   # ~10x smaller than encoder
+        wd      = float(getattr(cfgs, "weight_decay", 0.01))
+
+        param_groups = []
+
+        # 1) CNN encoder
+        enc_params = [p for p in model.encoder.parameters() if p.requires_grad]
+        if len(enc_params) > 0:
+            param_groups.append({"name": "enc", "params": enc_params, "lr": lr_enc})
+
+        # 2) Projection / adapter
+        proj_params = [p for p in model.proj.parameters() if p.requires_grad]
+        if len(proj_params) > 0:
+            param_groups.append({"name": "proj", "params": proj_params, "lr": lr_proj})
+
+        # 3) LM (prefer: decoder + lm_head/shared only)
+        hf = model.lm.lm  # HuggingFace T5ForConditionalGeneration  (PretrainedLMDecoder.lm) :contentReference[oaicite:7]{index=7}
+        dec_params = []
+        for name, p in hf.named_parameters():
+            if name.startswith("decoder.") or name.startswith("lm_head") or name.startswith("shared"):
+                dec_params.append(p)
+
+        if len(dec_params) > 0:
+            param_groups.append({"name": "lm_dec", "params": dec_params, "lr": lr_lm})
+
+        optimizer = torch.optim.AdamW(param_groups, weight_decay=wd)
+        scaler = GradScaler(enabled=bool(getattr(cfgs, "lm_use_amp", False)))
+
+        logger.info(
+            "[OptGroups] enc={} proj={} lm_dec={} | lr_enc={} lr_proj={} lr_lm={}",
+            sum(p.numel() for p in enc_params),
+            sum(p.numel() for p in proj_params),
+            sum(p.numel() for p in dec_params),
+            lr_enc, lr_proj, lr_lm,
+        )
+    else:
+    # -----------------------------------------------------------
 
         optimizer = torch.optim.AdamW(model.parameters(), cfgs.lr)
         scaler = GradScaler()
+
+    # Create scheduler only if training (not test mode)
+    if not cfgs.test:
         lr_scheduler = SequentialLR(
-            optimizer,
-            [
-                LinearLR(optimizer, 0.01, total_iters=len(dataloader_train) * cfgs.epoch_warmup),
-                CosineAnnealingLR(optimizer, len(dataloader_train) * (cfgs.epoch - cfgs.epoch_warmup)),
-            ],
-            [len(dataloader_train) * cfgs.epoch_warmup],
-        )
+                optimizer,
+                [
+                    LinearLR(optimizer, 0.01, total_iters=len(dataloader_train) * cfgs.epoch_warmup),
+                    CosineAnnealingLR(optimizer, len(dataloader_train) * (cfgs.epoch - cfgs.epoch_warmup)),
+                ],
+                [len(dataloader_train) * cfgs.epoch_warmup],
+            )
+        
+        # LM mode sanity log right after optimizer/scheduler construction
+        if LM_MODE:
+            _log_lm_state("init", optimizer)
+    else:
+        # Test mode: dummy scheduler (never used)
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1.0)
 
 
     # load checkpoint if given
@@ -1138,6 +1403,17 @@ def main(cfgs: argparse.Namespace) -> None:
 
         logger.info(f'Load checkpoint from {cfgs.checkpoint}')
 
+    # --- Staged LM fine-tuning: optionally unfreeze decoder at epoch N ---
+    # If you resume from a checkpoint that is already past lm_unfreeze_epoch,
+    # ensure requires_grad is set correctly before training continues.
+    if LM_MODE and (not cfgs.test):
+        lm_unfreeze_epoch = getattr(cfgs, "lm_unfreeze_epoch", None)
+        if lm_unfreeze_epoch is not None:
+            lm_unfreeze_epoch = int(lm_unfreeze_epoch)
+            if lm_unfreeze_epoch >= 0 and epoch_start >= lm_unfreeze_epoch:
+                model.lm.set_decoder_trainable(True)
+                logger.info("[LM] Resumed at epoch {} => LM decoder is UNFROZEN (lm_unfreeze_epoch={})", epoch_start, lm_unfreeze_epoch)
+
     # start running
     for e in range(epoch_start, cfgs.epoch):
         if cfgs.test:
@@ -1181,40 +1457,97 @@ def main(cfgs: argparse.Namespace) -> None:
                     "gradcam_layer": getattr(cfgs, "qual_gradcam_layer", "layers.11.pwconv"),
                 }
 
-            test(
-                dataloader_test,
-                model,
-                fn_loss,
-                manager,
-                ctc_decoder,
-                0,                     # epoch=0 for consistency
-                tokenizer=tok,
-                force_eval=True,       # ✅ always evaluate
-                qual_cfg=qual_cfg,     # ✅ enable Part B capture
-            )
+            # Route to correct evaluation function based on model type
+            if LM_MODE:
+                test_lm(dataloader_test, model, manager, 0)
+            else:
+                test(
+                    dataloader_test,
+                    model,
+                    fn_loss,
+                    manager,
+                    ctc_decoder,
+                    0,                     # epoch=0 for consistency
+                    tokenizer=tok,
+                    force_eval=True,       # ✅ always evaluate
+                    qual_cfg=qual_cfg,     # ✅ enable Part B capture
+                )
             manager.summarize_evaluation()
             break
 
         else:
-            train_one_epoch(
-                dataloader_train,
-                model,
-                fn_loss,
-                optimizer,
-                scaler,
-                lr_scheduler,
-                manager,
-                e,
-            )
-            test(
-                dataloader_test,
-                model,
-                fn_loss,
-                manager,
-                ctc_decoder,
-                e,
-                tokenizer=tok          # ✅ pass tokenizer
-            )
+            if LM_MODE and (not cfgs.test):
+                lm_unfreeze_epoch = getattr(cfgs, "lm_unfreeze_epoch", None)
+                if lm_unfreeze_epoch is not None and int(lm_unfreeze_epoch) >= 0 and int(e) == int(lm_unfreeze_epoch):
+                    model.lm.set_decoder_trainable(True)
+                    # Step (1): verify/print that decoder params are actually trainable
+                    _log_lm_state(f"unfreeze@{e}", optimizer)
+
+                    # Step (2): high-ROI approach = LR bump (scheduler-aware) rather than restarting full schedule.
+                    # This avoids perturbing encoder/proj LR while making LM updates non-trivial late in training.
+                    # Optional: only bumps LR if you set lm_lr_unfreeze_mult != 1.0 in YAML
+                    mult = float(getattr(cfgs, "lm_lr_unfreeze_mult", 1.0))
+                    idx = _find_group_idx_by_name(optimizer, "lm_dec")
+                    if idx is not None and mult > 0 and mult != 1.0:
+                        old_lr = float(optimizer.param_groups[idx]["lr"])
+                        new_lr = old_lr * mult
+                        _set_group_lr_and_base(optimizer, lr_scheduler, idx, new_lr)
+                        logger.info(
+                            "[LM] Unfreeze LR bump applied: lm_dec lr {} -> {} (mult={}, epoch={})",
+                            old_lr, new_lr, mult, e,
+                        )
+                    elif idx is not None and mult == 1.0:
+                        logger.info("[LM] Unfreeze LR bump disabled (lm_lr_unfreeze_mult=1.0).")
+                    else:
+                        logger.warning("[LM] Could not apply LR bump (lm_dec group missing or mult<=0).")
+
+                    logger.info("[LM] Unfroze LM decoder at epoch {} (lm_unfreeze_epoch={})", e, int(lm_unfreeze_epoch))
+
+            if LM_MODE:
+                train_one_epoch_lm(  # Use new LM training function
+                    dataloader_train,
+                    model,
+                    optimizer,
+                    scaler,
+                    lr_scheduler,
+                    manager,
+                    e,
+                )
+            else:
+                train_one_epoch(  # Keep existing for AR/CTC
+                    dataloader_train,
+                    model,
+                    fn_loss,
+                    optimizer,
+                    scaler,
+                    lr_scheduler,
+                    manager,
+                    e,
+                )
+            if LM_MODE:
+                test_lm(dataloader_test, model, manager, e)
+            else:
+                test(dataloader_test, model, fn_loss, manager, ctc_decoder, e, tokenizer=tok)
+
+            # Save only best checkpoints (CER/WER) if enabled.
+            if bool(getattr(cfgs, "save_best_only", False)):
+                best = manager.results.get("best", {})
+                if isinstance(best, dict):
+                    if "character_error_rate" in best and int(best["character_error_rate"][0]) == int(e):
+                        manager.save_checkpoint(
+                            model.state_dict(),
+                            optimizer.state_dict(),
+                            lr_scheduler.state_dict(),
+                            filename="best_cer.pth",
+                        )
+                    if "word_error_rate" in best and int(best["word_error_rate"][0]) == int(e):
+                        manager.save_checkpoint(
+                            model.state_dict(),
+                            optimizer.state_dict(),
+                            lr_scheduler.state_dict(),
+                            filename="best_wer.pth",
+                        )
+
 
     if not cfgs.test:
         manager.summarize_evaluation()
