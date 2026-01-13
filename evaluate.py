@@ -8,9 +8,15 @@ import torch
 import yaml
 from thop import profile
 
-from rewi.model import BaseModel
+from rewi.model import BaseModel, build_encoder
+from rewi.model.multimodal_lm_model import MultimodalLMModel
+from rewi.model.pretrainedLM import LMConfig
 
-import time
+
+def _is_lm_mode(cfgs: dict) -> bool:
+    arch_de = str(cfgs.get('arch_de', '')).lower()
+    # We treat it as LM-mode only if a local HF model path/name is provided.
+    return ('t5' in arch_de) and bool(cfgs.get('lm_name'))
 
 
 def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
@@ -119,23 +125,73 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
     Returns:
         dict: Updated results.
     '''
+    T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+
+    # LM path (T5/ByT5 multimodal)
+    if _is_lm_mode(cfgs):
+        encoder = build_encoder(cfgs['num_channel'], cfgs['arch_en'], cfgs.get('len_seq', 0))
+        ratio_ds = int(getattr(encoder, 'ratio_ds', 1))
+
+        d_cnn = int(cfgs.get('d_cnn', getattr(encoder, 'dim_out')))
+        lm_cfg = LMConfig(
+            name=str(cfgs['lm_name']),
+            train_lm=bool(cfgs.get('lm_train_lm', False)),
+            max_new_tokens=int(cfgs.get('lm_max_new_tokens', 128)),
+            num_beams=int(cfgs.get('lm_num_beams', 1)),
+            length_penalty=float(cfgs.get('lm_length_penalty', 1.0)),
+            min_new_tokens=int(cfgs.get('lm_min_new_tokens', 0)),
+            local_files_only=True,
+            no_repeat_ngram_size=int(cfgs.get('lm_no_repeat_ngram_size', 0)),
+            repetition_penalty=float(cfgs.get('lm_repetition_penalty', 1.0)),
+            early_stopping=bool(cfgs.get('lm_early_stopping', False)),
+        )
+
+        model = MultimodalLMModel(
+            encoder=encoder,
+            ratio_ds=ratio_ds,
+            d_cnn=d_cnn,
+            lm_cfg=lm_cfg,
+            proj_dropout=float(cfgs.get('lm_proj_dropout', 0.0)),
+            freeze_encoder=bool(cfgs.get('freeze', False)),
+        ).eval()
+
+        x = torch.randn(1, cfgs['num_channel'], T)
+        len_x = torch.tensor([T], dtype=torch.long)
+
+        # Provide a small dummy label sequence so forward() is runnable for profiling.
+        vocab_size = int(model.lm.lm.config.vocab_size)
+        labels = torch.randint(low=0, high=vocab_size, size=(1, 8), dtype=torch.long)
+
+        try:
+            macs, params = profile(model, inputs=(x, len_x, labels))
+            results['macs'] = int(macs)
+            results['params'] = int(params)
+        except Exception as e:
+            # HF models can be difficult for thop; keep evaluate.py usable anyway.
+            results['params'] = int(sum(p.numel() for p in model.parameters()))
+            results.setdefault('macs', -1)
+            print(f"[WARN] thop profiling failed for LM model: {e}")
+
+        results = {k: v for k, v in sorted(results.items())}
+        return results
+
+    # Non-LM path (original behavior)
     model = BaseModel(
         cfgs['arch_en'],
         cfgs['arch_de'],
         cfgs['num_channel'],
         len(cfgs['categories']),
-        cfgs['len_seq'],
+        cfgs.get('len_seq', 0),
+        use_gated_attention=bool(cfgs.get('use_gated_attention', False)),
+        gating_type=str(cfgs.get('gating_type', 'elementwise')),
     ).eval()
     model.infer()
-    x = torch.randn(
-        1, cfgs['num_channel'], 1024 if 'word' in cfgs['dir_dataset'] else 4096
-    )
+    x = torch.randn(1, cfgs['num_channel'], T)
     macs, params = profile(model, inputs=(x,))
 
     results['macs'] = int(macs)
     results['params'] = int(params)
     results = {k: v for k, v in sorted(results.items())}
-    print(model.decoder)  # should show LSTM(... hidden_size=320, num_layers=2, bidirectional=True)
     return results
 
 

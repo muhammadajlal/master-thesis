@@ -12,7 +12,6 @@ from .others.vit import ViT
 from .previous.cldnn import CLDNNDec, CLDNNEnc
 from .previous.ott import OttBiLSTM, OttCNN
 from .transformer import Transformer
-from .conformer_en import ConformerEncoder
 from .ARDecoder import ARDecoder
 
 
@@ -39,6 +38,9 @@ def build_encoder(in_chan: int, arch: str, len_seq: int = 0) -> nn.Module:
         case 'abla':
             return AblaEnc(in_chan, True, True, True, True, True, True)
         case 'conformer_b':
+            # Lazy import to avoid hard dependency (e.g., torchaudio) unless selected
+            from .conformer_en import ConformerEncoder
+
             return ConformerEncoder(in_channels=in_chan)
         case _:
             raise ValueError(f"Unknown encoder arch: {arch}")
