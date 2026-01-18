@@ -8,3 +8,17 @@ source /apps/python/3.12-conda/bin/activate /home/woody/iwso/iwso214h/imu-hwr/en
 python evaluate.py -c configs/train.yaml
 
 For the Qualitative analsysis we need to run the python main.py -c configs/test.yaml with qualitative=true
+
+
+
+
+use the following virtual envs to install packages in the server using pip/conda
+module load python/3.12-conda
+source /apps/python/3.12-conda/etc/profile.d/conda.sh
+conda activate /home/woody/iwso/iwso214h/imu-hwr/envs/rewi
+
+Or
+
+module load python/3.12-conda
+source /apps/python/3.12-conda/etc/profile.d/conda.sh
+conda activate /home/woody/iwso/iwso214h/imu-hwr/envs/rewi26

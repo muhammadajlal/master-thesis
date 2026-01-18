@@ -1,5 +1,5 @@
 arch_de: 'ar_transformer_s' # decoder architecture
-freeze_decoder_epochs: 0 # Ablation: freeze AR decoder for first N epochs (0 = train end-to-end from start)
+freeze_decoder_epochs: 100 # Ablation: freeze AR decoder for first N epochs (0 = train end-to-end from start)
 pretrained_decoder_checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_ar_decoder_char_100/run_1512332/0/checkpoints/best_loss.pth
 
 arch_en: 'blconv_b'
@@ -9,8 +9,8 @@ checkpoint: null # path to checkpoint to load
 ctc_decoder: best_path
 device: cuda
 
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wd_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_complete/ar_transformer_s__onhw_wd_word_rh
+# dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wd_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_freeze_100
 
 epoch: 300
 # We also can set epoch_warmup to 10 for more quick debugging.

@@ -566,6 +566,231 @@ def save_signal_plus_cam(x_cpu: torch.Tensor, cam_1d: np.ndarray, outpath: str, 
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
+
+def _count_params(module: nn.Module) -> tuple[int, int]:
+    total = 0
+    trainable = 0
+    for p in module.parameters():
+        n = p.numel()
+        total += n
+        if p.requires_grad:
+            trainable += n
+    return trainable, total
+
+
+def _maybe_log_trainability(man: RunManager, model: nn.Module, *, epoch: int, where: str) -> None:
+    """Log encoder/decoder trainability when it changes.
+
+    This is intentionally stateful on `man` so it also catches mid-training
+    freeze/unfreeze changes (manual or config-driven) without spamming logs.
+    """
+    enc = getattr(model, "encoder", None)
+    dec = getattr(model, "decoder", None)
+    if enc is None and dec is None:
+        return
+
+    enc_tr, enc_tot = _count_params(enc) if enc is not None else (0, 0)
+    dec_tr, dec_tot = _count_params(dec) if dec is not None else (0, 0)
+
+    snap = (enc_tr, enc_tot, dec_tr, dec_tot)
+    prev = getattr(man, "_dbg_trainability_prev", None)
+    if prev != snap:
+        logger.info(
+            "[Trainability][{}] epoch={} | enc trainable={}/{} | dec trainable={}/{}",
+            where,
+            epoch,
+            enc_tr,
+            enc_tot,
+            dec_tr,
+            dec_tot,
+        )
+        man._dbg_trainability_prev = snap
+
+
+def _set_decoder_frozen(
+    man: RunManager,
+    model: nn.Module,
+    *,
+    frozen: bool,
+    epoch: int,
+    where: str,
+) -> None:
+    """Freeze/unfreeze model.decoder parameters (AR mode ablation).
+
+    - `frozen=True`: decoder params get requires_grad=False and decoder is marked frozen.
+    - `frozen=False`: decoder params get requires_grad=True.
+
+    We keep the optimizer unchanged; parameters are already in it. This avoids rebuilding
+    schedules and preserves optimizer state. `_maybe_log_optimizer_coverage` will confirm
+    coverage when the decoder becomes trainable.
+    """
+    dec = getattr(model, "decoder", None)
+    if dec is None:
+        return
+
+    want_trainable = (not bool(frozen))
+    cur_trainable = any(p.requires_grad for p in dec.parameters())
+    if cur_trainable == want_trainable and bool(getattr(man.cfgs, "decoder_frozen", False)) == bool(frozen):
+        return
+
+    for p in dec.parameters():
+        p.requires_grad = want_trainable
+    man.cfgs.decoder_frozen = bool(frozen)
+
+    logger.info(
+        "[Freeze] decoder {} at epoch {} (freeze_decoder_epochs={}) | where={}",
+        "FROZEN" if frozen else "UNFROZEN",
+        int(epoch),
+        int(getattr(man.cfgs, "freeze_decoder_epochs", 0) or 0),
+        where,
+    )
+
+    _maybe_log_trainability(man, model, epoch=epoch, where=f"{where}_after_decoder_freeze")
+
+
+
+def _log_decoder_pretrain_load(model: nn.Module, *, ckpt_path: str, state: dict) -> None:
+    """Debug-friendly decoder-only checkpoint load into model.decoder."""
+    dec = getattr(model, "decoder", None)
+    if dec is None:
+        logger.warning("[DecoderPretrain] no model.decoder found; cannot load {}", ckpt_path)
+        return
+
+    tgt_sd = dec.state_dict()
+    src_sd = state
+    if not isinstance(src_sd, dict):
+        raise ValueError("[DecoderPretrain] checkpoint state is not a state_dict dict")
+
+    common = sorted(set(tgt_sd.keys()).intersection(src_sd.keys()))
+    missing = sorted(set(tgt_sd.keys()).difference(src_sd.keys()))
+    unexpected = sorted(set(src_sd.keys()).difference(tgt_sd.keys()))
+    shape_mismatch = [
+        k
+        for k in common
+        if hasattr(tgt_sd[k], "shape")
+        and hasattr(src_sd[k], "shape")
+        and tuple(tgt_sd[k].shape) != tuple(src_sd[k].shape)
+    ]
+
+    logger.info(
+        "[DecoderPretrain] loading decoder weights | ckpt={} | common_keys={} | missing={} | unexpected={} | shape_mismatch={}",
+        ckpt_path,
+        len(common),
+        len(missing),
+        len(unexpected),
+        len(shape_mismatch),
+    )
+
+    if shape_mismatch:
+        show = shape_mismatch[:20]
+        msg = "\n".join(
+            [
+                f"  {k}: ckpt={tuple(src_sd[k].shape)} vs model={tuple(tgt_sd[k].shape)}"
+                for k in show
+            ]
+        )
+        raise ValueError(
+            "[DecoderPretrain] shape mismatch when loading pretrained decoder.\n"
+            "This usually means vocab size / gating / architecture differs between pretrain and finetune.\n"
+            f"First mismatches (up to 20):\n{msg}"
+        )
+
+    res = dec.load_state_dict(src_sd, strict=False)
+    # torch returns an IncompatibleKeys object
+    miss2 = list(getattr(res, "missing_keys", []))
+    unexp2 = list(getattr(res, "unexpected_keys", []))
+    if miss2 or unexp2:
+        logger.warning(
+            "[DecoderPretrain] loaded with strict=False | missing_keys={} unexpected_keys={} (showing up to 20)",
+            miss2[:20],
+            unexp2[:20],
+        )
+    else:
+        logger.info("[DecoderPretrain] loaded cleanly (strict=False, no missing/unexpected keys)")
+
+
+def _maybe_log_optimizer_coverage(
+    man: RunManager,
+    optimizer: torch.optim.Optimizer,
+    model: nn.Module,
+    *,
+    epoch: int,
+    where: str,
+) -> None:
+    """Log whether optimizer param_groups actually cover encoder/decoder trainable params.
+
+    This catches the common gotcha: you unfreeze something, but the optimizer
+    was created only from a subset of params.
+    """
+    enc = getattr(model, "encoder", None)
+    dec = getattr(model, "decoder", None)
+    if enc is None and dec is None:
+        return
+
+    enc_all = list(enc.parameters()) if enc is not None else []
+    dec_all = list(dec.parameters()) if dec is not None else []
+
+    enc_ids_all = {id(p) for p in enc_all}
+    dec_ids_all = {id(p) for p in dec_all}
+
+    enc_ids_train = {id(p) for p in enc_all if p.requires_grad}
+    dec_ids_train = {id(p) for p in dec_all if p.requires_grad}
+
+    opt_ids: set[int] = set()
+    for g in optimizer.param_groups:
+        for p in g.get("params", []):
+            opt_ids.add(id(p))
+
+    missing_enc = sorted(enc_ids_train.difference(opt_ids))
+    missing_dec = sorted(dec_ids_train.difference(opt_ids))
+
+    # Per-group breakdown (counts only; no spammy names)
+    group_summaries: list[str] = []
+    for i, g in enumerate(optimizer.param_groups):
+        params = g.get("params", [])
+        gid = g.get("name", str(i))
+        lr = g.get("lr", None)
+        group_ids = {id(p) for p in params}
+
+        enc_cov = sum(p.numel() for p in params if id(p) in enc_ids_all)
+        dec_cov = sum(p.numel() for p in params if id(p) in dec_ids_all)
+        tot_cov = sum(p.numel() for p in params)
+
+        group_summaries.append(
+            f"{gid}: lr={lr} total={tot_cov} enc={enc_cov} dec={dec_cov}"
+        )
+
+    snap = (
+        len(optimizer.param_groups),
+        tuple(sorted(float(g.get("lr", 0.0)) for g in optimizer.param_groups)),
+        len(missing_enc),
+        len(missing_dec),
+        tuple(group_summaries),
+    )
+    prev = getattr(man, "_dbg_opt_prev", None)
+    if prev != snap:
+        logger.info(
+            "[OptCoverage][{}] epoch={} | groups={} | missing_trainable enc={} dec={} | {}",
+            where,
+            epoch,
+            len(optimizer.param_groups),
+            len(missing_enc),
+            len(missing_dec),
+            " | ".join(group_summaries[:8]),
+        )
+        if len(group_summaries) > 8:
+            logger.info("[OptCoverage][{}] (more groups omitted: {})", where, len(group_summaries) - 8)
+        if missing_enc or missing_dec:
+            logger.warning(
+                "[OptCoverage][{}] WARNING: some trainable params are NOT in the optimizer. "
+                "This will prevent learning after unfreeze. missing_enc={} missing_dec={}",
+                where,
+                len(missing_enc),
+                len(missing_dec),
+            )
+        man._dbg_opt_prev = snap
+
+
 def build_ar_batch(y: torch.Tensor, len_y: torch.Tensor,
                    pad_id: int, bos_id: int, eos_id: int,
                    device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
@@ -640,6 +865,16 @@ def train_one_epoch(
     '''
     man.initialize_epoch(epoch, len(dataloader), False)
     model.train()
+
+    # If the decoder is intentionally frozen, keep it in eval mode to disable dropout
+    # while still training the encoder.
+    if bool(getattr(man.cfgs, "decoder_frozen", False)):
+        dec = getattr(model, "decoder", None)
+        if dec is not None:
+            dec.eval()
+
+    # Debug: log if encoder/decoder trainability changed (freeze/unfreeze)
+    _maybe_log_trainability(man, model, epoch=epoch, where="train_one_epoch")
 
     for idx, (x, y, len_x, len_y) in enumerate(dataloader):
         x, y = x.to(man.cfgs.device), y.to(man.cfgs.device)
@@ -982,18 +1217,27 @@ def test(
 
     man.summarize_epoch()
 
-    # Always export full validation predictions/labels (independent of RunManager)
-    
-    export_dir = os.path.join(man.cfgs.dir_work, "exports")
-    os.makedirs(export_dir, exist_ok=True)
+    # Export full validation predictions/labels.
+    # - During training: only if export_val_full=true AND it's an eval epoch.
+    # - During explicit test mode: always export.
+    export_val_full = bool(getattr(man.cfgs, "export_val_full", False))
+    is_test_mode = bool(getattr(man.cfgs, "test", False))
+    do_export = is_test_mode or (export_val_full and man.check_step(epoch + 1, 'eval'))
 
-    tag = f"fold{man.cfgs.idx_fold}_epoch{epoch if epoch is not None else 0}"
-    export_path = os.path.join(export_dir, f"val_full_{tag}.json")
+    if do_export:
+        export_dir = os.path.join(man.cfgs.dir_work, "exports")
+        os.makedirs(export_dir, exist_ok=True)
 
-    with open(export_path, "w", encoding="utf-8") as f:
-        json.dump({"predictions": preds, "labels": labels}, f, ensure_ascii=False)
+        epoch_tag = "best" if epoch is None else f"epoch{epoch}"
+        export_path = os.path.join(
+            export_dir,
+            f"val_full_fold{man.cfgs.idx_fold}_{epoch_tag}.json",
+        )
 
-    logger.info("Exported full validation predictions to {}", export_path)
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump({"predictions": preds, "labels": labels}, f, ensure_ascii=False)
+
+        logger.info("Exported full validation predictions to {}", export_path)
 
     # Evaluation and visualization
     if man.check_step(epoch + 1, 'eval'):
@@ -1006,23 +1250,6 @@ def test(
             # >>> ADD THIS: evaluate AR predictions <<<
             results_eval = evaluate(preds, labels)
             man.update_evaluation(results_eval, preds[:20], labels[:20])
-
-            # Export FULL validation predictions for downstream CSV creation
-            export_dir = os.path.join(man.cfgs.dir_work, "exports")
-            os.makedirs(export_dir, exist_ok=True)
-
-            epoch_tag = "best" if epoch is None else f"epoch{epoch}"
-            export_path = os.path.join(
-                export_dir,
-                f"val_full_fold{man.cfgs.idx_fold}_{epoch_tag}.json"
-            )
-
-            with open(export_path, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"predictions": preds, "labels": labels},
-                    f,
-                    ensure_ascii=False
-                )
 
 def main(cfgs: argparse.Namespace) -> None:
     '''Main function for training and evaluation.
@@ -1102,6 +1329,28 @@ def main(cfgs: argparse.Namespace) -> None:
             use_gated_attention=getattr(cfgs, "use_gated_attention", False),    # ✅ pass use_gated_attention from cfgs
             gating_type=getattr(cfgs, "gating_type", "elementwise"),            # ✅ pass gating_type from cfgs
         ).to(cfgs.device)
+
+        # Optional: initialize decoder weights from a text-only pretrained checkpoint.
+        # The checkpoint is expected to be produced by pretrain_decoder.py and contain
+        # a decoder-only state dict under key "model".
+        pretrained_dec_ckpt = getattr(cfgs, "pretrained_decoder_checkpoint", None)
+        if pretrained_dec_ckpt:
+            logger.info(
+                "[DecoderPretrain] init requested | arch_de={} gated={} gating_type={} vocab_dec={} PAD/BOS/EOS=({},{},{})",
+                getattr(cfgs, "arch_de", None),
+                getattr(cfgs, "use_gated_attention", False),
+                getattr(cfgs, "gating_type", None),
+                getattr(cfgs, "vocab_dec", None),
+                getattr(cfgs, "PAD_ID", None),
+                getattr(cfgs, "BOS_ID", None),
+                getattr(cfgs, "EOS_ID", None),
+            )
+            ckp = torch.load(pretrained_dec_ckpt, map_location="cpu", weights_only=False)
+            state = ckp.get("model", ckp)
+            _log_decoder_pretrain_load(model, ckpt_path=str(pretrained_dec_ckpt), state=state)
+            _maybe_log_trainability(manager, model, epoch=0, where="after_pretrained_decoder_load")
+
+            # Optimizer will be built later; we can only log coverage once it's created.
 
     # Datasets: hand tokenizer to datasets
     dataset_test = HRDataset(
@@ -1334,6 +1583,9 @@ def main(cfgs: argparse.Namespace) -> None:
         optimizer = torch.optim.AdamW(model.parameters(), cfgs.lr)
         scaler = GradScaler()
 
+    # Debug: verify optimizer covers encoder/decoder trainable params
+    _maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="after_optimizer_init")
+
     # Create scheduler only if training (not test mode)
     if not cfgs.test:
         lr_scheduler = SequentialLR(
@@ -1348,6 +1600,7 @@ def main(cfgs: argparse.Namespace) -> None:
         # LM mode sanity log right after optimizer/scheduler construction
         if LM_MODE:
             _log_lm_state("init", optimizer)
+            _maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="lm_after_scheduler_init")
     else:
         # Test mode: dummy scheduler (never used)
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda epoch: 1.0)
@@ -1367,9 +1620,18 @@ def main(cfgs: argparse.Namespace) -> None:
                 epoch_start = ckp['epoch'] + 1
                 optimizer.load_state_dict(ckp['optimizer'])
                 lr_scheduler.load_state_dict(ckp['lr_scheduler'])
+                logger.info(
+                    "[Resume] epoch_start={} (ckpt_epoch={}) | checkpoint={}",
+                    epoch_start,
+                    ckp.get('epoch', None),
+                    cfgs.checkpoint,
+                )
+                _maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="after_resume_optimizer_load")
             elif cfgs.freeze:  # freeze
                 for params in model.encoder.parameters():
                     params.requires_grad = False
+                logger.info("[Freeze] encoder frozen (requires_grad=False) | checkpoint={}", cfgs.checkpoint)
+                _maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="after_freeze_encoder")
             else:  # finetune
                 optimizer = torch.optim.AdamW(
                     [
@@ -1401,6 +1663,11 @@ def main(cfgs: argparse.Namespace) -> None:
                     [len(dataloader_train) * cfgs.epoch_warmup],
                 )
 
+                _maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="after_finetune_optimizer_rebuild")
+
+            # Always log trainability after applying resume/freeze/finetune decisions.
+            _maybe_log_trainability(manager, model, epoch=int(locals().get('epoch_start', 0)), where="after_checkpoint_load")
+
         logger.info(f'Load checkpoint from {cfgs.checkpoint}')
 
     # --- Staged LM fine-tuning: optionally unfreeze decoder at epoch N ---
@@ -1413,6 +1680,7 @@ def main(cfgs: argparse.Namespace) -> None:
             if lm_unfreeze_epoch >= 0 and epoch_start >= lm_unfreeze_epoch:
                 model.lm.set_decoder_trainable(True)
                 logger.info("[LM] Resumed at epoch {} => LM decoder is UNFROZEN (lm_unfreeze_epoch={})", epoch_start, lm_unfreeze_epoch)
+                _maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="lm_after_unfreeze_resume")
 
     # start running
     for e in range(epoch_start, cfgs.epoch):
@@ -1476,6 +1744,23 @@ def main(cfgs: argparse.Namespace) -> None:
             break
 
         else:
+            # --- AR ablation: optionally freeze decoder for first N epochs ---
+            # This is only relevant for the CNN+ARDecoder pipeline (not LM_MODE).
+            if (not LM_MODE) and hasattr(model, "decoder"):
+                freeze_dec_epochs = int(getattr(cfgs, "freeze_decoder_epochs", 0) or 0)
+                if freeze_dec_epochs > 0:
+                    frozen = int(e) < freeze_dec_epochs
+                    _set_decoder_frozen(manager, model, frozen=frozen, epoch=int(e), where="main_loop")
+
+                    # Coverage is only meaningful when trainable; still safe to call.
+                    _maybe_log_optimizer_coverage(
+                        manager,
+                        optimizer,
+                        model,
+                        epoch=int(e),
+                        where="after_decoder_freeze_toggle",
+                    )
+
             if LM_MODE and (not cfgs.test):
                 lm_unfreeze_epoch = getattr(cfgs, "lm_unfreeze_epoch", None)
                 if lm_unfreeze_epoch is not None and int(lm_unfreeze_epoch) >= 0 and int(e) == int(lm_unfreeze_epoch):
@@ -1531,6 +1816,9 @@ def main(cfgs: argparse.Namespace) -> None:
 
             # Save only best checkpoints (CER/WER) if enabled.
             if bool(getattr(cfgs, "save_best_only", False)):
+                # Best metrics are only known after we summarize evaluation results.
+                # Safe even on non-eval epochs (summarize_evaluation() is a no-op if no eval exists yet).
+                manager.summarize_evaluation()
                 best = manager.results.get("best", {})
                 if isinstance(best, dict):
                     if "character_error_rate" in best and int(best["character_error_rate"][0]) == int(e):
@@ -1547,6 +1835,16 @@ def main(cfgs: argparse.Namespace) -> None:
                             lr_scheduler.state_dict(),
                             filename="best_wer.pth",
                         )
+
+            # Always keep a resume checkpoint (overwrites each epoch).
+            # This is independent of save_best_only and avoids filling the disk.
+            if not cfgs.test:
+                manager.save_checkpoint(
+                    model.state_dict(),
+                    optimizer.state_dict(),
+                    lr_scheduler.state_dict(),
+                    filename="last.pth",
+                )
 
 
     if not cfgs.test:
