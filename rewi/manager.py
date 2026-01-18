@@ -122,6 +122,7 @@ class RunManager:
         state_model: dict | None = None,
         state_optimizer: dict | None = None,
         state_lr_scheduler: dict | None = None,
+        filename: str | None = None,
     ) -> None:
         '''Save the states of model, optimizer and scheduler to the checkpoint
         directory in the work directory.
@@ -130,7 +131,10 @@ class RunManager:
             state_model (dict, optional): State dictionary of the model. Defaults to None.
             state_optimizer (dict, optional): State dictionary of the optimizer. Defaults to None.
             state_lr_scheduler (dict, optional): State dictionary of the learning rate scheduler. Defaults to None.
+            filename (str | None, optional): Override output filename (e.g., "best_cer.pth"). Defaults to None.
         '''
+        if filename is None:
+            filename = f'{self.epoch}.pth'
         torch.save(
             {
                 'epoch': self.epoch,
@@ -138,9 +142,9 @@ class RunManager:
                 'model': state_model,
                 'optimizer': state_optimizer,
             },
-            os.path.join(self.dir_ckp, f'{self.epoch}.pth'),
+            os.path.join(self.dir_ckp, filename),
         )
-        logger.info(f'Saved checkpoint of epoch {self.epoch}')
+        logger.info(f'Saved checkpoint: {filename} (epoch {self.epoch})')
 
     def save_results(self) -> None:
         '''Save the cached result dictionary as a JSON file to the work
@@ -177,6 +181,9 @@ class RunManager:
             for epoch, result in self.results.items()
             if 'evaluation' in result.keys()
         ]
+        if not results_eval:
+            # Can happen early in training if freq_eval skips first epochs.
+            return
         metrics = results_eval[0][1].keys()
         best = {metric: [-1, -1] for metric in metrics}  # [epoch, value]
 

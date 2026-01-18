@@ -1,0 +1,70 @@
+# Text-only pretraining for AR decoder (categories-based char IDs).
+# Run from work/REWI_work:
+#   python3 pretrain_decoder.py -c configs/pretrain_decoder.yaml
+
+# --- RunManager basics ---
+idx_fold: 0
+# Put outputs under results/ (same convention as training)
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_ar_decoder
+
+test: false
+epoch: 30
+max_train_iters: null
+
+# Logging / save frequencies
+freq_log: 200
+freq_eval: 1
+freq_save: 1
+
+# --- Data ---
+wordlist_path: assets/dictionaries/mixed_en_de_no_onhw.txt
+val_ratio: 0.01
+max_words: null          # set e.g. 200000 for faster pretrain
+
+# --- Tokenizer ---
+# Keep option for SentencePiece later, but default is char.
+# tokenizer:
+#   type: sentencepiece
+#   model: tokenizer/bpe500_fold_0.model
+
+tokenizer:
+  # IMPORTANT: this matches the existing CNN-AR "no tokenizer" pipeline.
+  # It uses indices of cfgs.categories (from the referenced YAML) and appends PAD/BOS/EOS.
+  type: categories
+  categories_from_yaml: configs/train_element_word.yaml
+  categories_key: categories
+
+# What to do with words containing characters outside the categories vocab:
+# - drop: skip the whole word
+# - strip: remove unknown chars and keep the remainder (if non-empty)
+unknown_policy: drop
+
+# --- Model ---
+arch_de: ar_transformer_s
+use_gated_attention: true
+gating_type: elementwise
+
+# --- Optimization ---
+batch_size: 512
+lr: 0.0005
+weight_decay: 0.01
+clip_grad: 1.0
+use_cosine: true
+
+# --- Sequence lengths ---
+# max_len is BOS + chars + EOS (so 32 means up to 30 chars)
+max_len: 32
+max_decode_len: 32
+
+# --- Eval speed ---
+# Greedy decoding is slower; limit samples for quick CER/WER.
+# Set to null to evaluate full val split.
+eval_max_samples: null
+# number of raw words per eval batch (strings)
+eval_batch_words: 512
+
+# --- Runtime ---
+# Note: the Slurm script also patches this to `cuda`.
+device: cuda
+num_workers: 16
+seed: 1337
