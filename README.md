@@ -1,4 +1,4 @@
-# Alignment-Stable Attention for IMU Handwriting Recognition  
+# Alignment-Stable Attention for IMU Handwriting Recognition via Hybrid CTC--AR Training, Calibrated Decoding, and Pretrained LM Decoder Adaptation  
 **Master’s Thesis Repository — Muhammad Ajlal Khan (FAU Pattern Recognition Lab)**
 
 This repository contains the codebase and experimental artifacts for my Master’s thesis on **writer-independent (WI) online handwriting recognition (HWR) from inertial measurement unit (IMU) time series**. The work builds on the REWI baseline introduced by my supervisor’s paper **“Robust and Efficient Writer-Independent IMU-Based Handwriting Recognition” (arXiv:2502.20954)**. :contentReference[oaicite:0]{index=0}
