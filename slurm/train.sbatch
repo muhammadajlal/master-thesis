@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J rewi-cv
-#SBATCH -o %x_%A_%a.out
-#SBATCH -e %x_%A_%a.err
+#SBATCH -o logs/slurm/%x_%A_%a.out
+#SBATCH -e logs/slurm/%x_%A_%a.err
 #SBATCH -p v100
 #SBATCH --gres=gpu:v100:1
 #SBATCH --cpus-per-task=8
@@ -14,10 +14,10 @@ set -x
 
 # ---- Params you can tweak ----
 # Specify the YAML config file to use (path relative to configs/)
-TRAIN_YAML=${TRAIN_YAML:-train_element_word_freeze_complete.yaml}
+TRAIN_YAML=${TRAIN_YAML:-train-t5-small-0-600_sent.yaml}
 
 # Dataset name (can still be overridden)
-DATASET=${DATASET:-onhw_wd_word_rh}  # onhw_wi_word_rh | wi_word_hw6_meta etc.
+DATASET=${DATASET:-}  # onhw_wi_word_rh | wi_word_hw6_meta etc.
 
 # Toggle tokenizer/BPE usage: "true"/"false" or "1"/"0"
 USE_BPE=${USE_BPE:-false}

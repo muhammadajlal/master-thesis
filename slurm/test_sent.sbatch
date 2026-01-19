@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J rewi-infer-sent
-#SBATCH -o %x_%A_%a.out
-#SBATCH -e %x_%A_%a.err
+#SBATCH -o logs/slurm/%x_%A_%a.out
+#SBATCH -e logs/slurm/%x_%A_%a.err
 #SBATCH -p v100
 #SBATCH --gres=gpu:v100:1
 #SBATCH --cpus-per-task=8

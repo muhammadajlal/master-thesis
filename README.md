@@ -315,8 +315,8 @@ See example configs:
 
 For 5-fold training as an array job, use:
 
-- `train.sbatch` (CV training)
-- `train_pretrain.sbatch` (decoder-only pretraining)
+- `slurm/train.sbatch` (CV training)
+- `slurm/train_pretrain.sbatch` (decoder-only pretraining)
 
 These scripts copy a base YAML into `$SLURM_TMPDIR` and patch keys like `idx_fold`, `dir_work`, and `dir_dataset`.
 
@@ -380,7 +380,7 @@ pip install -r requirements.txt
 
 For commercial reasons, our datasets will not be published. Alternatively, you can use the OnHW public dataset for training and evaluation. In the paper, we use the right-handed writer-independent subset of the OnHW-words500 dataset. To download the dataset, please visit: https://www.iis.fraunhofer.de/de/ff/lv/dataanalytics/anwproj/schreibtrainer/onhw-dataset.html
 
-We use a MSCOCO-like structure for the training and evaluation of our dataset. After the OnHW dataset is downloaded, please convert the original dataset to the desired structure with the notebook `onhw.ipynb`. Please adjust the variables `dir_raw`, `dir_out`, and `writer_indep` accordingly.
+We use a MSCOCO-like structure for the training and evaluation of our dataset. After the OnHW dataset is downloaded, please convert the original dataset to the desired structure with the notebook `notebooks/onhw.ipynb`. Please adjust the variables `dir_raw`, `dir_out`, and `writer_indep` accordingly.
 
 ## Training
 
@@ -391,10 +391,10 @@ python main.py -c configs/train.yaml
 python main_mohamad.py -c configs/train_mohamad.yaml # CLDNN only
 ```
 
-Alternatively, you can also train all folds at once sequentially with `train_cv.py`. The script will generate configuration files for all folds in a `temp*` directory and run `main.py` with these configuration files sequentially. After the training is finished, the `temp*` directory will be deleted automatically.
+Alternatively, you can also train all folds at once sequentially with `scripts/others/train_cv.py` (legacy helper). The script will generate configuration files for all folds in a `temp*` directory and run `main.py` with these configuration files sequentially. After the training is finished, the `temp*` directory will be deleted automatically.
 
 ```bash
-python train_cv.py -c configs/train.yaml -m main.py
+python scripts/others/train_cv.py -c configs/train.yaml -m main.py
 ```
 
 ## Evaluation
