@@ -9,8 +9,8 @@ checkpoint: null # path to checkpoint to load
 ctc_decoder: best_path
 device: cuda
 
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wd_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_complete/ar_transformer_s__onhw_wd_word_rh
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_complete/ar_transformer_s__onhw_wi_word_rh
 
 epoch: 300
 # We also can set epoch_warmup to 10 for more quick debugging.
