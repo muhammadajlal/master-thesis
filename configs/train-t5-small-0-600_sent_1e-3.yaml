@@ -41,7 +41,7 @@ ctc_decoder: best_path
 
 # Data / paths
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/multimodal_t5_small-0-600_1e-4
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/multimodal_t5_small-0-600_1e-3
 checkpoint: null
 
 # Runtime
@@ -67,7 +67,7 @@ test: false
 # End-to-end training: use discriminative LRs (LM usually needs a much smaller LR)
 lr_enc: 0.001
 lr_proj: 0.001
-lr_lm: 0.0001
+lr_lm: 0.001
 lm_lr_unfreeze_mult: 1.0
 weight_decay: 0.01
 

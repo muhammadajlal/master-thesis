@@ -1,21 +1,40 @@
 #!/usr/bin/env python3
-"""Build a mixed EN+DE word list and filter out any words that appear in ONHW datasets.
+"""Build a mixed EN+DE dictionary (words OR sentences) and filter out dataset labels.
 
-Your EN/DE files are TSV (rank \t token \t count). This script:
-- Extracts the token column
-- Normalizes tokens (NFKC + lowercase by default)
-- Keeps only "word-like" tokens (letters with optional internal '-' or ''')
-- Removes any token that appears as a ground-truth label in the provided dataset JSONs
-- Deduplicates and shuffles deterministically
+This script supports two input types:
 
-Example:
-  python3 tools/build_mixed_dictionary.py \
-    --en assets/dictionaries/eng_news_2024_1M-words.txt \
-    --de assets/dictionaries/deu_news_2024_1M-words.txt \
-    --dataset ../../data/onhw_wi_word_rh/train.json --dataset ../../data/onhw_wi_word_rh/val.json \
-    --dataset ../../data/onhw_wd_word_rh/train.json --dataset ../../data/onhw_wd_word_rh/val.json \
-        --out assets/dictionaries/mixed_en_de_no_onhw.txt \
-        --out-removed assets/dictionaries/removed_due_to_leakage.txt
+- **word**: EN/DE inputs are TSV (rank \t token \t count). The script extracts column 2.
+- **sent**: EN/DE inputs are sentence-per-line (optionally prefixed with a numeric rank).
+
+In both cases we:
+- normalize (NFKC + lowercase by default)
+- optionally filter for "word-like" tokens (word mode)
+- remove any item that appears as a ground-truth label in provided dataset JSONs
+- deduplicate and shuffle deterministically
+
+Examples
+--------
+
+Word dictionary (filter ONHW word labels):
+
+    python3 scripts/tools/build_mixed_dictionary.py \
+        --kind word \
+        --en assets/dictionaries/word/eng_news_2024_1M-words.txt \
+        --de assets/dictionaries/word/deu_news_2024_1M-words.txt \
+        --dataset ../../data/onhw_wi_word_rh/train.json --dataset ../../data/onhw_wi_word_rh/val.json \
+        --dataset ../../data/onhw_wd_word_rh/train.json --dataset ../../data/onhw_wd_word_rh/val.json \
+        --out assets/dictionaries/word/mixed_en_de_no_onhw.txt \
+        --out-removed assets/dictionaries/word/removed_due_to_leakage.txt
+
+Sentence dictionary (filter WI sentence labels to avoid leakage):
+
+    python3 scripts/tools/build_mixed_dictionary.py \
+        --kind sent \
+        --en assets/dictionaries/sent/eng_news_2024_1M-sentences.txt \
+        --de assets/dictionaries/sent/deu_news_2024_1M-sentences.txt \
+        --dataset ../../data/wi_sent_hw6_meta \
+        --out assets/dictionaries/sent/mixed_en_de_no_wi_sent_hw6_meta.txt \
+        --out-removed assets/dictionaries/sent/removed_due_to_leakage.txt
 """
 
 from __future__ import annotations
@@ -27,13 +46,28 @@ import unicodedata
 from pathlib import Path
 
 
-def _normalize(token: str, *, lowercase: bool, nfkc: bool) -> str:
+def _normalize(token: str, *, lowercase: bool, nfkc: bool, normalize_ws: bool) -> str:
     token = token.strip()
     if nfkc:
         token = unicodedata.normalize("NFKC", token)
     if lowercase:
         token = token.lower()
+    if normalize_ws:
+        # Collapse whitespace runs only when needed.
+        # Avoid calling split/join for the common case (single spaces already).
+        if (
+            "\t" in token
+            or "\r" in token
+            or "\n" in token
+            or "  " in token
+            or "\u00a0" in token
+        ):
+            token = " ".join(token.split())
     return token
+
+
+def _has_letter(s: str) -> bool:
+    return any(unicodedata.category(ch).startswith("L") for ch in s)
 
 
 def _is_word_like(token: str) -> bool:
@@ -53,8 +87,7 @@ def _is_word_like(token: str) -> bool:
         cat = unicodedata.category(ch)
         return cat.startswith("L") or cat.startswith("M")
 
-    has_letter = any(unicodedata.category(ch).startswith("L") for ch in token)
-    if not has_letter:
+    if not _has_letter(token):
         return False
 
     for i, ch in enumerate(token):
@@ -70,7 +103,14 @@ def _is_word_like(token: str) -> bool:
     return True
 
 
-def _read_tsv_wordlist(path: Path, *, lowercase: bool, nfkc: bool, min_count: int) -> list[str]:
+def _read_tsv_wordlist(
+    path: Path,
+    *,
+    lowercase: bool,
+    nfkc: bool,
+    normalize_ws: bool,
+    min_count: int,
+) -> list[str]:
     words: list[str] = []
     with path.open("r", encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -90,13 +130,115 @@ def _read_tsv_wordlist(path: Path, *, lowercase: bool, nfkc: bool, min_count: in
             if count is not None and count < min_count:
                 continue
 
-            token = _normalize(token, lowercase=lowercase, nfkc=nfkc)
+            token = _normalize(token, lowercase=lowercase, nfkc=nfkc, normalize_ws=normalize_ws)
             if _is_word_like(token):
                 words.append(token)
     return words
 
 
-def _extract_labels_from_dataset_json(path: Path, *, lowercase: bool, nfkc: bool) -> set[str]:
+def _strip_leading_rank(line: str) -> str:
+    """Drop an optional leading numeric rank.
+
+    Handles lines like:
+      "123  some sentence"
+      "123\tsome token"
+    """
+
+    s = line.lstrip()
+    if not s:
+        return ""
+    parts = s.split(None, 1)
+    if len(parts) == 2 and parts[0].isdigit():
+        return parts[1]
+    return s
+
+
+def _read_sentence_list(
+    path: Path,
+    *,
+    lowercase: bool,
+    nfkc: bool,
+    normalize_ws: bool,
+    require_letter: bool,
+) -> list[str]:
+    sents: list[str] = []
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+
+            text = _strip_leading_rank(line)
+            text = text.strip()
+            # The provided news sentence lists seem to prefix many lines with '$'
+            # (e.g. "$An den Finanzmärkten ..."). Strip it.
+            if text.startswith("$"):
+                text = text[1:].lstrip()
+
+            text = _normalize(text, lowercase=lowercase, nfkc=nfkc, normalize_ws=normalize_ws)
+            if not text:
+                continue
+            if require_letter and not _has_letter(text):
+                continue
+
+            sents.append(text)
+    return sents
+
+
+def _iter_sentence_items(
+    path: Path,
+    *,
+    lowercase: bool,
+    nfkc: bool,
+    normalize_ws: bool,
+    require_letter: bool,
+):
+    """Yield normalized sentences one-by-one (streaming)."""
+
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+
+            text = _strip_leading_rank(line)
+            text = text.strip()
+            if text.startswith("$"):
+                text = text[1:].lstrip()
+
+            text = _normalize(text, lowercase=lowercase, nfkc=nfkc, normalize_ws=normalize_ws)
+            if not text:
+                continue
+            if require_letter and not _has_letter(text):
+                continue
+
+            yield text
+
+
+def _iter_dataset_jsons(path: Path) -> list[Path]:
+    """Allow passing either a dataset JSON file or a dataset directory.
+
+    If a directory is passed, we auto-include train.json/val.json when present.
+    """
+
+    path = Path(path)
+    if path.is_dir():
+        out: list[Path] = []
+        for name in ["train.json", "val.json"]:
+            p = path / name
+            if p.exists():
+                out.append(p)
+        return out
+    return [path]
+
+
+def _extract_labels_from_dataset_json(
+    path: Path,
+    *,
+    lowercase: bool,
+    nfkc: bool,
+    normalize_ws: bool,
+) -> set[str]:
     """Extract the ground-truth word labels from a MSCOCO-like dataset JSON.
 
     For ONHW word datasets, the label field is `label` and `annotations` is a dict keyed by fold.
@@ -124,7 +266,7 @@ def _extract_labels_from_dataset_json(path: Path, *, lowercase: bool, nfkc: bool
             raw = it.get("label") or it.get("text") or it.get("word")
             if not isinstance(raw, str):
                 continue
-            token = _normalize(raw, lowercase=lowercase, nfkc=nfkc)
+            token = _normalize(raw, lowercase=lowercase, nfkc=nfkc, normalize_ws=normalize_ws)
             if token:
                 forbidden.add(token)
 
@@ -133,8 +275,14 @@ def _extract_labels_from_dataset_json(path: Path, *, lowercase: bool, nfkc: bool
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--en", type=Path, required=True, help="English TSV wordlist")
-    ap.add_argument("--de", type=Path, required=True, help="German TSV wordlist")
+    ap.add_argument(
+        "--kind",
+        choices=["word", "sent"],
+        default="word",
+        help="Input/output type: word (TSV token list) or sent (sentence-per-line list)",
+    )
+    ap.add_argument("--en", type=Path, required=True, help="English input file (TSV wordlist for kind=word, text sentences for kind=sent)")
+    ap.add_argument("--de", type=Path, required=True, help="German input file (TSV wordlist for kind=word, text sentences for kind=sent)")
     ap.add_argument("--dataset", type=Path, action="append", default=[], help="Dataset JSON(s) to exclude labels from")
     ap.add_argument("--out", type=Path, required=True, help="Output .txt (one word per line)")
     ap.add_argument(
@@ -146,24 +294,73 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=1337)
     ap.add_argument("--no-lower", action="store_true", help="Do not lowercase")
     ap.add_argument("--no-nfkc", action="store_true", help="Do not apply NFKC normalization")
+    ap.add_argument(
+        "--keep-whitespace",
+        action="store_true",
+        help="Do not normalize whitespace (by default, whitespace runs are collapsed)",
+    )
     ap.add_argument("--min-count", type=int, default=1, help="Minimum count column (if present)")
     args = ap.parse_args()
 
     lowercase = not args.no_lower
     nfkc = not args.no_nfkc
+    normalize_ws = not args.keep_whitespace
 
     # 1) forbidden set from datasets
     forbidden: set[str] = set()
     for ds in args.dataset:
-        forbidden |= _extract_labels_from_dataset_json(ds, lowercase=lowercase, nfkc=nfkc)
+        for json_path in _iter_dataset_jsons(ds):
+            forbidden |= _extract_labels_from_dataset_json(
+                json_path,
+                lowercase=lowercase,
+                nfkc=nfkc,
+                normalize_ws=normalize_ws,
+            )
 
-    # 2) read wordlists
-    en_words = _read_tsv_wordlist(args.en, lowercase=lowercase, nfkc=nfkc, min_count=args.min_count)
-    de_words = _read_tsv_wordlist(args.de, lowercase=lowercase, nfkc=nfkc, min_count=args.min_count)
+    # 2) read sources + build combined set
+    combined: set[str] = set()
+    en_raw = 0
+    de_raw = 0
 
-    # 3) dedupe + filter leakage
-    combined = set(en_words)
-    combined |= set(de_words)
+    if args.kind == "word":
+        en_items = _read_tsv_wordlist(
+            args.en,
+            lowercase=lowercase,
+            nfkc=nfkc,
+            normalize_ws=normalize_ws,
+            min_count=args.min_count,
+        )
+        de_items = _read_tsv_wordlist(
+            args.de,
+            lowercase=lowercase,
+            nfkc=nfkc,
+            normalize_ws=normalize_ws,
+            min_count=args.min_count,
+        )
+        en_raw = len(en_items)
+        de_raw = len(de_items)
+        combined.update(en_items)
+        combined.update(de_items)
+    else:
+        # Sentence mode: stream (files are large)
+        for _ in _iter_sentence_items(
+            args.en,
+            lowercase=lowercase,
+            nfkc=nfkc,
+            normalize_ws=normalize_ws,
+            require_letter=True,
+        ):
+            en_raw += 1
+            combined.add(_)
+        for _ in _iter_sentence_items(
+            args.de,
+            lowercase=lowercase,
+            nfkc=nfkc,
+            normalize_ws=normalize_ws,
+            require_letter=True,
+        ):
+            de_raw += 1
+            combined.add(_)
 
     before_set = combined
     combined = {w for w in before_set if w not in forbidden}
@@ -185,7 +382,8 @@ def main() -> int:
         args.out_removed.write_text("\n".join(removed_sorted) + ("\n" if removed_sorted else ""), encoding="utf-8")
 
     print("[build_mixed_dictionary]")
-    print(f"  en_raw={len(en_words)} de_raw={len(de_words)}")
+    print(f"  kind={args.kind}")
+    print(f"  en_raw={en_raw} de_raw={de_raw}")
     print(f"  forbidden_from_datasets={len(forbidden)}")
     print(f"  unique_before_filter={before}")
     print(f"  unique_after_filter={after}")
