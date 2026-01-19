@@ -15,4 +15,5 @@ For the Qualitative analsysis we need to run the python main.py -c configs/test.
 -> Auto Passphrase Agent for Github/GitLab Pushing
 
 eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519    # or ~/.ssh/id_rsa
+ssh-add ~/.ssh/id_ed25519   
+ssh-add -t 8h ~/.ssh/id_ed25519

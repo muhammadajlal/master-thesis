@@ -2,16 +2,16 @@
 #SBATCH -J rewi-pretrain-decoder
 #SBATCH -o logs/slurm/%x_%j.out
 #SBATCH -e logs/slurm/%x_%j.err
-#SBATCH -p a100
-#SBATCH --gres=gpu:a100:1
-#SBATCH --cpus-per-task=16
+#SBATCH -p rtx3080
+#SBATCH --gres=gpu:rtx3080:1
+#SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 
 set -euo pipefail
 set -x
 
 # ---- Params you can tweak ----
-PRETRAIN_YAML=${PRETRAIN_YAML:-pretrain_decoder.yaml}
+PRETRAIN_YAML=${PRETRAIN_YAML:-pretrain_decoder_sent.yaml}
 
 WORK=/home/woody/iwso/iwso214h
 PROJ=$WORK/imu-hwr/work/REWI_work

@@ -35,6 +35,7 @@ MANIFEST
 *.manifest
 *.spec
 
+
 # Direcotories
 /inference_results*/
 /*analysis_outputs*/
@@ -45,7 +46,7 @@ MANIFEST
 /tokenizer/bpe*.model
 /tokenizer/bpe*.vocab
 /tokenizer/bpe*.txt
-
+/slurm/logs/
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
