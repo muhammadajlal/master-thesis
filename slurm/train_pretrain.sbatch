@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J rewi-pretrain-decoder
-#SBATCH -o %x_%j.out
-#SBATCH -e %x_%j.err
+#SBATCH -o logs/slurm/%x_%j.out
+#SBATCH -e logs/slurm/%x_%j.err
 #SBATCH -p a100
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=16
