@@ -1,0 +1,83 @@
+# Text-only pretraining for AR decoder (categories-based char IDs).
+#
+# This config is tuned for *sentence-level* text pretraining using the mixed
+# EN+DE de-leaked sentence dictionary.
+#
+# Run from work/REWI_work:
+#   python3 scripts/others/pretrain_decoder.py -c configs/pretrain_decoder.yaml
+
+# --- RunManager basics ---
+idx_fold: 0
+# Put outputs under results/ (same convention as training)
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_decoder_sent
+
+test: false
+epoch: 100
+max_train_iters: null
+
+# Logging / save frequencies
+freq_log: 200
+freq_eval: 1
+freq_save: 1
+
+# --- Data ---
+# One sentence per line (already normalized + de-leaked against wi_sent_hw6_meta)
+sentlist_path: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/dictionaries/sent/mixed_en_de_no_wi_sent_hw6_meta.txt
+val_ratio: 0.01
+max_words: null          # set e.g. 200000 for faster pretrain
+
+# --- Tokenizer ---
+# Keep option for SentencePiece later, but default is char.
+# tokenizer:
+#   type: sentencepiece
+#   model: tokenizer/bpe500_fold_0.model
+
+tokenizer:
+  # IMPORTANT: this matches the existing CNN-AR "no tokenizer" pipeline.
+  # It uses indices of cfgs.categories (from the referenced YAML) and appends PAD/BOS/EOS.
+  type: categories
+  categories_from_yaml: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/configs/train_element_sent.yaml
+  categories_key: categories
+
+# What to do with sentences containing characters outside the categories vocab:
+# - drop: skip the whole sentence
+# - strip: remove unknown chars and keep the remainder (if non-empty)
+#
+# Sentence dictionaries can contain occasional rare punctuation; `strip` keeps more data.
+unknown_policy: strip
+
+# --- Model ---
+arch_de: ar_transformer_s
+use_gated_attention: true
+gating_type: elementwise
+
+# --- Optimization ---
+# Sentence sequences are longer than word sequences; keep batch_size conservative.
+batch_size: 128
+lr: 0.001
+weight_decay: 0.01
+clip_grad: 1.0
+use_cosine: true
+
+# --- Sequence lengths ---
+# max_len includes BOS + chars + EOS.
+# For sentence-level pretraining, 32 is too short (heavy truncation). Start with 128.
+max_len: 256
+max_decode_len: 256
+
+# --- Eval speed ---
+# Teacher-forced val_loss/val_ppl is the primary metric.
+# Greedy CER/WER is expensive and not very meaningful for decoder-only pretraining.
+eval_greedy: false
+
+# If you do enable greedy eval, keep it bounded.
+eval_max_samples: 2000
+
+# number of raw samples per eval batch (strings)
+eval_batch_words: 512
+
+# --- Runtime ---
+# Note: the Slurm script also patches this to `cuda`.
+device: cuda
+num_workers: 16
+seed: 1337

@@ -2,8 +2,8 @@
 #SBATCH -J rewi-pretrain-decoder
 #SBATCH -o logs/slurm/%x_%j.out
 #SBATCH -e logs/slurm/%x_%j.err
-#SBATCH -p rtx3080
-#SBATCH --gres=gpu:rtx3080:1
+#SBATCH -p a100
+#SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 
@@ -30,28 +30,78 @@ if [[ ! -f "$YAML_PATH" ]]; then
   exit 1
 fi
 
-# Output directory for this run
 OUTDIR_BASE=$WORK/imu-hwr/results/hwr2/${PRETRAIN_YAML%.yaml}
-OUTDIR="$OUTDIR_BASE/run_${SLURM_JOB_ID}"
-mkdir -p "$OUTDIR"
+
+# Optional: set this to an existing run directory to resume there.
+# Example:
+#   sbatch --export=ALL,PRETRAIN_YAML=pretrain_decoder_sent.yaml,RESUME_RUNDIR=/path/to/run_1514217 slurm/train_pretrain.sbatch
+RESUME_RUNDIR=${RESUME_RUNDIR:-}
+
+if [[ -n "$RESUME_RUNDIR" ]]; then
+  if [[ ! -f "$RESUME_RUNDIR/0/checkpoints/last.pth" ]]; then
+    echo "ERROR: RESUME_RUNDIR is set but checkpoint is missing: $RESUME_RUNDIR/0/checkpoints/last.pth"
+    exit 1
+  fi
+fi
 
 TMPCFG="${SLURM_TMPDIR:-/tmp}/pretrain_decoder_${SLURM_JOB_ID}.yaml"
 cp "$YAML_PATH" "$TMPCFG"
 
-# Patch config to write into OUTDIR, keep idx_fold=0
-$PY_BIN - <<PY
+# Patch config and choose OUTDIR.
+# If resume is enabled and YAML already points at an existing run (with last.pth), reuse it.
+OUTDIR="$($PY_BIN - "$TMPCFG" "$OUTDIR_BASE" "${SLURM_JOB_ID:-local}" "$RESUME_RUNDIR" <<'PY'
+from pathlib import Path
+import sys
+
 import yaml
-cfg_path = "$TMPCFG"
-with open(cfg_path, "r") as f:
-    cfg = yaml.safe_load(f)
+
+cfg_path = sys.argv[1]
+outdir_base = sys.argv[2]
+job_id = sys.argv[3]
+resume_rundir = sys.argv[4] if len(sys.argv) > 4 else ""
+
+with open(cfg_path, "r", encoding="utf-8") as f:
+  cfg = yaml.safe_load(f) or {}
+
 cfg["idx_fold"] = 0
-cfg["dir_work"] = "$OUTDIR"
 cfg["device"] = "cuda"
 cfg["max_train_iters"] = None
-with open(cfg_path, "w") as f:
-    yaml.safe_dump(cfg, f, sort_keys=False)
-print("Wrote patched config:", cfg_path)
+
+resume = bool(cfg.get("resume", False))
+idx_fold = int(cfg.get("idx_fold", 0))
+
+def has_last_pth(dir_work: str) -> bool:
+  try:
+    p = Path(dir_work) / str(idx_fold) / "checkpoints" / "last.pth"
+    return p.exists()
+  except Exception:
+    return False
+
+dir_work_cfg = cfg.get("dir_work")
+if resume_rundir:
+  outdir = resume_rundir
+  cfg["resume"] = True
+elif resume and isinstance(dir_work_cfg, str) and dir_work_cfg and has_last_pth(dir_work_cfg):
+  outdir = dir_work_cfg
+else:
+  outdir = str(Path(outdir_base) / f"run_{job_id}")
+
+cfg["dir_work"] = outdir
+
+if resume and not cfg.get("resume_checkpoint"):
+  cfg["resume_checkpoint"] = str(Path(outdir) / str(idx_fold) / "checkpoints" / "last.pth")
+
+if cfg.get("resume") and not cfg.get("resume_checkpoint"):
+  cfg["resume_checkpoint"] = str(Path(outdir) / str(idx_fold) / "checkpoints" / "last.pth")
+
+with open(cfg_path, "w", encoding="utf-8") as f:
+  yaml.safe_dump(cfg, f, sort_keys=False)
+
+print(outdir)
 PY
+)"
+
+mkdir -p "$OUTDIR"
 
 export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
 

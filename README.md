@@ -17,8 +17,8 @@ This codebase supports multiple decoding setups:
 ### 0) Clone
 
 ```bash
-git clone git@github.com:muhammadajlal/master-thesis.git
-cd imu-hwr
+git clone https://github.com/muhammadajlal/master-thesis.git
+cd work/REWI_work
 ```
 
 ### 1) Environment
@@ -126,6 +126,7 @@ IMU-based HWR enables writing on paper (or any surface) without cameras or digit
 - **alignment-stable training**,  
 - **calibrated decoding**, and  
 - **hybrid CTC–autoregressive (AR) learning** (CTC for monotonic alignment supervision, AR for global conditional modeling).
+- **Multi-modal learning** (Pre-trained LM e.g., t5-small to fine tune on our downstream task).
 
 ---
 
@@ -150,9 +151,7 @@ The evaluation moved beyond CER/WER and characterized error structure via:
 - **writer-stratified error concentration** (collision lift among top writers),
 - **qualitative diagnostics** using cross-attention heatmaps + Grad-CAM1D.
 
----
-
-## 3) Main Results (Headline Numbers)
+### Main Results from Project
 
 All results below are on **internal STABILO WI splits** (word-level + sentence-level) as documented in the project report.
 
@@ -183,20 +182,20 @@ All results below are on **internal STABILO WI splits** (word-level + sentence-l
 
 ---
 
-## 4) Repository Contents (Recommended Layout)
+## 3) Repository Contents (Recommended Layout)
 
 This repo is organized so the “active” codebase lives under `work/REWI_work/`.
 
 - **Main entrypoints**
   - `main.py`: train/eval one fold (writes `train_*.json`, checkpoints)
   - `evaluate.py`: aggregates CV runs by discovering `train_*.json` under `dir_work`
+  - `pretrain_decoder.py`: decoder-only pretraining (writes `train_*.json`, checkpoints)
 - **Core package**
   - `rewi/`: datasets, models, training/manager utilities
 - **Experiment configuration**
   - `configs/`: YAML configs for training, testing, and decoder pretraining
 - **Utilities and analyses**
   - `scripts/tools/`: plotting + dictionary building (e.g., WI T5-small curves)
-  - `scripts/others/`: decoder-only pretraining (`pretrain_decoder.py`)
 - **Cluster workflow**
   - `slurm/`: sbatch scripts (arrays over folds, YAML patching via `$SLURM_TMPDIR`)
 - **Assets / docs**
@@ -211,7 +210,7 @@ At the repository root:
 
 ---
 
-## 5) Reproducibility and Evaluation Protocol
+## 4) Reproducibility and Evaluation Protocol
 
 ### Metrics
 - **CER / WER** (micro-averaged corpus rates)
@@ -225,7 +224,7 @@ At the repository root:
 
 ---
 
-## 6) Thesis Roadmap (Next Milestones)
+## 5) Thesis Roadmap (Next Milestones)
 
 The thesis plan formalizes the next steps beyond the project phase:
 
@@ -233,15 +232,19 @@ The thesis plan formalizes the next steps beyond the project phase:
     - joint objective: `L = L_AR + λ · L_CTC`
     - goal: keep AR’s WER advantage while using CTC to stabilize monotonic alignment and improve CER.
 
-2. **Calibrated decoding (beam search + EOS/length control)**
+2. **Multi-modal training (Encoder + Pre-trained LM Decoder)**
+    - domain adaption
+    - goal: use the language prior of the pre-trained LM and fine tune it our IMU based task.
+
+3. **Calibrated decoding (beam search + EOS/length control)**
     - beam search, length normalization, EOS bias/min-length constraints
     - optional coverage/skip penalties to reduce attention collapse and catastrophic tails.
 
-3. **Optional LM-based decoding extensions**
+4. **Optional LM-based decoding extensions**
     - lightweight external LM fusion/rescoring (if sufficient transcripts exist)
     - or pretrained LM decoder adaptation under strict latency/parameter budgets.
 
-4. **Robustness workstream**
+5. **Robustness workstream**
     - writer-balanced sampling / reweighting
     - tail-risk–aware evaluation as a first-class objective
     - systematic linkage between qualitative failure signatures and recurring error categories.
