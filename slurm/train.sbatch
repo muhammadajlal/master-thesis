@@ -2,9 +2,9 @@
 #SBATCH -J rewi-cv
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
-#SBATCH -p a100
-#SBATCH --gres=gpu:a100:1
-#SBATCH --cpus-per-task=16
+#SBATCH -p v100
+#SBATCH --gres=gpu:v100:1
+#SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 #SBATCH --array=0-4
 
@@ -14,7 +14,7 @@ set -x
 
 # ---- Params you can tweak ----
 # Specify the YAML config file to use (path relative to configs/)
-TRAIN_YAML=${TRAIN_YAML:-train-t5-small-0-600_sent_1e-3.yaml}
+TRAIN_YAML=${TRAIN_YAML:-train_element_sent.yaml}
 
 # Dataset name (can still be overridden)
 DATASET=${DATASET:-wi_sent_hw6_meta}  # onhw_wi_word_rh | wi_word_hw6_meta etc.

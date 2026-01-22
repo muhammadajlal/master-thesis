@@ -9,7 +9,12 @@
 # --- RunManager basics ---
 idx_fold: 0
 # Put outputs under results/ (same convention as training)
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_decoder_sent
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_decoder_sent/run_1514217
+
+# Resume support (continues from <dir_work>/<idx_fold>/checkpoints/last.pth)
+resume: true
+# Optional explicit path (overrides auto last.pth lookup)
+# resume_checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_decoder_sent/run_1514217/0/checkpoints/last.pth
 
 test: false
 epoch: 100
@@ -79,5 +84,5 @@ eval_batch_words: 512
 # --- Runtime ---
 # Note: the Slurm script also patches this to `cuda`.
 device: cuda
-num_workers: 16
+num_workers: 8
 seed: 1337
