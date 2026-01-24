@@ -18,6 +18,7 @@ d_cnn: 512
 
 # Pretrained LM settings
 lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+lm_local_files_only: true
 lm_train_lm: false
 lm_proj_dropout: 0.0
 

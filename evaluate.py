@@ -135,6 +135,7 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
             num_beams=int(cfgs.get('lm_num_beams', 1)),
             length_penalty=float(cfgs.get('lm_length_penalty', 1.0)),
             min_new_tokens=int(cfgs.get('lm_min_new_tokens', 0)),
+            local_files_only=bool(cfgs.get('lm_local_files_only', True)),
         )
 
         d_cnn = int(cfgs.get('d_cnn', 0))

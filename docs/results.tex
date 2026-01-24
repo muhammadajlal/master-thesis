@@ -1,0 +1,114 @@
+
+% =========================
+% Results: Multimodal Adaptation for HWR
+% Auto-filled from results.json under /results/hwr2
+% =========================
+
+\subsection{Experimental Setup (Multimodal Adaptation)}
+\label{sec:results-setup}
+
+Across all experiments, we use the same CNN encoder (\texttt{blconv\_b}) and compare three decoder setups:
+(i) an autoregressive Transformer decoder (\texttt{ar\_transformer\_s}) trained from scratch,
+(ii) the same \texttt{ar\_transformer\_s} initialized from text-only decoder pretraining and fine-tuned end-to-end,
+and (iii) a multimodal decoder based on \texttt{t5-small} (decoder-only), connected to the CNN encoder via a projection layer.
+For word and sentence datasets, we use character-level labels defined explicitly in the YAML configuration files (\texttt{categories}); \texttt{use\_bpe=false} in all reported runs.
+
+\noindent\textbf{Data availability.} The Stabilo internal dataset (\texttt{wi\_sent\_hw6\_meta}) is private and cannot be published; therefore, results on this dataset are not directly reproducible outside our environment. All other reported experiments can be replicated using the OnHW500 datasets and the provided configuration files.
+
+For AR models, we train for 300 epochs with cosine annealing and 10\% warmup (\texttt{epoch\_warmup}=30) and learning rate $10^{-3}$.
+For \texttt{t5-small} models, we train for 600 epochs with cosine annealing and 10\% warmup (\texttt{epoch\_warmup}=60) and discriminative learning rates ($\texttt{lr\_enc}=10^{-3}$, $\texttt{lr\_proj}=10^{-3}$, $\texttt{lr\_lm}=10^{-5}$).
+Unless otherwise stated, metrics are reported as cross-validation mean $\pm$ standard deviation over folds.
+The model selection per fold follows the validation-best CER criterion used by our evaluation pipeline.
+In our setup, cross-validation uses five folds (0--4) as defined in the dataset annotation JSON files.
+
+\paragraph{Decoder pretraining corpus.}
+For text-only pretraining of \texttt{ar\_transformer\_s}, we use a mixed German+English text corpus (including $\sim$1M English news lines) and German text from the Leipzig Corpora Collection (Wortschatz).
+
+\paragraph{Pretrained decoder initialization (\texttt{best\_loss.pth}).}
+For the \emph{pretrained decoder} condition, we initialize the downstream HWR model's \texttt{ar\_transformer\_s} decoder from a text-only pretraining checkpoint named \texttt{best\_loss.pth}.
+This file is produced by the decoder-only pretraining script and corresponds to the epoch with the lowest teacher-forced validation loss (cross-entropy / perplexity) on a held-out split of the pretraining text.
+Technically, \texttt{best\_loss.pth} is a PyTorch checkpoint that stores (at minimum) the decoder parameter \texttt{state\_dict} under the key \texttt{"model"} (and may additionally include optimizer/scheduler state for resuming).
+During multimodal fine-tuning, we load this decoder-only \texttt{state\_dict} into the HWR model's decoder (\texttt{model.decoder}) with \texttt{strict=False} and require matching architecture/vocabulary (e.g., same gating setting and character vocabulary size).
+
+\paragraph{\texttt{t5-small} initialization and fine-tuning.}
+For the \texttt{t5-small} condition, we initialize the language model from HuggingFace pretrained weights via \texttt{T5ForConditionalGeneration.from\_pretrained(\textit{lm\_name})}, with \texttt{local\_files\_only=true} to support offline cluster usage.
+The CNN encoder produces a sequence of feature vectors which is mapped to the T5 hidden size using a learned projection layer; these projected encoder states are then passed as \texttt{encoder\_outputs} to the T5 decoder.
+Depending on configuration, the T5 parameters can be fully frozen or fine-tuned (including staged unfreezing of decoder-side parameters); in our reported runs we use discriminative learning rates ($\texttt{lr\_enc}=10^{-3}$, $\texttt{lr\_proj}=10^{-3}$, $\texttt{lr\_lm}=10^{-5}$).
+
+\paragraph{Input preprocessing and augmentation.}
+Sensor sequences are loaded from semicolon-delimited CSV files and normalized per feature channel to zero mean and unit variance.
+If \texttt{aug=true}, we apply lightweight augmentations (noise, drift, dropout, time-warp) with a per-augmentation probability of 0.25.
+Sequences are padded to satisfy minimum length constraints (in particular, the CTC constraint $T \ge 2\,|y|\,\texttt{ratio\_ds}$) and, optionally, to a fixed \texttt{len\_seq}.
+
+\paragraph{Decoding and evaluation protocol.}
+For CNN--ARTransformer models we use greedy autoregressive decoding (argmax next-token) starting from \texttt{BOS} and stopping at \texttt{EOS}; in our evaluation loop the maximum decode steps are capped by the maximum target length in the batch (plus a small constant).
+For CNN--\texttt{t5-small}, decoding uses HuggingFace \texttt{generate()} with \texttt{lm\_num\_beams}, \texttt{lm\_max\_new\_tokens}, \texttt{lm\_length\_penalty}, and related settings; \texttt{lm\_num\_beams=1} corresponds to greedy decoding.
+Across all results, we report CER/WER on the validation split per fold and select the epoch with the best validation CER for model selection; final numbers are cross-validation mean $\pm$ standard deviation.
+
+
+\section{Quantitative Results}
+\label{sec:results-quant}
+
+% Helper note: CER/WER below are shown in percent.
+
+\begin{table}[t]
+\centering
+\caption{Results on the Stabilo internal sentence dataset (\texttt{wi\_sent\_hw6\_meta}).}
+\label{tab:results-stabilo-sent}
+\begin{tabular}{lrrrr}
+\toprule
+Model & CER $\downarrow$ & WER $\downarrow$ & MACs $\downarrow$ & Params $\downarrow$ \\
+\midrule
+CNN--ARTransformer (no pretraining) & 8.43 $\pm$ 1.29 & 11.88 $\pm$ 1.61 & 1.72 B & 4.69 M \\
+CNN--ARTransformer (pretrained decoder) & 10.69 $\pm$ 1.30 & 14.71 $\pm$ 1.64 & 1.72 B & 4.69 M \\
+CNN--t5-small (decoder-only) & 25.06 $\pm$ 2.19 & 34.96 $\pm$ 2.61 & 3.72 B & 44.34 M \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[t]
+\centering
+\caption{Results on the OnHW500 WI split (\texttt{onhw\_wi\_word\_rh}).}
+\label{tab:results-onhw-wi}
+\begin{tabular}{lrrrr}
+\toprule
+Model & CER $\downarrow$ & WER $\downarrow$ & MACs $\downarrow$ & Params $\downarrow$ \\
+\midrule
+CNN--ARTransformer (no pretraining) & 6.82 $\pm$ 6.25 & 10.32 $\pm$ 7.33 & 0.43 B & 4.69 M \\
+CNN--ARTransformer (pretrained decoder) & 6.83 $\pm$ 6.21 & 10.41 $\pm$ 7.11 & 0.43 B & 4.69 M \\
+CNN--t5-small (decoder-only) & 9.32 $\pm$ 7.48 & 15.39 $\pm$ 8.41 & 1.16 B & 44.34 M \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\begin{table}[t]
+\centering
+\caption{Results on the OnHW500 WD split (\texttt{onhw\_wd\_word\_rh}).}
+\label{tab:results-onhw-wd}
+\begin{tabular}{lrrrr}
+\toprule
+Model & CER $\downarrow$ & WER $\downarrow$ & MACs $\downarrow$ & Params $\downarrow$ \\
+\midrule
+CNN--ARTransformer (no pretraining) & 16.52 $\pm$ 5.53 & 32.86 $\pm$ 9.06 & 0.43 B & 4.69 M \\
+CNN--ARTransformer (pretrained decoder) & 17.03 $\pm$ 5.72 & 33.74 $\pm$ 8.95 & 0.43 B & 4.69 M \\
+CNN--t5-small (decoder-only) & 32.17 $\pm$ 7.28 & 57.37 $\pm$ 12.15 & 1.16 B & 44.34 M \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\section{Notes on Interpretation}
+\label{sec:results-notes}
+
+\noindent
+The \texttt{t5-small} setup increases compute and parameter count substantially, yet does not consistently improve CER/WER in these experiments.
+Decoder-only pretraining of \texttt{ar\_transformer\_s} does not yield a consistent gain across datasets and can degrade sentence recognition, suggesting a mismatch between text-only objectives and sensor-conditioned decoding.
+
+\paragraph{Staged unfreezing ablation (\texttt{t5-small}).}
+We additionally study \emph{staged unfreezing} of the \texttt{t5-small} decoder on OnHW500 WI words (CNN--\texttt{t5-small}, decoder-only). In this ablation, all settings are kept fixed and only \texttt{lm\_unfreeze\_epoch} is varied (60 vs. 80 vs. 200).
+Across folds, unfreezing at epoch 60 performs best (CER $\approx 9.03\%$, WER $\approx 14.91\%$), while unfreezing at epoch 80 is consistently worse (CER $\approx 9.54\%$, WER $\approx 15.27\%$); unfreezing at epoch 200 is close to the best setting (CER $\approx 9.19\%$, WER $\approx 15.14\%$).
+The learning curves indicate that earlier unfreezing tends to accelerate improvements after the transition, whereas very late unfreezing yields limited benefit and can slightly perturb validation CER around the unfreeze point.
+For reference, the generated plots are stored under \texttt{results/hwr2/figures/t5\_unfreeze\_ablation\_summary.png} and \texttt{results/hwr2/figures/t5\_unfreeze\_ablation\_curves.png}.
+

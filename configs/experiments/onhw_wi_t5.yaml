@@ -1,0 +1,78 @@
+# OnHW500 WI (word): CNN encoder + T5-small decoder-only (multimodal)
+# NOTE: T5 weights are loaded with local_files_only=true by default in code.
+# Ensure lm_name points to a local HF snapshot directory.
+# Paths are patched by scripts/repro/reproduce_tables.sh
+
+arch_en: "blconv_b"
+arch_de: "t5-small"
+
+# Encoder output dim for blconv_b (used by projection)
+d_cnn: 512
+
+# HF model (local directory)
+lm_name: "work/REWI_work/assets/hf_models/t5-small"
+lm_local_files_only: true
+lm_train_lm: true
+lm_unfreeze_epoch: 0
+lm_proj_dropout: 0.1
+
+# Decoding (evaluation)
+lm_num_beams: 1
+lm_max_new_tokens: 64
+lm_length_penalty: 1.0
+lm_min_new_tokens: 0
+
+# Guardrails for label length
+lm_max_label_len: 128
+
+# AMP (leave off by default for maximum stability)
+lm_use_amp: false
+
+# Data / output (patched)
+dir_dataset: __DATASET_DIR__
+dir_work: __WORK_DIR__
+checkpoint: null
+
+# Cross-validation
+idx_fold: -1
+
+# Runtime
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+aug: false
+
+# Schedule
+epoch: 600
+epoch_warmup: 60
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+save_best_only: true
+export_val_full: true
+
+# Optimization (discriminative LRs)
+lr_enc: 0.001
+lr_proj: 0.001
+lr_lm: 0.00001
+lm_lr_unfreeze_mult: 1.0
+weight_decay: 0.01
+
+# Legacy fields (unused in LM mode, kept for compatibility)
+lr: 0.0001
+size_batch: 64
+num_channel: 13
+len_seq: 0
+freeze: false
+ctc_decoder: best_path
+
+# Tokenizer fields (legacy; LM uses HF tokenizer internally)
+tokenizer:
+  type: sentencepiece
+  model: work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+# Labels (word-level)
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
