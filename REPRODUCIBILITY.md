@@ -1,14 +1,14 @@
 # Reproducibility / Replication Guide
 
 This repository contains the full training and evaluation code used in our experiments.
-The most replication-friendly way to reproduce results is to run the **exact YAML configs** and generate `results.json` via `evaluate.py`.
+The most replication-friendly way to reproduce results is to run the **exact YAML configs** from the repository root and generate `results.json` via `evaluate.py`.
 
 ## Data availability
 
-- **STABILO / `wi_sent_hw6_meta` (private):** This dataset is internal/private and cannot be published. Results on this dataset are **not directly reproducible** outside our environment.
-- **OnHW500 (public in this repo layout):** All other experiments in the thesis can be replicated using the OnHW500 datasets shipped in this repository under `data/`:
-  - `data/onhw_wi_word_rh` (WI split)
-  - `data/onhw_wd_word_rh` (WD split)
+- **STABILO / `wi_sent_hw6_meta` (private):** For commercial reasons, our datasets will not be published. Alternatively, you can use the OnHW public dataset for training and evaluation. Results on this dataset are **not directly reproducible** outside our environment.
+- **OnHW500:** All other experiments in the thesis can be replicated using the OnHW500 datasets. In the thesis, we use the right-handed (WI/WD Split) subset of the OnHW-words500 dataset. To download the dataset, please visit: https://www.iis.fraunhofer.de/de/ff/lv/dataanalytics/anwproj/schreibtrainer/onhw-dataset.html
+
+We use a MSCOCO-like structure for the training and evaluation of our dataset. After the OnHW dataset is downloaded, please convert the original dataset to the desired structure with the notebook `onhw.ipynb`. Please adjust the variables `dir_raw`, `dir_out`, and `writer_indep`/`writer_dep` accordingly. You can open and run the notebook from the repository root.
 
 ## What “replication” means here
 
@@ -18,11 +18,7 @@ The most replication-friendly way to reproduce results is to run the **exact YAM
 
 ## Environment
 
-Run commands from `work/REWI_work`:
-
-```bash
-cd work/REWI_work
-```
+Run commands from the repository root (the folder created by `git clone`).
 
 Install dependencies (choose one):
 
@@ -44,16 +40,16 @@ We provide a helper script that:
 2) runs sequential cross-validation training,
 3) runs `evaluate.py` to write `results.json`.
 
-From `work/REWI_work`:
+From the repository root:
 
 ```bash
 bash scripts/repro/reproduce_tables.sh \
-  --data-root ../../data \
-  --out-root ../../results/repro
+  --data-root data \
+  --out-root results/repro
 ```
 
 This reproduces **OnHW500 WI** and **OnHW500 WD** experiments for:
-- CNN–ARTransformer (scratch)
+- CNN–ARTransformer (Decoder not-pretrained)
 - CNN–t5-small (decoder-only)
 
 ## Getting `t5-small` weights (offline-first)
@@ -63,17 +59,16 @@ Our code defaults to offline loading for HuggingFace models (`lm_local_files_onl
 To download `t5-small` once (when internet is available) and store it in the repo under `assets/hf_models/`:
 
 ```bash
-cd work/REWI_work
 bash scripts/repro/download_t5_small.sh
 ```
 
 This downloads into:
-- `work/REWI_work/assets/hf_models/t5-small`
+- `assets/hf_models/t5-small`
 
 The corresponding YAML fields are:
 
 ```yaml
-lm_name: work/REWI_work/assets/hf_models/t5-small
+lm_name: assets/hf_models/t5-small
 lm_local_files_only: true
 ```
 
@@ -89,14 +84,89 @@ Model page (reference): https://huggingface.co/t5-small
 ### Pretrained AR decoder condition
 
 The “pretrained decoder” condition additionally requires a decoder-only pretraining checkpoint (`best_loss.pth`).
-That checkpoint depends on an external text corpus; the corpus is not shipped here.
+That checkpoint depends on an external text corpus; the corpus could be reproduced for both words and sentences levell pre-training using the following instructions please replace sentences/words accordingly in the commands. 
+
+### Download the source sentence/word lists (News 2024, 1M)
+The input files come from the Leipzig Corpora Collection / Wortschatz Leipzig downloads:
+https://wortschatz-leipzig.de/de/download/
+
+We use the **News** corpora for year **2024** at size **1M** (measured in number of sentences on the website). Download both:
+- English: https://wortschatz-leipzig.de/de/download/eng  → section **News** → row **2024** → column **Download 1M**
+- German: https://wortschatz-leipzig.de/de/download/deu → section **News** → row **2024** → column **Download 1M**
+
+After downloading, extract the archive (format depends on the download; typically a `.tar.gz`):
+
+```bash
+tar -xzf eng_news_2024_1M.tar.gz
+tar -xzf deu_news_2024_1M.tar.gz
+```
+
+Then locate the `*-sentences.txt` file inside each extracted folder and place/rename it to match the expected inputs below:
+- `eng_news_2024_1M-sentences.txt`
+- `deu_news_2024_1M-sentences.txt`
+
+Note: These downloads are subject to the provider's terms of use (see the download page).
+
+## Inputs
+- `eng_news_2024_1M-sentences.txt`
+- `deu_news_2024_1M-sentences.txt`
+
+These files are sentence-per-line, optionally prefixed with a numeric rank:
+
+```
+1  $0.07 of every dollar for public officers' pensions.
+2  $100 million boost for new pro league.
+...
+```
+
+Note: Some lines have a leading `$` character which is stripped during processing.
+
+## What was filtered
+1. Read all unique sentence labels from:
+   - `../../../../data/wi_sent_hw6_meta/train.json`
+   - `../../../../data/wi_sent_hw6_meta/val.json`
+
+   In this dataset, the label is stored in the annotation field `label`.
+
+2. Normalize everything the same way (by default):
+   - Unicode NFKC normalization
+   - lowercase
+   - collapse whitespace runs
+
+3. Build a mixed set of sentences from EN∪DE, then remove anything that matches a dataset label.
+
+## Outputs
+- `mixed_en_de_no_wi_sent_hw6_meta.txt`
+  - Final mixed dictionary (**1,999,971 sentences**, one per line)
+  - **Already has wi_sent_hw6_meta label-sentences removed**
+
+- `removed_due_to_leakage.txt`
+  - Sentences that were removed because they matched a dataset label
+  - **1 sentence** removed: `"three people were injured."`
+  - Sorted for easy inspection
+
+## How to reproduce
+From the repository root:
+
+```bash
+python3 scripts/tools/build_mixed_dictionary.py \
+  --kind sent \
+  --en assets/dictionaries/sent/eng_news_2024_1M-sentences.txt \
+  --de assets/dictionaries/sent/deu_news_2024_1M-sentences.txt \
+  --dataset data/wi_sent_hw6_meta \
+  --out assets/dictionaries/sent/mixed_en_de_no_wi_sent_hw6_meta.txt \
+  --out-removed assets/dictionaries/sent/removed_due_to_leakage.txt
+```
+
+The script used is: `scripts/tools/build_mixed_dictionary.py`.
+
 
 If you have a compatible `best_loss.pth`, you can include the pretrained-decoder runs:
 
 ```bash
 bash scripts/repro/reproduce_tables.sh \
-  --data-root ../../data \
-  --out-root ../../results/repro \
+  --data-root data \
+  --out-root results/repro \
   --pretrained-decoder-ckpt /abs/path/to/best_loss.pth
 ```
 
