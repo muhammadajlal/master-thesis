@@ -1303,6 +1303,7 @@ def main(cfgs: argparse.Namespace) -> None:
             num_beams=int(getattr(cfgs, "lm_num_beams", 1)),
             length_penalty=float(getattr(cfgs, "lm_length_penalty", 1.0)),
             min_new_tokens=int(getattr(cfgs, "lm_min_new_tokens", 0)),
+            local_files_only=bool(getattr(cfgs, "lm_local_files_only", True)),
         )
 
         # Recommended: d_cnn=0 => projection uses LazyLinear and auto-infers (e.g., 512)

@@ -1,0 +1,64 @@
+# OnHW500 WD (word): CNN encoder + T5-small decoder-only (multimodal)
+# NOTE: T5 weights are loaded with local_files_only=true by default in code.
+# Ensure lm_name points to a local HF snapshot directory.
+# Paths are patched by scripts/repro/reproduce_tables.sh
+
+arch_en: "blconv_b"
+arch_de: "t5-small"
+
+d_cnn: 512
+
+lm_name: "work/REWI_work/assets/hf_models/t5-small"
+lm_local_files_only: true
+lm_train_lm: true
+lm_unfreeze_epoch: 0
+lm_proj_dropout: 0.1
+
+lm_num_beams: 1
+lm_max_new_tokens: 64
+lm_length_penalty: 1.0
+lm_min_new_tokens: 0
+
+lm_max_label_len: 128
+lm_use_amp: false
+
+dir_dataset: __DATASET_DIR__
+dir_work: __WORK_DIR__
+checkpoint: null
+
+idx_fold: -1
+
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+aug: false
+
+epoch: 600
+epoch_warmup: 60
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+save_best_only: true
+export_val_full: true
+
+lr_enc: 0.001
+lr_proj: 0.001
+lr_lm: 0.00001
+lm_lr_unfreeze_mult: 1.0
+weight_decay: 0.01
+
+lr: 0.0001
+size_batch: 64
+num_channel: 13
+len_seq: 0
+freeze: false
+ctc_decoder: best_path
+
+tokenizer:
+  type: sentencepiece
+  model: work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]

@@ -12,6 +12,7 @@ d_cnn: 512
 
 # Pretrained LM settings (probe defaults)
 lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+lm_local_files_only: true
 lm_train_lm: false       # true: fine-tune entire LM from epoch 0; false: freeze LM weights
 lm_unfreeze_epoch: 200   # At which epoch to unfreeze LM if lm_train_lm is false initially
 lm_proj_dropout: 0.1

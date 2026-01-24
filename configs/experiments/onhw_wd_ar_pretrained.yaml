@@ -1,0 +1,46 @@
+# OnHW500 WD (word): CNN encoder + AR transformer decoder (pretrained decoder init)
+# Requires an external decoder-only pretraining checkpoint (best_loss.pth).
+# Paths are patched by scripts/repro/reproduce_tables.sh
+
+arch_en: 'blconv_b'
+arch_de: 'ar_transformer_s'
+
+pretrained_decoder_checkpoint: __PRETRAIN_DECODER_CKPT__
+freeze_decoder_epochs: 0
+
+dir_dataset: __DATASET_DIR__
+dir_work: __WORK_DIR__
+
+idx_fold: -1
+
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+aug: true
+
+epoch: 300
+epoch_warmup: 30
+freq_eval: 5
+freq_log: 50
+freq_save: 5
+save_best_only: true
+export_val_full: false
+
+lr: 0.001
+size_batch: 64
+
+num_channel: 13
+len_seq: 0
+freeze: false
+
+tokenizer:
+  type: sentencepiece
+  model: work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+use_gated_attention: true
+gating_type: elementwise
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]

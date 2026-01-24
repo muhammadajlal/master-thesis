@@ -115,6 +115,15 @@ These scripts copy a base YAML into `$SLURM_TMPDIR` and patch keys like `idx_fol
 
 ---
 
+## Reproducibility
+
+- Replication-grade instructions and configs live in [REPRODUCIBILITY.md](REPRODUCIBILITY.md) and `configs/experiments/`.
+- Download helper for HuggingFace weights: `bash scripts/repro/download_t5_small.sh` (stores under `assets/hf_models/t5-small`).
+- **Private data note:** the Stabilo internal dataset (`wi_sent_hw6_meta`) is private and cannot be redistributed; experiments on it are not directly reproducible outside this environment.
+- All other reported experiments can be replicated using the OnHW500 datasets (`data/onhw_wi_word_rh`, `data/onhw_wd_word_rh`).
+
+---
+
 ## 1) Thesis Focus
 
 IMU-based HWR enables writing on paper (or any surface) without cameras or digitizers, but **WI generalization** is difficult due to:
@@ -130,7 +139,8 @@ IMU-based HWR enables writing on paper (or any surface) without cameras or digit
 
 ---
 
-## 2) What’s Already Done (Master's Project Component)
+
+## 2) What’s Already Done
 
 In addition, the **Master's project report is treated as a pre-requisite thesis component** and documents the initial research phase, system migration, ablations, and diagnostic analyses.
 The project phase established a practical and extensible AR pipeline and produced the main empirical findings below:
@@ -179,6 +189,86 @@ All results below are on **internal STABILO WI splits** (word-level + sentence-l
 - Exact-match mass is large (~**78–79%**), but the remaining errors are **heavy-tailed**.
 - Tail risk is non-trivial, especially for sentences (e.g., **P(e > 1)** notably higher than words).
 - Collisions disproportionately involve **frequent labels**, and collisions are **concentrated in subsets of writers**, consistent with frequency bias interacting with writer shift.
+
+## Multimodal LM-Decoder Adaptation Experiments (Pretrained Seq2Seq)
+
+### A. Goal: Replace Scratch AR Decoder with a Pretrained LM Decoder
+This experiment evaluates whether a **pretrained seq2seq language model decoder** can improve recognition quality (CER/WER) when adapted as a decoder conditioned on IMU-derived encoder tokens—while tracking **accuracy vs. compute** (MACs/Params). The core question is whether pretraining helps **sequence generation** beyond the scratch CNN–ARTransformer decoder.
+
+### B. Conditioning Mechanism: Lightweight Adapter / Projection
+The setup conditions a pretrained **T5-small** decoder on the CNN encoder output using a **lightweight projection/adapter**, and fine-tunes the system jointly **from epoch 0**. This keeps the interface minimal and makes results interpretable: any gains should come from leveraging pretrained decoding capacity.
+
+### C. Baseline: My CNN–ARTransformer (Reference System)
+All comparisons are made against my in-house baseline:
+- **CNN encoder + autoregressive Transformer decoder**
+- **batch-wise rectangularization + masking** to handle variable-length IMU sequences
+
+This baseline is also the platform used for thesis work on **hybrid CTC–AR multitask learning** and **decoder calibration**.
+
+### D. Evaluation Protocol: Multiple Domains + Compute Accounting
+Experiments are reported on:
+- **OnHW500** (Writer-Independent, Writer-Dependent)
+- **Internal STABILO sentence-level** split
+
+Metrics:
+- **CER/WER**
+- **MACs** (compute)
+- **Params** (model size)
+
+---
+
+### E. Results: Multimodal LM-Decoder Adaptation
+
+#### OnHW500 (Writer-Independent, WI)
+| Model | CER ↓ | WER ↓ | MACs ↓ | Params ↓ |
+|------|------:|------:|------:|---------:|
+| **CNN–ARTransformer (baseline, no pretrain)** | **6.75** | **10.21** | **430M** | **4.69M** |
+| CNN–ARTransformer (pretrained; fine-tuned from epoch 0) | 6.82 | 10.40 | 430M | 4.69M |
+| CNN–T5-small decoder (fine-tuned from epoch 0) | 9.32 | 15.38 | 1.16B | 44.34M |
+
+**Key takeaway:** Under the current conditioning setup, **T5-small underperforms** the scratch CNN–ARTransformer baseline while requiring **~2.7× MACs** and **~9.5× parameters**.
+
+---
+
+#### OnHW500 (Writer-Dependent, WD)
+| Model | CER ↓ | WER ↓ | MACs ↓ | Params ↓ |
+|------|------:|------:|------:|---------:|
+| **CNN–ARTransformer (baseline, no pretrain)** | **16.52** | **32.85** | **430M** | **4.69M** |
+| CNN–ARTransformer (pretrained; fine-tuned from epoch 0) | 17.03 | 33.74 | 430M | 4.69M |
+| CNN–T5-small decoder (fine-tuned from epoch 0) | 32.16 | 57.37 | 1.16B | 44.34M |
+
+**Key takeaway:** The performance gap widens on WD: pretrained LM adaptation **does not transfer effectively** and is substantially worse than the baseline.
+
+---
+
+#### Internal STABILO (Sentence-Level)
+| Model | CER ↓ | WER ↓ | MACs ↓ | Params ↓ |
+|------|------:|------:|------:|---------:|
+| **CNN–ARTransformer (baseline, no pretrain)** | **8.68** | **12.30** | **1.7B** | **4.69M** |
+| CNN–ARTransformer (pretrained; fine-tuned from epoch 0) | 10.68 | 14.71 | 1.7B | 4.69M |
+| CNN–T5-small decoder (lr = $10^{-3}$; fine-tuned from epoch 0) | 15.57 | 22.57 | 33.74B | 44.34M |
+
+**Key takeaway:** For sentence-level recognition, T5-small adaptation is **both less accurate and significantly more expensive** (MACs increase by an order of magnitude), suggesting the current multimodal interface is not yet leveraging LM pretraining.
+
+---
+
+## Interpretation / What This Suggests
+- **Pretrained decoder capacity alone is not sufficient**: without stronger grounding/alignment signals, the LM decoder can become fluent-but-wrong and fails to exploit IMU evidence effectively.
+- The **scratch CNN–ARTransformer remains the best accuracy–efficiency tradeoff** under the current setup.
+- These results motivate the thesis direction:
+  - **Hybrid CTC–AR multitask training** (CTC provides alignment supervision; AR provides context modeling),
+  - **Decoder calibration** (beam search, EOS/length control),
+  - Potentially **LM fusion / rescoring** rather than full LM-decoder replacement.
+
+---
+
+## Reproducibility
+- Configurations, logs, and result tables are documented in this repository (see experiment folders and result summaries).
+
+### Next Steps
+- Improve grounding/alignment for LM adaptation via hybrid CTC–AR supervision.
+- Evaluate beam search + length/EOS calibration for AR and LM decoders.
+- Explore LM fusion/rescoring as a lower-risk way to leverage pretraining.
 
 ---
 
@@ -254,7 +344,7 @@ The thesis plan formalizes the next steps beyond the project phase:
 ## 7) Primary References
 
 - **REWI baseline paper (foundation):**  
-  J. Li, T. Hamann, J. Barth, et al. *Robust and Efficient Writer-Independent IMU-Based Handwriting Recognition.* [arXiv:2502.20954](https://arxiv.org/abs/2502.20954), 2025.
+Li, J., Hamann, T., Barth, J., Kämpf, P., Zanca, D., Eskofier, B. (2026). Robust and Efficient Writer-Independent IMU-Based Handwriting Recognition. In: Durmaz Incel, Ö., Qin, J., Bieber, G., Kuijper, A. (eds) Sensor-Based Activity Recognition and Artificial Intelligence. iWOAR 2025. Lecture Notes in Computer Science, vol 16292. Springer, Cham. https://doi.org/10.1007/978-3-032-13312-0_16
 
 - **Master's Project report (part of thesis, completed phase):**  
   *Improving IMU-Based Online Handwriting Recognition: Upgrading from CTC to Attention-based Autoregressive Decoder.* [docs/Master-Project-Report.pdf](docs/Master-Project-Report.pdf)
