@@ -14,10 +14,10 @@ set -x
 
 # ---- Params you can tweak ----
 # Specify the YAML config file to use (path relative to configs/)
-TRAIN_YAML=${TRAIN_YAML:-train_element_sent.yaml}
+TRAIN_YAML=${TRAIN_YAML:-train_element_word.yaml}
 
 # Dataset name (can still be overridden)
-DATASET=${DATASET:-wi_sent_hw6_meta}  # onhw_wi_word_rh | wi_word_hw6_meta etc.
+DATASET=${DATASET:-wi_word_hw6_meta}  # onhw_wi_word_rh | wi_word_hw6_meta etc.
 
 # Toggle tokenizer/BPE usage: "true"/"false" or "1"/"0"
 USE_BPE=${USE_BPE:-false}
