@@ -9,8 +9,10 @@ This module provides:
 
 from rewi.training.loops import (
     train_one_epoch,
+    train_one_epoch_hybrid,
     train_one_epoch_lm,
     test,
+    test_hybrid,
     test_lm,
 )
 from rewi.training.utils import (
@@ -25,8 +27,10 @@ from rewi.training.utils import (
 __all__ = [
     # Training loops
     "train_one_epoch",
+    "train_one_epoch_hybrid",
     "train_one_epoch_lm",
     "test",
+    "test_hybrid",
     "test_lm",
     # Utilities
     "build_ar_batch",

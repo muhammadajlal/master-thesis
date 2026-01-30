@@ -10,7 +10,7 @@ class LSTM(nn.Module):
     Inputs:
         x (torch.Tensor): Input tensor (size_batch, len_seq, num_chan).
     Outputs:
-        torch.Tensor: Output tensor of probabilities (size_batch, len_seq, num_cls).
+        torch.Tensor: Output tensor of logits (size_batch, len_seq, num_cls).
     '''
 
     def __init__(
@@ -41,7 +41,6 @@ class LSTM(nn.Module):
             bidirectional=True,
         )
         self.fc = nn.Linear(hidden_size * 2, num_cls)
-        self.softmax = nn.Softmax(dim=2)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         '''Foward function.
@@ -54,6 +53,5 @@ class LSTM(nn.Module):
         '''
         x, _ = self.lstm(x)
         x = self.fc(x)
-        x = self.softmax(x)
 
         return x

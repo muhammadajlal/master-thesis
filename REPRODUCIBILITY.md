@@ -1,5 +1,66 @@
 # Reproducibility / Replication Guide
 
+## 📁 Repo Structure
+
+```
+work/REWI_work/
+├── main.py                 # Main training/evaluation entry point
+├── evaluate.py             # Cross-validation aggregation
+├── pretrain_decoder.py     # Text-only decoder pretraining
+│
+├── configs/                # YAML configuration files
+│   ├── train.yaml          # Base training config
+│   ├── test.yaml           # Evaluation config
+│   └── ...
+│
+├── rewi/                   # Core library
+│   ├── model/              # Neural network architectures
+│   │   ├── __init__.py     # BaseModel, build_encoder
+│   │   ├── conv.py         # CNN encoders (ConvNeXt, etc.)
+│   │   ├── transformer.py  # Transformer decoder
+│   │   ├── ARDecoder.py    # Autoregressive decoder
+│   │   └── multimodal_lm_model.py  # HuggingFace LM integration
+│   │
+│   ├── dataset/            # Data loading
+│   │   ├── __init__.py     # HRDataset
+│   │   ├── utils.py        # Collate functions
+│   │   └── lm_collate.py   # LM-specific collation
+│   │
+│   ├── training/           # Training loops and utilities
+│   │   ├── __init__.py
+│   │   ├── loops.py        # train_one_epoch, test functions
+│   │   └── utils.py        # Freeze/unfreeze, optimizer helpers
+│   │
+│   ├── analysis/           # Qualitative & quantitative analysis
+│   │   ├── __init__.py
+│   │   ├── attention.py    # Cross-attention visualization
+│   │   ├── gradcam.py      # Grad-CAM 1D for encoder
+│   │   ├── selection.py    # Sample selection by quantiles
+│   │   └── metrics.py      # Levenshtein distance, CER
+│   │
+│   ├── tokenizer/          # Text tokenization
+│   │   ├── __init__.py
+│   │   ├── base.py         # BaseTokenizer interface
+│   │   ├── bpe.py          # SentencePiece BPE tokenizer
+│   │   ├── char.py         # Character-level tokenizer
+│   │   └── utils.py        # Text normalization
+│   │
+│   ├── evaluate.py         # Evaluation metrics (CER, WER)
+│   ├── visualize.py        # Result visualization
+│   ├── manager.py          # RunManager for logging/checkpointing
+│   ├── loss.py             # CTC loss wrapper
+│   └── ctc_decoder.py      # CTC best-path decoder
+│
+├── analysis/               # Analysis scripts and outputs
+│   ├── scripts/            # Quantitative analysis scripts
+│   └── notebooks/          # Jupyter notebooks
+│
+├── scripts/                # Utility scripts
+│   └── tools/              # Plotting, preprocessing tools
+│
+└── slurm/                  # Cluster job scripts
+```
+
 This repository contains the full training and evaluation code used in our experiments.
 The most replication-friendly way to reproduce results is to run the **exact YAML configs** from the repository root and generate `results.json` via `evaluate.py`.
 
@@ -9,6 +70,21 @@ The most replication-friendly way to reproduce results is to run the **exact YAM
 - **OnHW500:** All other experiments in the thesis can be replicated using the OnHW500 datasets. In the thesis, we use the right-handed (WI/WD Split) subset of the OnHW-words500 dataset. To download the dataset, please visit: https://www.iis.fraunhofer.de/de/ff/lv/dataanalytics/anwproj/schreibtrainer/onhw-dataset.html
 
 We use a MSCOCO-like structure for the training and evaluation of our dataset. After the OnHW dataset is downloaded, please convert the original dataset to the desired structure with the notebook `onhw.ipynb`. Please adjust the variables `dir_raw`, `dir_out`, and `writer_indep`/`writer_dep` accordingly. You can open and run the notebook from the repository root.
+
+```bash
+python onhw.ipynb.py
+```
+
+### Data Layout
+
+After running the notebook successfully. Find Datasets MSCOCO-like structure under `<dir_out>/`:
+```
+data/
+└── onhw_wd_word_rh/
+    ├── train.json          # Training annotations (by fold)
+    ├── val.json            # Validation annotations (by fold)
+    └── data/               # Sensor CSV files
+```
 
 ## What “replication” means here
 

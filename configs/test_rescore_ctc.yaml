@@ -1,0 +1,63 @@
+# Test-time AR beam + CTC rescoring (dual-head checkpoints only)
+#
+# This config is intentionally close to configs/test.yaml.
+# Slurm scripts typically patch: idx_fold, checkpoint, dir_dataset, dir_work.
+
+arch_de: ar_transformer_s
+arch_en: blconv_b
+aug: true
+cache: false
+checkpoint: ""   # patch via Slurm
+ctc_decoder: best_path
+device: cuda
+
+dir_dataset: ""  # patch via Slurm
+# IMPORTANT: use a dedicated dir_work to avoid mixing outputs with greedy inference
+# patch via Slurm
+
+dir_work: ""
+
+test: true
+epoch: 1
+epoch_warmup: 0
+freq_eval: 1
+freq_log: 300
+idx_fold: 0
+len_seq: 0
+lr: 0.001
+num_channel: 13
+num_worker: 16
+seed: 42
+size_batch: 8
+
+# Dual-head must be enabled for CTC rescoring.
+dual_head:
+  enabled: false
+  # Must match the trained checkpoint.
+  arch_ctc: linear
+  lambda_ar: 1.0
+  lambda_ctc: 0.6
+  loss_balance: sum
+
+# Rescoring settings
+rescore_ctc:
+  enabled: true
+  # Beam search over the AR decoder
+  beam_size: 4
+  # If null, uses (max(label_len)+2) per batch
+  max_len: null
+  # Apply to AR log-prob as: logp / (len ** length_penalty)
+  length_penalty: 0.0
+  beta_ar: 1.0
+  betas_ctc: [0.0, 0.3, 0.6, 1.0]
+  export: true
+  export_dirname: exports_rescore_ctc
+
+
+use_gated_attention: true
+gating_type: elementwise  
+
+qualitative: false
+qual_use_gradcam: false
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]

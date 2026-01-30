@@ -1,5 +1,7 @@
+import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 def smooth_probs(probs: torch.Tensor, alpha: float = 1e-6) -> torch.Tensor:
@@ -22,16 +24,18 @@ def smooth_probs(probs: torch.Tensor, alpha: float = 1e-6) -> torch.Tensor:
 
 # original rewi loss
 class CTCLoss(nn.Module):
-    '''Custom CTCLoss with probability smoothing.
+    '''Custom CTCLoss with optional smoothing in log-space.
 
     Inputs:
-        probs (torch.Tensor): Non-log probability predictions. (T, N, C) or (T, C) where C = number of characters in alphabet including blank, T = input length, and N = batch size.
+        logits (torch.Tensor): Logits (not probabilities). Shape (T, N, C) or (T, C)
+            where C = number of characters in alphabet including blank, T = input length,
+            and N = batch size.
         targets (torch.Tensor): Targets. (N, S) or (sum(target_lengths)).
         input_lengths (torch.Tensor): (N) or (). Lengths of the inputs (must each be <= T)
         target_lengths (torch.Tensor): (N) or (). Lengths of the targets.
     Outputs:
         torch.Tensor: Loss value.
-    '''    
+    '''
     def __init__(
         self,
         alpha_smooth: float = 1e-6,
@@ -39,10 +43,11 @@ class CTCLoss(nn.Module):
         reduction: str = 'mean',
         zero_infinity: bool = False,
     ) -> None:
-        '''Custom CTCLoss with probability smoothing.
+        '''Custom CTCLoss with optional smoothing in log-space.
 
         Args:
-            alpha_smooth (float, optional): Smooth factor for input probability smoothing. If the factor is 0, original probability predictions are used. Defaults to 1e-6.
+            alpha_smooth (float, optional): Smoothing factor in log-space. If 0, no smoothing.
+                Defaults to 1e-6.
             blank (int, optional): Blank label. Defaults to 0.
             reduction (str, optional): Specifies the reduction to apply to the output. Options are 'none', 'mean' and 'sum'. Defaults to 'mean'.
             zero_infinity (bool, optional): Whether to zero infinite losses and the associated gradients. Defaults to False.
@@ -56,7 +61,7 @@ class CTCLoss(nn.Module):
 
     def forward(
         self,
-        probs: torch.Tensor,
+        logits: torch.Tensor,
         targets: torch.Tensor,
         input_lengths: torch.Tensor,
         target_lengths: torch.Tensor,
@@ -64,7 +69,7 @@ class CTCLoss(nn.Module):
         '''Forward method.
 
         Args:
-            probs (torch.Tensor): Non-log probability predictions. (T, N, C) or (T, C) where C = number of characters in alphabet including blank, T = input length, and N = batch size.
+            logits (torch.Tensor): Logits. (T, N, C) or (T, C).
             targets (torch.Tensor): Targets. (N, S) or (sum(target_lengths)).
             input_lengths (torch.Tensor): (N) or (). Lengths of the inputs (must each be <= T)
             target_lengths (torch.Tensor): (N) or (). Lengths of the targets.
@@ -72,69 +77,19 @@ class CTCLoss(nn.Module):
         Returns:
             torch.Tensor: Loss value.
         '''
-        if self.alpha_smooth:
-            probs = smooth_probs(probs, self.alpha_smooth)
-
-        probs = probs.log()
-        loss = nn.functional.ctc_loss(
-            probs,
-            targets,
-            input_lengths,
-            target_lengths,
-            self.blank,
-            self.reduction,
-            self.zero_infinity,
-        )
-
-        return loss
-
-"""
-# original rewi loss
-import math
-import torch.nn.functional as F
-
-class CTCLoss(nn.Module):
-
-    #Expects LOGITS of shape (T, N, C) or (T, C).
-    #Applies log_softmax internally. Optional prob-smoothing done in log-space.
-    
-    def __init__(
-        self,
-        alpha_smooth: float = 0.0,   # start with 0.0; you can re-enable later
-        blank: int = 0,
-        reduction: str = 'mean',
-        zero_infinity: bool = True,  # safer to avoid NaNs when lengths mismatch
-    ) -> None:
-        super().__init__()
-        self.alpha_smooth = float(alpha_smooth)
-        self.blank = blank
-        self.reduction = reduction
-        self.zero_infinity = zero_infinity
-
-    def forward(
-        self,
-        logits: torch.Tensor,        # (T, N, C) or (T, C) — LOGITS, not probs
-        targets: torch.Tensor,
-        input_lengths: torch.Tensor,
-        target_lengths: torch.Tensor,
-    ) -> torch.Tensor:
-
-        # 1) Stable log-softmax
         log_probs = F.log_softmax(logits, dim=-1)
 
-        # 2) Optional smoothing in log-space:
-        # log( (1-a)*p + a*1/V ) = logaddexp( log(1-a)+log p , log(a)+log(1/V) )
-        if self.alpha_smooth > 0.0:
+        if self.alpha_smooth and self.alpha_smooth > 0.0:
             V = log_probs.size(-1)
             log_one_minus_a = math.log1p(-self.alpha_smooth)
             log_a = math.log(self.alpha_smooth)
             log_unif = -math.log(V)
+            uniform_const = torch.tensor(log_a + log_unif, device=log_probs.device, dtype=log_probs.dtype)
             log_probs = torch.logaddexp(
                 log_probs + log_one_minus_a,
-                log_a + log_unif
+                uniform_const,
             )
 
-        # 3) Torch CTC expects (T, N, C)
         loss = F.ctc_loss(
             log_probs,
             targets,
@@ -144,5 +99,6 @@ class CTCLoss(nn.Module):
             reduction=self.reduction,
             zero_infinity=self.zero_infinity,
         )
-        return loss"""
+
+        return loss
 

@@ -36,6 +36,7 @@ from rewi.dataset_concat import ConcatWordDataset, concat_collate
 from rewi.loss import CTCLoss
 from rewi.manager import RunManager
 from rewi.model import BaseModel, build_encoder
+from rewi.model import DualHeadModel
 from rewi.utils import seed_everything, seed_worker
 
 # LM-specific modules
@@ -46,8 +47,10 @@ from rewi.dataset.lm_collate import lm_collate
 # Training loops and utilities
 from rewi.training import (
     train_one_epoch,
+    train_one_epoch_hybrid,
     train_one_epoch_lm,
     test,
+    test_hybrid,
     test_lm,
     maybe_log_trainability,
     maybe_log_optimizer_coverage,
@@ -129,15 +132,41 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             freeze_encoder=bool(getattr(cfgs, "freeze", True)),
         ).to(cfgs.device)
     else:
-        model = BaseModel(
-            cfgs.arch_en,
-            cfgs.arch_de,
-            cfgs.num_channel,
-            cfgs.vocab_dec,
-            cfgs.len_seq,
-            use_gated_attention=getattr(cfgs, "use_gated_attention", False),
-            gating_type=getattr(cfgs, "gating_type", "elementwise"),
-        ).to(cfgs.device)
+        dual = getattr(cfgs, "dual_head", {}) or {}
+        dual_enabled = bool(dual.get("enabled", False))
+
+        if dual_enabled:
+            if getattr(cfgs, "use_bpe", False):
+                raise ValueError("dual_head.enabled currently supports character mode only (use_bpe must be false)")
+
+            vocab_ctc = int(len(cfgs.categories))
+            arch_ctc = str(dual.get("arch_ctc", "linear"))
+
+            model = DualHeadModel(
+                arch_en=cfgs.arch_en,
+                arch_ar=cfgs.arch_de,
+                arch_ctc=arch_ctc,
+                in_chan=cfgs.num_channel,
+                vocab_ar=cfgs.vocab_dec,
+                vocab_ctc=vocab_ctc,
+                len_seq=cfgs.len_seq,
+                use_gated_attention=getattr(cfgs, "use_gated_attention", False),
+                gating_type=getattr(cfgs, "gating_type", "elementwise"),
+            ).to(cfgs.device)
+            cfgs.DUAL_HEAD = True
+            cfgs.vocab_ctc = vocab_ctc
+            cfgs.dual_head_arch_ctc = arch_ctc
+        else:
+            model = BaseModel(
+                cfgs.arch_en,
+                cfgs.arch_de,
+                cfgs.num_channel,
+                cfgs.vocab_dec,
+                cfgs.len_seq,
+                use_gated_attention=getattr(cfgs, "use_gated_attention", False),
+                gating_type=getattr(cfgs, "gating_type", "elementwise"),
+            ).to(cfgs.device)
+            cfgs.DUAL_HEAD = False
 
         # Optional pretrained decoder initialization
         pretrained_dec_ckpt = getattr(cfgs, "pretrained_decoder_checkpoint", None)
@@ -468,10 +497,27 @@ def run_training_loop(
     epoch_start, AR_MODE, LM_MODE
 ):
     """Main training loop."""
+    dual = getattr(cfgs, "dual_head", {}) or {}
+    dual_enabled = bool(dual.get("enabled", False)) and bool(AR_MODE) and not bool(LM_MODE)
+
     fn_loss = (
         nn.CrossEntropyLoss(ignore_index=cfgs.PAD_ID, label_smoothing=0.1)
         if AR_MODE else CTCLoss()
     )
+
+    fn_loss_ar = None
+    fn_loss_ctc = None
+    lambda_ar = 1.0
+    lambda_ctc = 0.0
+    lambda_ctc_schedule = None
+    loss_balance_mode = "sum"
+    if dual_enabled:
+        fn_loss_ar = nn.CrossEntropyLoss(ignore_index=cfgs.PAD_ID, label_smoothing=0.1)
+        fn_loss_ctc = CTCLoss()
+        lambda_ar = float(dual.get("lambda_ar", 1.0))
+        lambda_ctc = float(dual.get("lambda_ctc", 0.3))
+        lambda_ctc_schedule = dual.get("lambda_ctc_schedule", None)
+        loss_balance_mode = str(dual.get("loss_balance", "sum"))
 
     # LM state tracking helpers
     if LM_MODE:
@@ -500,13 +546,46 @@ def run_training_loop(
         if LM_MODE:
             train_one_epoch_lm(dataloader_train, model, optimizer, scaler, lr_scheduler, manager, e)
         else:
-            train_one_epoch(dataloader_train, model, fn_loss, optimizer, scaler, lr_scheduler, manager, e)
+            if dual_enabled:
+                train_one_epoch_hybrid(
+                    dataloader_train,
+                    model,
+                    fn_loss_ar,
+                    fn_loss_ctc,
+                    lambda_ar=lambda_ar,
+                    lambda_ctc=lambda_ctc,
+                    lambda_ctc_schedule=lambda_ctc_schedule,
+                    loss_balance_mode=loss_balance_mode,
+                    optimizer=optimizer,
+                    scaler=scaler,
+                    lr_scheduler=lr_scheduler,
+                    man=manager,
+                    epoch=e,
+                )
+            else:
+                train_one_epoch(dataloader_train, model, fn_loss, optimizer, scaler, lr_scheduler, manager, e)
 
         # Evaluate
         if LM_MODE:
             test_lm(dataloader_test, model, manager, e)
         else:
-            test(dataloader_test, model, fn_loss, manager, ctc_decoder, e, tokenizer=tok)
+            if dual_enabled:
+                test_hybrid(
+                    dataloader_test,
+                    model,
+                    fn_loss_ar,
+                    fn_loss_ctc,
+                    lambda_ar=lambda_ar,
+                    lambda_ctc=lambda_ctc,
+                    lambda_ctc_schedule=lambda_ctc_schedule,
+                    loss_balance_mode=loss_balance_mode,
+                    man=manager,
+                    ctc_decoder=ctc_decoder,
+                    epoch=e,
+                    tokenizer=tok,
+                )
+            else:
+                test(dataloader_test, model, fn_loss, manager, ctc_decoder, e, tokenizer=tok)
 
         # Save checkpoints
         _save_checkpoints(cfgs, model, optimizer, lr_scheduler, manager, e)
@@ -522,10 +601,39 @@ def _run_test_epoch(cfgs, model, fn_loss, manager, dataloader_test, ctc_decoder,
     if LM_MODE:
         test_lm(dataloader_test, model, manager, 0)
     else:
-        test(
-            dataloader_test, model, fn_loss, manager, ctc_decoder, 0,
-            tokenizer=tok, force_eval=True, qual_cfg=qual_cfg,
-        )
+        dual = getattr(cfgs, "dual_head", {}) or {}
+        dual_enabled = bool(getattr(cfgs, "DUAL_HEAD", False)) or bool(dual.get("enabled", False))
+
+        if dual_enabled:
+            # In test mode we must call the dual-head evaluator, otherwise the CTC head
+            # (and any rescoring logic) is never exercised.
+            fn_loss_ar = nn.CrossEntropyLoss(ignore_index=cfgs.PAD_ID, label_smoothing=0.1)
+            fn_loss_ctc = CTCLoss()
+            lambda_ar = float(dual.get("lambda_ar", 1.0))
+            lambda_ctc = float(dual.get("lambda_ctc", 0.3))
+            lambda_ctc_schedule = dual.get("lambda_ctc_schedule", None)
+            loss_balance_mode = str(dual.get("loss_balance", "sum"))
+
+            test_hybrid(
+                dataloader_test,
+                model,
+                fn_loss_ar,
+                fn_loss_ctc,
+                lambda_ar=lambda_ar,
+                lambda_ctc=lambda_ctc,
+                lambda_ctc_schedule=lambda_ctc_schedule,
+                loss_balance_mode=loss_balance_mode,
+                man=manager,
+                ctc_decoder=ctc_decoder,
+                epoch=0,
+                tokenizer=tok,
+                force_eval=True,
+            )
+        else:
+            test(
+                dataloader_test, model, fn_loss, manager, ctc_decoder, 0,
+                tokenizer=tok, force_eval=True, qual_cfg=qual_cfg,
+            )
     manager.summarize_evaluation()
 
 
@@ -628,14 +736,29 @@ def main(cfgs: argparse.Namespace) -> None:
     AR_MODE = cfgs.arch_de in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
     LM_MODE = cfgs.arch_de in {"byt5_small", "t5-small"}
 
+    # Attach derived flags for debug-friendly logging
+    cfgs.AR_MODE = bool(AR_MODE)
+    cfgs.LM_MODE = bool(LM_MODE)
+
     # Set up tokenizer
     tok, vocab_dec, PAD_ID, BOS_ID, EOS_ID = setup_tokenizer(cfgs)
 
     # Attach to cfgs
-    cfgs.AR_MODE = AR_MODE
     cfgs.PAD_ID, cfgs.BOS_ID, cfgs.EOS_ID = PAD_ID, BOS_ID, EOS_ID
     cfgs.vocab_dec = vocab_dec
     cfgs.tokenizer_obj = tok
+
+    # Regime string (used by RunManager for summary logs)
+    dual = getattr(cfgs, "dual_head", {}) or {}
+    dual_enabled_cfg = bool(dual.get("enabled", False))
+    if LM_MODE:
+        cfgs.TRAINING_REGIME = "lm"
+    elif AR_MODE and dual_enabled_cfg:
+        cfgs.TRAINING_REGIME = "hybrid_ar_ctc"
+    elif AR_MODE:
+        cfgs.TRAINING_REGIME = "ar_only"
+    else:
+        cfgs.TRAINING_REGIME = "ctc_only"
 
     # Initialize
     manager = RunManager(cfgs)
