@@ -1,0 +1,29 @@
+# Example YAML showing lambda_ctc scheduling and loss balancing
+# Copy from train_element_word.yaml and add these dual_head extensions
+
+dual_head:
+  enabled: true
+  arch_ctc: linear
+  lambda_ar: 1.0
+  lambda_ctc: 0.3  # This is the base/max value; schedule will modulate it
+  
+  # Optional: schedule lambda_ctc over epochs
+  # "linear" warmup: ramp from 0 to max over warmup_epochs, then stay at max
+  lambda_ctc_schedule:
+    enabled: true       # enable/disable schedule (if false, uses static lambda_ctc)
+    type: linear
+    warmup_epochs: 10   # epochs 0-9: lambda_ctc goes 0 → 0.3
+    max: 0.3            # epoch 10+: lambda_ctc stays at 0.3
+    # Optional decay (not used here):
+    # decay_start: 20   # start decay at epoch 20
+    # min: 0.1          # decay to 0.1
+    # decay_epochs: 10  # decay over 10 epochs
+  
+  # Optional: loss balancing mode
+  # "sum" (default): loss = lambda_ar*loss_ar + lambda_ctc*loss_ctc
+  # "normalize": loss = (lambda_ar*loss_ar + lambda_ctc*loss_ctc) / (lambda_ar + lambda_ctc)
+  # "convex": loss = (1-alpha)*loss_ar + alpha*loss_ctc, where alpha=lambda_ctc (clamped to [0,1])
+  loss_balance: sum
+
+# All other settings from train_element_word.yaml...
+# (copy the full base config here)

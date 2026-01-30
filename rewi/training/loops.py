@@ -5,10 +5,12 @@ Training and evaluation loop implementations.
 import contextlib
 import json
 import os
+import re
 from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from loguru import logger
 from torch.utils.data import DataLoader
 
@@ -26,6 +28,7 @@ from rewi.ctc_decoder import BestPath
 from rewi.evaluate import evaluate
 from rewi.manager import RunManager
 from rewi.model import BaseModel
+from rewi.model.dual_head import DualHeadModel
 from rewi.training.utils import build_ar_batch, maybe_log_trainability
 from rewi.visualize import visualize
 
@@ -243,6 +246,111 @@ def train_one_epoch(
         man.save_checkpoint(model.state_dict(), optimizer.state_dict(), lr_scheduler.state_dict())
 
 
+def train_one_epoch_hybrid(
+    dataloader: DataLoader,
+    model: DualHeadModel,
+    fn_loss_ar: nn.Module,
+    fn_loss_ctc: nn.Module,
+    *,
+    lambda_ar: float,
+    lambda_ctc: float,
+    lambda_ctc_schedule: dict | None = None,
+    loss_balance_mode: str = "sum",
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.cuda.amp.GradScaler,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
+    man: RunManager,
+    epoch: int,
+) -> None:
+    """Train dual-head (AR+CTC) model for one epoch."""
+    from .lambda_schedule import compute_lambda_ctc, balance_loss
+
+    # Compute effective lambda_ctc for this epoch
+    lambda_ctc_eff = compute_lambda_ctc(epoch, lambda_ctc_schedule, lambda_ctc)
+
+    man.initialize_epoch(epoch, len(dataloader), False)
+    model.train()
+
+    PAD_ID = man.cfgs.PAD_ID
+    BOS_ID = man.cfgs.BOS_ID
+    EOS_ID = man.cfgs.EOS_ID
+
+    # Log schedule info at epoch start
+    if epoch == 0 or (lambda_ctc_schedule and epoch % 5 == 0):
+        man.log(
+            f"[HybridSchedule] epoch={epoch} | lambda_ar={lambda_ar:.4f} | lambda_ctc_eff={lambda_ctc_eff:.4f} | balance_mode={loss_balance_mode}"
+        )
+
+    maybe_log_trainability(man, model, epoch=epoch, where="train_one_epoch_hybrid")
+
+    for idx, (x, y, len_x, len_y) in enumerate(dataloader):
+        x = x.to(man.cfgs.device)
+        y = y.to(man.cfgs.device)
+        len_x = len_x.to(man.cfgs.device)
+        len_y = len_y.to(man.cfgs.device)
+
+        optimizer.zero_grad(set_to_none=True)
+
+        use_amp = bool(x.is_cuda)
+        with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+            y_inp, y_tgt = build_ar_batch(
+                y, len_y, PAD_ID, BOS_ID, EOS_ID, device=man.cfgs.device
+            )
+            out = model(x, in_lengths=len_x, y_inp=y_inp, return_ar=True, return_ctc=True)
+
+            ar_logits = out["ar_logits"]
+            ctc_logits = out["ctc_logits"].float()  # keep ctc loss in fp32 for stability
+            enc_lengths = out["enc_lengths"]
+
+            loss_ar = fn_loss_ar(
+                ar_logits.reshape(-1, ar_logits.size(-1)),
+                y_tgt.reshape(-1),
+            )
+            loss_ctc = fn_loss_ctc(
+                ctc_logits.permute((1, 0, 2)),
+                y,
+                enc_lengths,
+                len_y,
+            )
+
+            loss = balance_loss(
+                float(loss_ar.item()),
+                float(loss_ctc.item()),
+                lambda_ar,
+                lambda_ctc_eff,
+                loss_balance_mode,
+            )
+            loss = torch.tensor(loss, device=ar_logits.device, requires_grad=True)
+            # Recompute with actual tensors for backward
+            loss = lambda_ar * loss_ar + lambda_ctc_eff * loss_ctc
+            if loss_balance_mode == "normalize":
+                loss = loss / (lambda_ar + lambda_ctc_eff)
+            elif loss_balance_mode == "convex":
+                alpha = max(0.0, min(1.0, lambda_ctc_eff))
+                loss = (1.0 - alpha) * loss_ar + alpha * loss_ctc
+
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+        scaler.step(optimizer)
+        scaler.update()
+        lr_scheduler.step()
+
+        man.update_iteration(
+            idx,
+            float(loss.item()),
+            lr_scheduler.get_last_lr()[0],
+            loss_ar=float(loss_ar.item()),
+            loss_ctc=float(loss_ctc.item()),
+            lambda_ctc_eff=float(lambda_ctc_eff),
+        )
+
+    man.summarize_epoch()
+
+    if not bool(getattr(man.cfgs, "save_best_only", False)) and man.check_step(epoch + 1, 'save'):
+        man.save_checkpoint(model.state_dict(), optimizer.state_dict(), lr_scheduler.state_dict())
+
+
 def test(
     dataloader: DataLoader,
     model: BaseModel,
@@ -418,7 +526,340 @@ def test(
         if not isinstance(fn_loss, nn.CrossEntropyLoss):
             visualize(preds, labels, man.cfgs.categories[1:], man.dir_vis, epoch)
         results_eval = evaluate(preds, labels)
-        man.update_evaluation(results_eval, preds[:20], labels[:20])
+
+
+def test_hybrid(
+    dataloader: DataLoader,
+    model: DualHeadModel,
+    fn_loss_ar: nn.Module,
+    fn_loss_ctc: nn.Module,
+    *,
+    lambda_ar: float,
+    lambda_ctc: float,
+    lambda_ctc_schedule: dict | None = None,
+    loss_balance_mode: str = "sum",
+    man: RunManager,
+    ctc_decoder: BestPath,
+    epoch: int,
+    tokenizer=None,
+    force_eval: bool = False,
+) -> None:
+    """Evaluate dual-head (AR+CTC) model.
+
+    - Logs total hybrid loss
+    - Computes greedy AR predictions and greedy CTC predictions
+    - Writes AR metrics under key='evaluation' (for best checkpoint selection)
+    - Writes CTC metrics under key='evaluation_ctc'
+    """
+    from .lambda_schedule import compute_lambda_ctc, balance_loss
+
+    # Compute effective lambda_ctc for this epoch
+    lambda_ctc_eff = compute_lambda_ctc(epoch, lambda_ctc_schedule, lambda_ctc)
+
+    man.initialize_epoch(epoch, len(dataloader), True)
+    model.eval()
+
+    PAD_ID = man.cfgs.PAD_ID
+    BOS_ID = man.cfgs.BOS_ID
+    EOS_ID = man.cfgs.EOS_ID
+
+    do_eval = force_eval or man.check_step(epoch + 1, 'eval')
+
+    preds_ar: list[str] = []
+    labels_ar: list[str] = []
+    preds_ctc: list[str] = []
+    labels_ctc: list[str] = []
+
+    rescore_cfg = getattr(man.cfgs, "rescore_ctc", {}) or {}
+    rescore_enabled = bool(rescore_cfg.get("enabled", False))
+    beam_size = int(rescore_cfg.get("beam_size", 4))
+    max_len_override = rescore_cfg.get("max_len", None)
+    length_penalty = float(rescore_cfg.get("length_penalty", 0.0))
+    beta_ar = float(rescore_cfg.get("beta_ar", 1.0))
+    betas_ctc = rescore_cfg.get("betas_ctc", [0.3])
+    export_enabled = bool(rescore_cfg.get("export", True))
+    export_dirname = str(rescore_cfg.get("export_dirname", "exports_rescore_ctc"))
+
+    try:
+        betas_ctc = [float(b) for b in (betas_ctc or [])]
+    except Exception:
+        betas_ctc = [0.3]
+
+    preds_rescore: dict[float, list[str]] = {b: [] for b in betas_ctc}
+    labels_rescore: dict[float, list[str]] = {b: [] for b in betas_ctc}
+
+    def _sanitize_beta(x: float) -> str:
+        s = f"{x:.4f}"
+        return re.sub(r"[^0-9A-Za-z_.-]", "_", s)
+
+    def _decode_ids(ids: list[int]) -> str:
+        if tokenizer is not None:
+            return tokenizer.decode(ids)
+        chars = getattr(man.cfgs, 'categories', None)
+        if not chars:
+            return ""
+        return ''.join(chars[i] for i in ids if 0 <= i < len(chars) and i != 0)
+
+    def _ctc_logprob_for_target(ctc_logits_TV: torch.Tensor, target_ids: list[int], T: int) -> float:
+        # target_ids must not include blanks; filter any invalid IDs.
+        tgt = [int(t) for t in target_ids if int(t) > 0]
+        if len(tgt) == 0:
+            return 0.0
+        if len(tgt) > int(T):
+            return float("-inf")
+
+        log_probs = F.log_softmax(ctc_logits_TV[:T], dim=-1)  # (T, V)
+        log_probs = log_probs.unsqueeze(1)  # (T, 1, V)
+        targets = torch.tensor(tgt, dtype=torch.long, device=ctc_logits_TV.device)
+        input_lengths = torch.tensor([int(T)], dtype=torch.long, device=ctc_logits_TV.device)
+        target_lengths = torch.tensor([int(len(tgt))], dtype=torch.long, device=ctc_logits_TV.device)
+
+        # Use sum reduction for a proper total log-prob (up to constant factors).
+        nll = F.ctc_loss(
+            log_probs,
+            targets,
+            input_lengths,
+            target_lengths,
+            blank=0,
+            reduction="sum",
+            zero_infinity=True,
+        )
+        return float((-nll).detach().cpu().item())
+
+    def _beam_search_one(mem_1TD: torch.Tensor, enc_pad_1T: torch.Tensor, *, max_len: int) -> list[tuple[list[int], float]]:
+        # Returns N-best (token_ids_without_BOS/EOS/PAD), ar_logprob
+        # Beam state keeps seq WITH BOS for decoding.
+        beams: list[tuple[list[int], float, bool]] = [([int(BOS_ID)], 0.0, False)]
+
+        for _step in range(max_len):
+            all_cands: list[tuple[list[int], float, bool]] = []
+            for seq, score, ended in beams:
+                if ended:
+                    all_cands.append((seq, score, True))
+                    continue
+
+                y_inp = torch.tensor([seq], dtype=torch.long, device=mem_1TD.device)
+                logits = model.decoder(y_inp, mem_1TD, enc_pad_1T)
+                next_logprobs = F.log_softmax(logits[:, -1, :], dim=-1).squeeze(0)
+
+                k = min(beam_size, int(next_logprobs.numel()))
+                topv, topi = torch.topk(next_logprobs, k=k, dim=-1)
+                for lp, tid in zip(topv.tolist(), topi.tolist()):
+                    tid = int(tid)
+                    if tid == int(PAD_ID):
+                        continue
+                    new_seq = seq + [tid]
+                    new_score = float(score + float(lp))
+                    new_ended = (tid == int(EOS_ID))
+                    all_cands.append((new_seq, new_score, new_ended))
+
+            # prune
+            def _rank_key(item: tuple[list[int], float, bool]) -> float:
+                seq, score, _ended = item
+                # exclude BOS for length
+                L = max(1, len(seq) - 1)
+                if length_penalty > 0:
+                    return score / (L ** length_penalty)
+                return score
+
+            all_cands.sort(key=_rank_key, reverse=True)
+            beams = all_cands[:beam_size]
+            if all(e for (_s, _sc, e) in beams):
+                break
+
+        # finalize
+        out: list[tuple[list[int], float]] = []
+        for seq, score, _ended in beams:
+            # strip BOS, stop at EOS, remove PAD
+            ids = []
+            for t in seq[1:]:
+                if t == int(EOS_ID):
+                    break
+                if t == int(PAD_ID):
+                    continue
+                ids.append(int(t))
+            out.append((ids, float(score)))
+        # sort by same rank key used for pruning
+        def _final_rank(item: tuple[list[int], float]) -> float:
+            ids, score = item
+            L = max(1, len(ids))
+            return score / (L ** length_penalty) if length_penalty > 0 else score
+        out.sort(key=_final_rank, reverse=True)
+        return out
+
+    with torch.no_grad():
+        for idx, (x, y, len_x, len_y) in enumerate(dataloader):
+            x = x.to(man.cfgs.device)
+            y = y.to(man.cfgs.device)
+            len_x = len_x.to(man.cfgs.device)
+            len_y = len_y.to(man.cfgs.device)
+
+            # Encode once; reuse memory for greedy decode/beam search
+            use_amp = bool(x.is_cuda)
+            with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
+                feats, enc_pad, enc_lengths = model._encode_with_mask(x, len_x)
+
+                mem = feats
+                if getattr(model, "mem_proj", None) is not None:
+                    mem = model.mem_proj(mem)
+
+                # teacher-forced AR logits for loss only
+                y_inp, y_tgt = build_ar_batch(
+                    y, len_y, PAD_ID, BOS_ID, EOS_ID, device=man.cfgs.device
+                )
+                ar_logits = model.decoder(y_inp, mem, enc_pad)
+
+                # CTC logits from the per-timestep head
+                ctc_logits = model.ctc_head(feats).float()
+
+                loss_ar = fn_loss_ar(
+                    ar_logits.reshape(-1, ar_logits.size(-1)),
+                    y_tgt.reshape(-1),
+                )
+                loss_ctc = fn_loss_ctc(
+                    ctc_logits.permute((1, 0, 2)),
+                    y,
+                    enc_lengths,
+                    len_y,
+                )
+                loss = lambda_ar * loss_ar + lambda_ctc_eff * loss_ctc
+                if loss_balance_mode == "normalize":
+                    loss = loss / (lambda_ar + lambda_ctc_eff)
+                elif loss_balance_mode == "convex":
+                    alpha = max(0.0, min(1.0, lambda_ctc_eff))
+                    loss = (1.0 - alpha) * loss_ar + alpha * loss_ctc
+
+            man.update_iteration(
+                idx,
+                float(loss.item()),
+                lr=0.0,
+                loss_ar=float(loss_ar.item()),
+                loss_ctc=float(loss_ctc.item()),
+                lambda_ctc_eff=float(lambda_ctc_eff),
+            )
+
+            if not do_eval:
+                continue
+
+            # CTC greedy
+            for logit, Lx, label, Ly in zip(ctc_logits.detach().cpu(), enc_lengths.detach().cpu(), y.detach().cpu(), len_y.detach().cpu()):
+                preds_ctc.append(ctc_decoder.decode(logit[: int(Lx)]))
+                labels_ctc.append(ctc_decoder.decode(label[: int(Ly)], True))
+
+            # Convert encoder outputs to fp32 for greedy/beam decoding (avoid dtype mismatch)
+            mem = mem.float()
+            ctc_logits = ctc_logits.float()
+
+            # AR greedy
+            B = x.size(0)
+            max_len = int(len_y.max().item()) + 2
+            if max_len_override is not None:
+                try:
+                    max_len = int(max_len_override)
+                except Exception:
+                    pass
+
+            # AR greedy decode from cached encoder memory
+            y_gen = torch.full((B, 1), BOS_ID, dtype=torch.long, device=mem.device)
+            for _ in range(max_len):
+                step_logits = model.decoder(y_gen, mem, enc_pad)
+                nxt = step_logits[:, -1, :].argmax(-1, keepdim=True)
+                y_gen = torch.cat([y_gen, nxt], dim=1)
+
+            y_gen = y_gen.detach().cpu().tolist()
+            y_cpu = y.detach().cpu()
+            len_y_cpu = len_y.detach().cpu().tolist()
+
+            for b in range(B):
+                ids_pred = y_gen[b][1:]
+                seq = []
+                for t in ids_pred:
+                    if t == EOS_ID:
+                        break
+                    if t == PAD_ID:
+                        continue
+                    seq.append(int(t))
+                preds_ar.append(_decode_ids(seq))
+
+                L = int(len_y_cpu[b])
+                lab_ids = y_cpu[b, :L].tolist() if y_cpu.dim() == 2 else []
+                labels_ar.append(_decode_ids([int(t) for t in lab_ids if int(t) != int(PAD_ID)]))
+
+            # Optional: AR beam + CTC rescoring
+            if rescore_enabled and betas_ctc:
+                for b in range(B):
+                    mem_b = mem[b:b+1]
+                    enc_pad_b = enc_pad[b:b+1]
+                    T_b = int(enc_lengths[b].detach().cpu().item())
+                    ctc_b = ctc_logits[b]
+
+                    nbest = _beam_search_one(mem_b, enc_pad_b, max_len=max_len)
+                    if not nbest:
+                        # fallback to greedy seq already computed
+                        nbest = [([], float("-inf"))]
+
+                    # Precompute CTC logprobs for candidates
+                    cand_ctc_lp: list[float] = []
+                    for cand_ids, _ar_lp in nbest:
+                        # CTC targets are character IDs, no BOS/EOS/PAD, no blanks
+                        cand_ids_ctc = [int(t) for t in cand_ids if int(t) != int(PAD_ID) and int(t) != int(EOS_ID) and int(t) != int(BOS_ID) and int(t) > 0]
+                        cand_ctc_lp.append(_ctc_logprob_for_target(ctc_b, cand_ids_ctc, T=T_b))
+
+                    # Label once
+                    L = int(len_y_cpu[b])
+                    lab_ids = y_cpu[b, :L].tolist() if y_cpu.dim() == 2 else []
+                    lab_str = _decode_ids([int(t) for t in lab_ids if int(t) != int(PAD_ID)])
+
+                    for beta_ctc in betas_ctc:
+                        best_i = 0
+                        best_score = float("-inf")
+                        for i, ((cand_ids, ar_lp), ctc_lp) in enumerate(zip(nbest, cand_ctc_lp)):
+                            Lcand = max(1, len(cand_ids))
+                            ar_lp_adj = ar_lp / (Lcand ** length_penalty) if length_penalty > 0 else ar_lp
+                            score = beta_ar * ar_lp_adj + float(beta_ctc) * float(ctc_lp)
+                            if score > best_score:
+                                best_score = score
+                                best_i = i
+
+                        best_ids = nbest[best_i][0]
+                        preds_rescore[float(beta_ctc)].append(_decode_ids(best_ids))
+                        labels_rescore[float(beta_ctc)].append(lab_str)
+
+    man.summarize_epoch()
+
+    if do_eval:
+        results_ar = evaluate(preds_ar, labels_ar)
+        results_ctc = evaluate(preds_ctc, labels_ctc)
+        man.update_evaluation(results_ar, preds_ar[:20], labels_ar[:20], key='evaluation', label='AR-greedy')
+        man.update_evaluation(results_ctc, preds_ctc[:20], labels_ctc[:20], key='evaluation_ctc', label='CTC-bestpath')
+
+        if rescore_enabled and betas_ctc:
+            for beta_ctc in betas_ctc:
+                preds_b = preds_rescore.get(float(beta_ctc), [])
+                labels_b = labels_rescore.get(float(beta_ctc), [])
+                if not preds_b:
+                    continue
+                res = evaluate(preds_b, labels_b)
+                beta_tag = _sanitize_beta(float(beta_ctc))
+                key = f"evaluation_rescore_ctc_beta{beta_tag}"
+                man.update_evaluation(
+                    res,
+                    preds_b[:20],
+                    labels_b[:20],
+                    key=key,
+                    label=f"AR-beam+CTC(beta_ctc={beta_ctc})",
+                )
+
+                if export_enabled:
+                    export_dir = os.path.join(man.cfgs.dir_work, export_dirname)
+                    os.makedirs(export_dir, exist_ok=True)
+                    export_path = os.path.join(
+                        export_dir,
+                        f"val_full_fold{man.cfgs.idx_fold}_beta{beta_tag}.json",
+                    )
+                    with open(export_path, "w", encoding="utf-8") as f:
+                        json.dump({"predictions": preds_b, "labels": labels_b}, f, ensure_ascii=False)
+                    logger.info("Exported rescored predictions to {}", export_path)
 
 
 def _do_qualitative_capture(
