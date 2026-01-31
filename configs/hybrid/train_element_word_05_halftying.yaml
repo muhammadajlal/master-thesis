@@ -2,12 +2,16 @@ dual_head:
   enabled: true
   arch_ctc: linear
   lambda_ar: 1.0
-  lambda_ctc: 0.5  # base value (will be overridden by schedule)
+  lambda_ctc: 0.5  # base value (will be overridden by schedule if enabled)
+  tie:
+    ctc_to_ar_outproj: false  # tie CTC outproj to AR outproj
+    ar_emb_outproj: true    # tie AR embedding outproj to AR outproj
+    ctc_input_space: "dec"  # "enc" or "dec" (dec reuses mem_proj if dims mismatch)
   lambda_ctc_schedule:
     enabled: false         # enable/disable schedule (if false, uses static lambda_ctc)
     type: linear          # schedule type (linear ramp/decay over epochs), not CTC head architecture
     warmup_epochs: 0      # no warmup, start at max immediately
-    max: 0.9              # high CTC early
+    max: 0.6              # high CTC early
     decay_start: 50       # start decay at epoch 50
     min: 0.1              # decay to low by epoch 150
     decay_epochs: 100     # decay over 100 epochs (50→150)
@@ -26,7 +30,7 @@ ctc_decoder: best_path
 device: cuda
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_hybrid_05_new
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_hybrid_05_ar_emb_outproj
 
 epoch: 300
 # We also can set epoch_warmup to 10 for more quick debugging.
@@ -45,6 +49,7 @@ num_worker: 16
 seed: 42
 size_batch: 64
 test: false
+use_amp: true # whether to use automatic mixed precision (AMP) training, default true
 
 tokenizer:
   type: sentencepiece

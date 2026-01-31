@@ -1,8 +1,13 @@
+# Dual-head configuration for hybrid CTC/Attention model
 dual_head:
-  enabled: true
+  enabled: false
   arch_ctc: linear
   lambda_ar: 1.0
-  lambda_ctc: 0.6  # base value (will be overridden by schedule if enabled)
+  lambda_ctc: 0.5  # base value (will be overridden by schedule if enabled)
+  tie:
+    ctc_to_ar_outproj: false  # tie CTC outproj to AR outproj
+    ar_emb_outproj: false    # tie AR embedding outproj to AR outproj
+    ctc_input_space: "dec"  # "enc" or "dec" (dec reuses mem_proj if dims mismatch)
   lambda_ctc_schedule:
     enabled: false         # enable/disable schedule (if false, uses static lambda_ctc)
     type: linear          # schedule type (linear ramp/decay over epochs), not CTC head architecture
@@ -15,6 +20,16 @@ dual_head:
                           # "normalize": loss = (λ_ar·loss_ar + λ_ctc·loss_ctc) / (λ_ar + λ_ctc) (keeps gradients stable across λ sweeps)
                           # "convex": loss = (1-α)·loss_ar + α·loss_ctc where α = clamp(λ_ctc, 0, 1)
 
+# AR-only + decoder-side CTC (attention mode)
+decoder_side_ctc:
+  enabled: true
+  mode: attention
+  layers: [1, 2, 3]
+  lambda: 0.6
+  nhead: 4
+  layernorm: true
+  
+# Model architecture and training settings
 arch_de: 'ar_transformer_s' # decoder architecture
 freeze_decoder_epochs: 0 # Ablation: freeze AR decoder for first N epochs (0 = train end-to-end from start)
 pretrained_decoder_checkpoint: null # path to pretrained AR decoder checkpoint to load
@@ -26,7 +41,7 @@ ctc_decoder: best_path
 device: cuda
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_hybrid_06_new
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_AR-only_decoder-side-CTC_06
 
 epoch: 300
 # We also can set epoch_warmup to 10 for more quick debugging.
@@ -45,6 +60,8 @@ num_worker: 16
 seed: 42
 size_batch: 64
 test: false
+use_amp: true # whether to use automatic mixed precision (AMP) training, default true
+
 
 tokenizer:
   type: sentencepiece

@@ -293,6 +293,7 @@ class ARDecoder(nn.Module):
     ):
         super().__init__()
         self.d_model = d_model     
+        self.nhead = nhead
         self.num_layers = layers   # to use in initialization
         self.emb = nn.Embedding(vocab_size, d_model)
         self.use_gated_attention = use_gated_attention
@@ -408,7 +409,22 @@ class ARDecoder(nn.Module):
         if self.proj.bias is not None:
             nn.init.zeros_(self.proj.bias)
 
-    def forward(self, y_inp, memory, mem_pad_mask=None):
+    def forward(self, y_inp, memory, mem_pad_mask=None, *, return_layer_states: bool = False):
+        """Run AR decoder.
+
+        Args:
+            y_inp: (B, N) token IDs with <bos> at position 0.
+            memory: (B, Tm, D) encoder memory in decoder space.
+            mem_pad_mask: (B, Tm) bool mask (True = pad).
+            return_layer_states: if True, additionally returns intermediate hidden
+                states after each decoder layer.
+
+        Returns:
+            If return_layer_states=False (default): logits (B, N, V)
+            If return_layer_states=True: dict with keys:
+                - logits: (B, N, V)
+                - layer_states: list[Tensor] length=num_layers, each (B, N, D)
+        """
         # y_inp: (B, N) with <bos> at 0; memory: (B, Tm, D)
         tgt = self.emb(y_inp)  # (B, N, D)
         N = y_inp.size(1)
@@ -419,10 +435,28 @@ class ARDecoder(nn.Module):
             diagonal=1,
         )
 
-        h = self.dec(
-            tgt,
-            memory,
-            tgt_mask=causal,
-            memory_key_padding_mask=mem_pad_mask,
-        )
-        return self.proj(h)  # (B, N, V)
+        if not return_layer_states:
+            h = self.dec(
+                tgt,
+                memory,
+                tgt_mask=causal,
+                memory_key_padding_mask=mem_pad_mask,
+            )
+            return self.proj(h)  # (B, N, V)
+
+        x = tgt
+        layer_states: list[torch.Tensor] = []
+        for layer in self.dec.layers:
+            x = layer(
+                x,
+                memory,
+                tgt_mask=causal,
+                memory_key_padding_mask=mem_pad_mask,
+            )
+            layer_states.append(x)
+
+        if getattr(self.dec, "norm", None) is not None:
+            x = self.dec.norm(x)
+
+        logits = self.proj(x)
+        return {"logits": logits, "layer_states": layer_states}
