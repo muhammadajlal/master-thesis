@@ -32,11 +32,15 @@ size_batch: 8
 
 # Dual-head must be enabled for CTC rescoring.
 dual_head:
-  enabled: false
+  enabled: true
   # Must match the trained checkpoint.
   arch_ctc: linear
   lambda_ar: 1.0
   lambda_ctc: 0.6
+  tie:
+    ctc_to_ar_outproj: false
+    ar_emb_outproj: false
+    ctc_input_space: "dec"
   loss_balance: sum
 
 # Rescoring settings

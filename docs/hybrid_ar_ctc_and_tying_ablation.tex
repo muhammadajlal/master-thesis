@@ -1,0 +1,265 @@
+% hybrid_ar_ctc_and_tying_ablation.tex
+% Thesis-ready text: Hybrid AR+CTC training and the weight-tying ablation.
+% Drop into your thesis with: \input{<path>/hybrid_ar_ctc_and_tying_ablation.tex}
+
+\section{Hybrid autoregressive--CTC training}
+\label{sec:hybrid-ar-ctc}
+
+\paragraph{Motivation.}
+Autoregressive (AR) sequence-to-sequence decoders with cross-attention are strong recognizers, but training can benefit from an auxiliary objective that encourages monotonic, frame-synchronous alignment.
+Connectionist Temporal Classification (CTC) provides such a signal by defining a differentiable alignment marginalization over encoder time steps.
+In this work, we adopt a \emph{hybrid} training regime where an AR decoder is the primary recognizer, while an auxiliary CTC head regularizes the shared encoder representation.
+
+\subsection{Model}
+Let $\mathbf{x} \in \mathbb{R}^{T \times C}$ denote an input IMU sequence of length $T$ with $C$ sensor channels.
+An encoder $f_{\text{enc}}$ produces a downsampled sequence of hidden states
+\begin{equation}
+\mathbf{h} = f_{\text{enc}}(\mathbf{x}) \in \mathbb{R}^{T' \times d_{\text{enc}}},
+\end{equation}
+where $T' \le T$ due to temporal downsampling.
+An AR decoder $f_{\text{ar}}$ attends to $\mathbf{h}$ and predicts a token sequence $\mathbf{y} = (y_1,\dots,y_N)$ via teacher forcing during training.
+
+\paragraph{Vocabularies and special tokens.}
+We use a character-level vocabulary (``categories'') with the CTC blank symbol at index $0$.
+For AR decoding we use the same base vocabulary and append three special symbols \texttt{PAD}, \texttt{BOS}, \texttt{EOS} at the end.
+Thus, for character mode,
+\begin{equation}
+V_{\text{ctc}} = |\mathcal{V}_{\text{ctc}}|, \qquad
+V_{\text{ar}} = V_{\text{ctc}} + 3.
+\end{equation}
+This layout ensures that token IDs $0,\dots,V_{\text{ctc}}-1$ have the same semantics for both CTC and AR.
+
+\subsection{Objectives}
+\paragraph{AR cross-entropy.}
+With teacher forcing, the decoder defines next-token probabilities
+\begin{equation}
+P_{\text{ar}}(y_t \mid y_{<t}, \mathbf{h}), \qquad t=1,\dots,N.
+\end{equation}
+The AR loss is the standard cross-entropy (optionally with label smoothing) summed over positions:
+\begin{equation}
+\mathcal{L}_{\text{ar}} = - \sum_{t=1}^{N} \log P_{\text{ar}}(y_t \mid y_{<t}, \mathbf{h}).
+\end{equation}
+
+\paragraph{CTC loss.}
+A per-timestep classifier produces logits over $\mathcal{V}_{\text{ctc}}$ for each encoder frame.
+CTC defines the conditional likelihood by summing over all monotonic alignments that collapse (via blank removal and repetition merging) to the target sequence.
+We use the negative log-likelihood form
+\begin{equation}
+\mathcal{L}_{\text{ctc}} = -\log P_{\text{ctc}}(\mathbf{y} \mid \mathbf{h}).
+\end{equation}
+
+\paragraph{Hybrid loss.}
+The overall hybrid loss combines both terms with weights $\lambda_{\text{ar}}$ and $\lambda_{\text{ctc}}$:
+\begin{equation}
+\mathcal{L}_{\text{hyb}} = \lambda_{\text{ar}}\, \mathcal{L}_{\text{ar}} + \lambda_{\text{ctc}}\, \mathcal{L}_{\text{ctc}}.
+\label{eq:hybrid-loss}
+\end{equation}
+In our experiments, $\lambda_{\text{ar}}=1$ and $\lambda_{\text{ctc}}$ is treated as a hyperparameter (optionally scheduled across epochs).
+
+\paragraph{Why this helps.}
+The CTC term provides an auxiliary alignment/regularization signal on the encoder time axis.
+This can stabilize optimization and improve generalization, especially in settings with noisy sensor sequences and variable writing styles.
+Importantly, the AR decoder remains the primary recognizer at inference time.
+
+\section{Ablation: ``single-decoder-ish'' CTC via weight tying}
+\label{sec:ctc-weight-tying}
+
+\subsection{Goal}
+A common critique of hybrid models is that gains might come from adding extra parameters (the auxiliary head) rather than from the auxiliary objective.
+To control for this, we introduce an ablation where the CTC classifier reuses the AR decoder's output projection weights.
+This produces a more ``single-decoder-ish'' setup: CTC still scores encoder frames, but it does not introduce a separate token classifier matrix.
+
+\subsection{Baseline (separate CTC head)}
+In the standard hybrid model, CTC logits are computed via a dedicated linear layer
+\begin{equation}
+\mathbf{z}^{\text{ctc}}_t = \mathbf{W}_{\text{ctc}}\, \mathbf{h}_t + \mathbf{b}_{\text{ctc}},
+\qquad \mathbf{W}_{\text{ctc}} \in \mathbb{R}^{V_{\text{ctc}} \times d_{\text{enc}}}.
+\end{equation}
+This adds $V_{\text{ctc}}\cdot d_{\text{enc}}$ parameters (plus bias).
+
+\subsection{Variant A (primary ablation): tie CTC to the AR output projection}
+\paragraph{AR output projection.}
+The AR decoder produces hidden states in decoder space $\mathbf{s}_t \in \mathbb{R}^{d_{\text{dec}}}$ and maps them to vocabulary logits using its output projection
+\begin{equation}
+\mathbf{z}^{\text{ar}}_t = \mathbf{W}_{\text{ar}}\, \mathbf{s}_t + \mathbf{b}_{\text{ar}},
+\qquad \mathbf{W}_{\text{ar}} \in \mathbb{R}^{V_{\text{ar}} \times d_{\text{dec}}}.
+\end{equation}
+
+\paragraph{CTC logits from encoder frames using shared classifier rows.}
+To reuse the same classifier weights, we compute CTC logits by taking the \emph{prefix slice} of the AR projection matrix corresponding to the shared vocabulary IDs:
+\begin{equation}
+\mathbf{W}_{\text{ctc}} \equiv \mathbf{W}_{\text{ar}}[0{:}V_{\text{ctc}}],
+\qquad \mathbf{b}_{\text{ctc}} \equiv \mathbf{b}_{\text{ar}}[0{:}V_{\text{ctc}}].
+\end{equation}
+Since CTC operates on encoder frames, we must ensure its input feature dimension matches $d_{\text{dec}}$.
+When $d_{\text{enc}} \ne d_{\text{dec}}$, we reuse the existing encoder-to-decoder projection (already required for AR cross-attention in our implementation):
+\begin{equation}
+\tilde{\mathbf{h}}_t = \mathbf{P}\, \mathbf{h}_t, \qquad \mathbf{P} \in \mathbb{R}^{d_{\text{dec}} \times d_{\text{enc}}}.
+\end{equation}
+The tied CTC logits become
+\begin{equation}
+\mathbf{z}^{\text{ctc}}_t = \mathbf{W}_{\text{ar}}[0{:}V_{\text{ctc}}] \, \tilde{\mathbf{h}}_t + \mathbf{b}_{\text{ar}}[0{:}V_{\text{ctc}}].
+\label{eq:tied-ctc-logits}
+\end{equation}
+With this design, there is no independent $\mathbf{W}_{\text{ctc}}$ parameter matrix.
+Gradients from the CTC loss update the same token classifier used by the AR decoder (for the shared token subset).
+
+\paragraph{Effect on parameter count and reporting.}
+Compared to the baseline hybrid model with a separate linear CTC head, this ablation removes the dedicated CTC classifier parameters $\mathbf{W}_{\text{ctc}} \in \mathbb{R}^{V_{\text{ctc}}\times d_{\text{enc}}}$ (and optional bias), i.e., it eliminates approximately $V_{\text{ctc}}\cdot d_{\text{enc}}$ learnable weights.
+No new classifier parameters are introduced because CTC reuses the AR output projection rows.
+When $d_{\text{enc}}\ne d_{\text{dec}}$, we reuse the existing encoder-to-decoder projection already required for cross-attention (thus the ablation does not add an extra ``adapter'' beyond the baseline AR model).
+In the thesis, we report parameter counts and MACs for each variant in a single table (baseline hybrid vs tied-CTC), and explicitly attribute any reduction in parameters to the removal of the standalone CTC head.
+
+\paragraph{Interpretation.}
+This ablation isolates whether improvements from hybrid training are attributable to the auxiliary alignment objective (CTC) rather than increased head capacity.
+It also aligns with the intuition that the decoder is the primary recognizer, while CTC provides complementary supervision using the same classifier.
+
+\subsection{Configuration switches for the ablation}
+We expose minimal switches in the configuration under \texttt{dual\_head.tie}:
+\begin{itemize}
+  \item \texttt{ctc\_to\_ar\_outproj}: enables the tied CTC classifier (Variant A).
+  \item \texttt{ar\_emb\_outproj}: optional secondary ablation that ties the AR embedding matrix to the AR output projection (LM-style weight tying).
+  \item \texttt{ctc\_input\_space}: \texttt{"dec"} (recommended) uses the existing encoder$\to$decoder projection so that Eq.~\eqref{eq:tied-ctc-logits} is well-defined even when $d_{\text{enc}}\ne d_{\text{dec}}$.
+\end{itemize}
+A concrete YAML snippet is:
+\begin{verbatim}
+dual_head:
+  enabled: true
+  arch_ctc: linear
+  lambda_ar: 1.0
+  lambda_ctc: 0.6
+  tie:
+    ctc_to_ar_outproj: true
+    ar_emb_outproj: false
+    ctc_input_space: "dec"
+\end{verbatim}
+
+\subsection{Optional auxiliary supervision inside the decoder}
+\label{sec:decoder-aux-supervision}
+To more directly regularize the AR decoder (``between decoder layers''), we additionally implement two optional training-time losses.
+These ablations are available both in hybrid AR+CTC mode (under \texttt{dual\_head.*}) and in AR-only mode (under top-level config keys), enabling fair comparisons.
+
+\paragraph{Deep supervision (auxiliary token cross-entropy at intermediate layers).}
+When enabled, we compute token-level cross-entropy not only from the final decoder layer but also from intermediate layers (e.g., layers 1--3 for a 4-layer decoder).
+Crucially, all layers reuse the \emph{same} vocabulary projection matrix (the AR output projection), so this adds no independent classifier capacity.
+
+For hybrid AR+CTC mode, the configuration lives under \texttt{dual\_head.deep\_supervision}:
+\begin{verbatim}
+dual_head:
+  deep_supervision:
+    enabled: true
+    layers: [1, 2, 3]      # supervised intermediate layers (1-indexed)
+    include_final: true    # also supervise the final layer
+    reduce: mean           # mean|sum across supervised layers
+\end{verbatim}
+
+For AR-only mode, use a top-level block:
+\begin{verbatim}
+deep_supervision:
+  enabled: true
+  layers: [1, 2, 3]
+  include_final: true
+  reduce: mean
+\end{verbatim}
+
+\paragraph{Decoder-side ``CTC-like'' loss (CTC on encoder frames conditioned on decoder states).}
+True CTC is defined over a frame-synchronous time axis, whereas decoder layers are naturally defined over the token axis.
+To obtain a decoder-internal auxiliary signal while remaining mathematically consistent with CTC, we construct frame-length ($T'$) logits conditioned on intermediate decoder states.
+The token classifier itself is still shared (we reuse the AR output projection rows for the shared vocabulary prefix), so we do not introduce an additional classifier matrix.
+
+This option implements the suggestion to ``put the CTC head with the transformer decoder as a regularizer'' (see discussion with supervisor).
+
+Two modes are available via \texttt{decoder\_side\_ctc.mode}:
+\begin{itemize}
+  \item \textbf{attention} (default): Encoder frames (queries) attend to decoder token states (keys/values) via a small reverse cross-attention module. This adds $\sim 3 d^2$ parameters (Q/K/V projections + output) but allows each frame to selectively attend to relevant decoder positions.
+  \item \textbf{pool}: Global average pooling of decoder states, then broadcast-added to encoder frames. This adds \emph{zero} extra parameters and provides a simpler baseline for testing decoder-conditioning.
+\end{itemize}
+
+For hybrid AR+CTC mode, the configuration is under \texttt{dual\_head.decoder\_side\_ctc}:
+\begin{verbatim}
+dual_head:
+  decoder_side_ctc:
+    enabled: true
+    mode: attention      # "attention" or "pool"
+    layers: [1, 2, 3]    # which decoder layer states condition the frame logits
+    lambda: 0.1          # weight of this auxiliary loss
+    nhead: 4             # attention heads (only used if mode=attention)
+    layernorm: true      # layer norm after attention (only if mode=attention)
+\end{verbatim}
+
+For AR-only mode (AR + decoder-side CTC ablation), use a top-level block:
+\begin{verbatim}
+decoder_side_ctc:
+  enabled: true
+  mode: pool             # zero extra params
+  layers: [1, 2, 3]
+  lambda: 0.1
+\end{verbatim}
+
+\paragraph{Ablation matrix.}
+With these switches, the following conditions can be compared on a common encoder/decoder backbone:
+\begin{enumerate}
+  \item \textbf{AR-only}: pure autoregressive CE (baseline).
+  \item \textbf{AR + deep supervision}: CE at layers 1/2/3/4 (no extra head capacity).
+  \item \textbf{AR + decoder-side CTC}: CTC regularization ``between decoder layers'' (adds reverse-attention params only).
+  \item \textbf{Hybrid AR+CTC (encoder-side)}: separate CTC head after encoder (baseline hybrid).
+  \item \textbf{Hybrid AR+CTC + deep supervision / decoder-side CTC}: combinations of the above.
+\end{enumerate}
+This design directly tests whether placing auxiliary supervision closer to the decoder (the professor's suggestion) improves recognition compared to placing it after the encoder.
+
+\paragraph{Secondary ablation and experimental design.}
+The switch \texttt{ar\_emb\_outproj=true} enables AR embedding--classifier tying (i.e., the same weight matrix is used for token lookup and for the final vocabulary projection).
+This can change optimization dynamics even without CTC weight sharing.
+For clean attribution, we therefore treat it as an \emph{independent} ablation and report it both (i) on its own and (ii) in combination with Variant~A.
+Concretely, we run a small factorial comparison: baseline hybrid (separate CTC head), Variant~A (CTC$\leftrightarrow$out\_proj tied), AR-only tying (\texttt{ar\_emb\_outproj=true} only), and ``full tying'' (both flags enabled).
+
+\subsection{Results and conclusion (capacity-control test)}
+\label{sec:ctc-weight-tying-results}
+Table~\ref{tab:hybrid-ctc-tying-results} reports the word-level results of the AR-only baseline and hybrid AR+CTC training under different tying configurations.
+All numbers are character error rate (CER) and word error rate (WER) in \%, using the same encoder/decoder and evaluation protocol across runs.
+We sweep the CTC weight $\lambda_{\text{ctc}}\in\{0.5,0.6\}$, keeping $\lambda_{\text{ar}}=1$.
+
+\begin{table}[t]
+\centering
+\begin{tabular}{lcc}
+\hline
+\textbf{Variant} & \textbf{CER (\%)} & \textbf{WER (\%)} \\
+\hline
+AR-only (no CTC) & 6.82 & 10.31 \\
+\hline
+Hybrid AR+CTC (separate CTC head), $\lambda_{\text{ctc}}=0.6$ & 6.46 & 9.76 \\
+Hybrid AR+CTC (separate CTC head), $\lambda_{\text{ctc}}=0.5$ & 6.48 & 9.87 \\
+\hline
+Hybrid + tie \texttt{ar\_emb\_outproj} only, $\lambda_{\text{ctc}}=0.6$ & 6.53 & 9.97 \\
+Hybrid + tie \texttt{ar\_emb\_outproj} only, $\lambda_{\text{ctc}}=0.5$ & 6.69 & 10.12 \\
+\hline
+Hybrid + tie \texttt{ctc\_to\_ar\_outproj} only, $\lambda_{\text{ctc}}=0.6$ & 7.00 & 10.49 \\
+Hybrid + tie \texttt{ctc\_to\_ar\_outproj} only, $\lambda_{\text{ctc}}=0.5$ & 6.99 & 10.53 \\
+\hline
+Hybrid + full tying (both flags), $\lambda_{\text{ctc}}=0.5$ & 7.22 & 11.32 \\
+\hline
+\end{tabular}
+\caption{Ablation of hybrid AR+CTC training and weight tying (word-level recognition). ``Separate CTC head'' denotes the standard hybrid model with an independent CTC classifier matrix $\mathbf{W}_{\text{ctc}}$. ``Tie \texttt{ctc\_to\_ar\_outproj}'' removes this independent classifier by reusing the AR output projection rows as in Eq.~\eqref{eq:tied-ctc-logits}.}
+\label{tab:hybrid-ctc-tying-results}
+\end{table}
+
+\paragraph{What the capacity-control ablation tells us.}
+The untied hybrid model (separate CTC head) improves over AR-only for both $\lambda_{\text{ctc}}=0.5$ and $0.6$.
+However, when we apply the intended capacity-control by tying the CTC classifier to the AR output projection (\texttt{ctc\_to\_ar\_outproj=true}), performance drops back to (and slightly below) the AR-only baseline.
+Therefore, based on these experiments, we \emph{cannot} conclude that the hybrid gains come purely from the auxiliary objective independent of added head capacity.
+The results are consistent with two (not mutually exclusive) explanations: (i) the standalone CTC head provides useful classifier flexibility beyond the shared AR projection, and/or (ii) the tying constraint introduces optimization trade-offs (gradient interference) that negate the hybrid benefit.
+
+\paragraph{Secondary observation (embedding/output tying).}
+Tying the AR embedding to the AR output projection (\texttt{ar\_emb\_outproj=true}) does not improve performance in this setting and slightly degrades CER/WER compared to the untied hybrid.
+This reinforces the importance of treating embedding/output tying as an independent ablation rather than as a ``free'' control.
+
+\subsection{Reproducibility and sanity checks}
+When tying is enabled, we enforce the following invariants at model initialization:
+\begin{itemize}
+  \item $V_{\text{ar}} \ge V_{\text{ctc}}$ so that a prefix slice exists.
+  \item Character-mode special token layout: if $V_{\text{ar}} = V_{\text{ctc}} + 3$, then \texttt{PAD}$=V_{\text{ctc}}$, \texttt{BOS}$=V_{\text{ctc}}+1$, \texttt{EOS}$=V_{\text{ctc}}+2$.
+  \item \texttt{ctc\_input\_space="enc"} is only allowed when $d_{\text{enc}}=d_{\text{dec}}$.
+\end{itemize}
+These checks ensure the tied classifier uses consistent token semantics across CTC and AR.
+
+% End of file

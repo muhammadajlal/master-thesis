@@ -141,6 +141,7 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
 
             vocab_ctc = int(len(cfgs.categories))
             arch_ctc = str(dual.get("arch_ctc", "linear"))
+            tie_cfg = dual.get("tie", {}) or {}
 
             model = DualHeadModel(
                 arch_en=cfgs.arch_en,
@@ -152,11 +153,21 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
                 len_seq=cfgs.len_seq,
                 use_gated_attention=getattr(cfgs, "use_gated_attention", False),
                 gating_type=getattr(cfgs, "gating_type", "elementwise"),
+                pad_id=getattr(cfgs, "PAD_ID", None),
+                bos_id=getattr(cfgs, "BOS_ID", None),
+                eos_id=getattr(cfgs, "EOS_ID", None),
+                tie_cfg=tie_cfg,
+                dual_cfg=dual,
             ).to(cfgs.device)
             cfgs.DUAL_HEAD = True
             cfgs.vocab_ctc = vocab_ctc
             cfgs.dual_head_arch_ctc = arch_ctc
         else:
+            # AR-only mode: optionally enable decoder-side CTC (CTC regularization
+            # "between decoder layers" using the AR vocab projection prefix).
+            dec_ctc_cfg = getattr(cfgs, "decoder_side_ctc", {}) or {}
+            vocab_ctc = int(len(cfgs.categories))  # CTC vocab = base chars + blank
+
             model = BaseModel(
                 cfgs.arch_en,
                 cfgs.arch_de,
@@ -165,8 +176,12 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
                 cfgs.len_seq,
                 use_gated_attention=getattr(cfgs, "use_gated_attention", False),
                 gating_type=getattr(cfgs, "gating_type", "elementwise"),
+                vocab_ctc=vocab_ctc,
+                pad_id=getattr(cfgs, "PAD_ID", None),
+                decoder_side_ctc_cfg=dec_ctc_cfg,
             ).to(cfgs.device)
             cfgs.DUAL_HEAD = False
+            cfgs.vocab_ctc = vocab_ctc
 
         # Optional pretrained decoder initialization
         pretrained_dec_ckpt = getattr(cfgs, "pretrained_decoder_checkpoint", None)
@@ -388,7 +403,16 @@ def _build_lm_optimizer(cfgs, model, dataloader_train):
 def _build_standard_optimizer(cfgs, model, dataloader_train):
     """Build standard optimizer for CTC/AR modes."""
     optimizer = torch.optim.AdamW(model.parameters(), cfgs.lr)
-    scaler = GradScaler()
+    
+    # AMP is configurable via use_amp (default true for backward compat)
+    use_amp = bool(getattr(cfgs, "use_amp", True))
+    # Use a conservative init_scale to avoid early overflow
+    scaler = GradScaler(enabled=use_amp, init_scale=2048.0)
+    
+    if use_amp:
+        logger.info("[AMP] enabled with GradScaler init_scale=2048")
+    else:
+        logger.info("[AMP] disabled (use_amp=false)")
 
     if dataloader_train is not None:
         lr_scheduler = SequentialLR(

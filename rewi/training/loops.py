@@ -218,15 +218,102 @@ def train_one_epoch(
     BOS_ID = man.cfgs.BOS_ID
     EOS_ID = man.cfgs.EOS_ID
 
+    ds_cfg = getattr(man.cfgs, "deep_supervision", {}) or {}
+    ds_enabled = bool(ds_cfg.get("enabled", False))
+    ds_layers_cfg = ds_cfg.get("layers", [1, 2, 3])
+    ds_include_final = bool(ds_cfg.get("include_final", True))
+    ds_reduce = str(ds_cfg.get("reduce", "mean")).lower()  # mean|sum
+
+    # Decoder-side CTC for AR-only mode (CTC regularization "between decoder layers")
+    dec_ctc_cfg = getattr(man.cfgs, "decoder_side_ctc", {}) or {}
+    dec_ctc_enabled = bool(dec_ctc_cfg.get("enabled", False))
+    dec_ctc_lambda = float(dec_ctc_cfg.get("lambda", 0.0))
+    fn_loss_ctc = None
+    if dec_ctc_enabled and dec_ctc_lambda > 0.0:
+        from ..loss import CTCLoss
+        fn_loss_ctc = CTCLoss(blank=0, reduction="mean")
+
+    # AMP controllable via config (default true for backward compat)
+    use_amp = bool(getattr(man.cfgs, "use_amp", True)) and torch.cuda.is_available()
+
     for idx, (x, y, len_x, len_y) in enumerate(dataloader):
         x, y = x.to(man.cfgs.device), y.to(man.cfgs.device)
         optimizer.zero_grad()
 
-        with torch.autocast('cuda', torch.float16):
+        with torch.autocast('cuda', torch.float16, enabled=use_amp):
             if isinstance(fn_loss, nn.CrossEntropyLoss):  # AR mode
                 y_inp, y_tgt = build_ar_batch(y, len_y, PAD_ID, BOS_ID, EOS_ID, device=man.cfgs.device)
-                logits = model(x, in_lengths=len_x, y_inp=y_inp)
-                loss = fn_loss(logits.reshape(-1, logits.size(-1)), y_tgt.reshape(-1))
+
+                # Determine what extra outputs we need
+                need_dec_ctc = dec_ctc_enabled and dec_ctc_lambda > 0.0 and fn_loss_ctc is not None
+                need_layers = ds_enabled or need_dec_ctc
+
+                if need_layers:
+                    out = model(x, in_lengths=len_x, y_inp=y_inp, return_ar_layers=True, return_dec_ctc=need_dec_ctc)
+                    logits = out["logits"]
+                    logits_layers = out.get("logits_layers", None)
+                else:
+                    logits = model(x, in_lengths=len_x, y_inp=y_inp)
+                    out = None
+                    logits_layers = None
+
+                # Deep supervision CE
+                if ds_enabled:
+                    if logits_layers is None:
+                        raise RuntimeError("deep_supervision.enabled=true but model did not return logits_layers")
+
+                    layers = ds_layers_cfg
+                    if not isinstance(layers, (list, tuple)):
+                        layers = [layers]
+                    layer_idxs = [int(l) - 1 for l in layers]
+                    layer_idxs = [i for i in layer_idxs if i >= 0]
+                    if ds_include_final:
+                        layer_idxs = list(layer_idxs) + [len(logits_layers) - 1]
+                    seen = set()
+                    layer_idxs = [i for i in layer_idxs if (i not in seen and not seen.add(i))]
+                    if len(layer_idxs) == 0:
+                        raise ValueError("deep_supervision.layers must contain valid 1-indexed layer IDs")
+                    if max(layer_idxs) >= len(logits_layers):
+                        raise ValueError(
+                            f"deep_supervision.layers out of range. Got {layers}, decoder has {len(logits_layers)} layers"
+                        )
+
+                    losses = []
+                    for li in layer_idxs:
+                        logits_li = logits_layers[li]
+                        losses.append(
+                            fn_loss(logits_li.reshape(-1, logits_li.size(-1)), y_tgt.reshape(-1))
+                        )
+                    if ds_reduce == "sum":
+                        loss = torch.stack(losses, dim=0).sum()
+                    else:
+                        loss = torch.stack(losses, dim=0).mean()
+                else:
+                    loss = fn_loss(logits.reshape(-1, logits.size(-1)), y_tgt.reshape(-1))
+
+                # Decoder-side CTC (AR + CTC regularization "between decoder layers")
+                loss_dec_ctc = None
+                if need_dec_ctc:
+                    if out is None or "dec_ctc_logits_layers" not in out:
+                        raise RuntimeError(
+                            "decoder_side_ctc.enabled=true but model did not return dec_ctc_logits_layers"
+                        )
+                    dec_logits_layers = out["dec_ctc_logits_layers"]
+                    enc_lengths = out["enc_lengths"]
+                    if len(dec_logits_layers) == 0:
+                        raise RuntimeError("dec_ctc_logits_layers is empty")
+                    dec_losses = []
+                    for dec_logits in dec_logits_layers:
+                        dec_losses.append(
+                            fn_loss_ctc(
+                                dec_logits.float().permute((1, 0, 2)),
+                                y,
+                                enc_lengths,
+                                len_y,
+                            )
+                        )
+                    loss_dec_ctc = torch.stack(dec_losses, dim=0).mean()
+                    loss = loss + dec_ctc_lambda * loss_dec_ctc
             else:
                 # CTC path
                 out = model(x)
@@ -275,6 +362,17 @@ def train_one_epoch_hybrid(
     BOS_ID = man.cfgs.BOS_ID
     EOS_ID = man.cfgs.EOS_ID
 
+    dual_cfg = getattr(man.cfgs, "dual_head", {}) or {}
+    ds_cfg = dual_cfg.get("deep_supervision", {}) or {}
+    ds_enabled = bool(ds_cfg.get("enabled", False))
+    ds_layers_cfg = ds_cfg.get("layers", [1, 2, 3])
+    ds_include_final = bool(ds_cfg.get("include_final", True))
+    ds_reduce = str(ds_cfg.get("reduce", "mean")).lower()  # mean|sum
+
+    dec_ctc_cfg = dual_cfg.get("decoder_side_ctc", {}) or {}
+    dec_ctc_enabled = bool(dec_ctc_cfg.get("enabled", False))
+    dec_ctc_lambda = float(dec_ctc_cfg.get("lambda", 0.0))
+
     # Log schedule info at epoch start
     if epoch == 0 or (lambda_ctc_schedule and epoch % 5 == 0):
         man.log(
@@ -283,35 +381,135 @@ def train_one_epoch_hybrid(
 
     maybe_log_trainability(man, model, epoch=epoch, where="train_one_epoch_hybrid")
 
+    clip_grad = float(getattr(man.cfgs, "clip_grad", 5.0) or 5.0)
+    
+    # AMP controllable via config (default true for backward compat)
+    use_amp_cfg = bool(getattr(man.cfgs, "use_amp", True)) and torch.cuda.is_available()
+
+    skipped_nonfinite = 0
+    skipped_empty_ar = 0
+
     for idx, (x, y, len_x, len_y) in enumerate(dataloader):
         x = x.to(man.cfgs.device)
         y = y.to(man.cfgs.device)
         len_x = len_x.to(man.cfgs.device)
         len_y = len_y.to(man.cfgs.device)
 
+        # Skip degenerate / non-finite inputs (rare but can happen with corrupt CSVs)
+        if not torch.isfinite(x).all():
+            skipped_nonfinite += 1
+            if skipped_nonfinite <= 5:
+                logger.warning(
+                    "Non-finite input batch. Skipping. epoch={} iter={} len_x=[{},{}]",
+                    epoch,
+                    idx,
+                    int(len_x.min().item()) if len_x.numel() else -1,
+                    int(len_x.max().item()) if len_x.numel() else -1,
+                )
+            continue
+
         optimizer.zero_grad(set_to_none=True)
 
-        use_amp = bool(x.is_cuda)
+        use_amp = use_amp_cfg and x.is_cuda
         with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
             y_inp, y_tgt = build_ar_batch(
                 y, len_y, PAD_ID, BOS_ID, EOS_ID, device=man.cfgs.device
             )
+
+            # Guard: if PAD/BOS/EOS IDs are misconfigured (or a truly empty target batch),
+            # CrossEntropyLoss can return NaN due to division by zero.
+            n_valid_ar = int((y_tgt.reshape(-1) != int(PAD_ID)).sum().item())
+            if n_valid_ar <= 0:
+                skipped_empty_ar += 1
+                if skipped_empty_ar <= 5:
+                    logger.warning(
+                        "No valid AR target tokens (all PAD). Skipping. epoch={} iter={} PAD_ID={} BOS_ID={} EOS_ID={} len_y=[{},{}]",
+                        epoch,
+                        idx,
+                        int(PAD_ID),
+                        int(BOS_ID),
+                        int(EOS_ID),
+                        int(len_y.min().item()) if len_y.numel() else -1,
+                        int(len_y.max().item()) if len_y.numel() else -1,
+                    )
+                continue
+
             out = model(x, in_lengths=len_x, y_inp=y_inp, return_ar=True, return_ctc=True)
 
             ar_logits = out["ar_logits"]
             ctc_logits = out["ctc_logits"].float()  # keep ctc loss in fp32 for stability
             enc_lengths = out["enc_lengths"]
 
-            loss_ar = fn_loss_ar(
-                ar_logits.reshape(-1, ar_logits.size(-1)),
-                y_tgt.reshape(-1),
-            )
+            # AR token loss (optionally with deep supervision on intermediate decoder layers)
+            if ds_enabled:
+                if "ar_logits_layers" not in out:
+                    raise RuntimeError(
+                        "dual_head.deep_supervision.enabled=true but model did not return ar_logits_layers"
+                    )
+                layers = ds_layers_cfg
+                if not isinstance(layers, (list, tuple)):
+                    layers = [layers]
+                layer_idxs = [int(l) - 1 for l in layers]
+                layer_idxs = [i for i in layer_idxs if i >= 0]
+                if ds_include_final:
+                    layer_idxs = list(layer_idxs) + [len(out["ar_logits_layers"]) - 1]
+                # unique + stable order
+                seen = set()
+                layer_idxs = [i for i in layer_idxs if (i not in seen and not seen.add(i))]
+                if len(layer_idxs) == 0:
+                    raise ValueError("dual_head.deep_supervision.layers must contain valid 1-indexed layer IDs")
+                if max(layer_idxs) >= len(out["ar_logits_layers"]):
+                    raise ValueError(
+                        f"dual_head.deep_supervision.layers out of range. Got {layers}, decoder has {len(out['ar_logits_layers'])} layers"
+                    )
+
+                losses = []
+                for li in layer_idxs:
+                    logits_li = out["ar_logits_layers"][li]
+                    losses.append(
+                        fn_loss_ar(
+                            logits_li.reshape(-1, logits_li.size(-1)),
+                            y_tgt.reshape(-1),
+                        )
+                    )
+                if ds_reduce == "sum":
+                    loss_ar = torch.stack(losses, dim=0).sum()
+                else:
+                    loss_ar = torch.stack(losses, dim=0).mean()
+            else:
+                loss_ar = fn_loss_ar(
+                    ar_logits.reshape(-1, ar_logits.size(-1)),
+                    y_tgt.reshape(-1),
+                )
+
             loss_ctc = fn_loss_ctc(
                 ctc_logits.permute((1, 0, 2)),
                 y,
                 enc_lengths,
                 len_y,
             )
+
+            # Optional decoder-side CTC (CTC on encoder time axis conditioned on decoder layer states)
+            loss_dec_ctc = None
+            if dec_ctc_enabled and dec_ctc_lambda > 0.0:
+                if "dec_ctc_logits_layers" not in out:
+                    raise RuntimeError(
+                        "dual_head.decoder_side_ctc.enabled=true but model did not return dec_ctc_logits_layers"
+                    )
+                dec_logits_layers = out["dec_ctc_logits_layers"]
+                if len(dec_logits_layers) == 0:
+                    raise RuntimeError("dec_ctc_logits_layers is empty")
+                dec_losses = []
+                for dec_logits in dec_logits_layers:
+                    dec_losses.append(
+                        fn_loss_ctc(
+                            dec_logits.float().permute((1, 0, 2)),
+                            y,
+                            enc_lengths,
+                            len_y,
+                        )
+                    )
+                loss_dec_ctc = torch.stack(dec_losses, dim=0).mean()
 
             loss = balance_loss(
                 float(loss_ar.item()),
@@ -329,9 +527,51 @@ def train_one_epoch_hybrid(
                 alpha = max(0.0, min(1.0, lambda_ctc_eff))
                 loss = (1.0 - alpha) * loss_ar + alpha * loss_ctc
 
+            if loss_dec_ctc is not None:
+                loss = loss + dec_ctc_lambda * loss_dec_ctc
+
+        # Skip non-finite losses (prevents corrupting epoch averages and model weights).
+        if not (torch.isfinite(loss) and torch.isfinite(loss_ar) and torch.isfinite(loss_ctc)):
+            skipped_nonfinite += 1
+            if skipped_nonfinite <= 5:
+                ar_finite = bool(torch.isfinite(ar_logits).all().detach().cpu().item())
+                ctc_finite = bool(torch.isfinite(ctc_logits).all().detach().cpu().item())
+                logger.warning(
+                    "Non-finite loss. Skipping update. epoch={} iter={} lr={} loss={} loss_ar={} loss_ctc={} ar_logits_finite={} ctc_logits_finite={} len_x=[{},{}] len_y=[{},{}]",
+                    epoch,
+                    idx,
+                    lr_scheduler.get_last_lr()[0],
+                    float(loss.detach().cpu().item()),
+                    float(loss_ar.detach().cpu().item()),
+                    float(loss_ctc.detach().cpu().item()),
+                    ar_finite,
+                    ctc_finite,
+                    int(len_x.min().item()) if len_x.numel() else -1,
+                    int(len_x.max().item()) if len_x.numel() else -1,
+                    int(len_y.min().item()) if len_y.numel() else -1,
+                    int(len_y.max().item()) if len_y.numel() else -1,
+                )
+            optimizer.zero_grad(set_to_none=True)
+            # Don't call scaler.update() here - we haven't called scaler.scale() yet
+            continue
+
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
+        if not torch.isfinite(grad_norm):
+            skipped_nonfinite += 1
+            if skipped_nonfinite <= 5:
+                logger.warning(
+                    "Non-finite grad norm. Skipping update. epoch={} iter={} grad_norm={}",
+                    epoch,
+                    idx,
+                    float(grad_norm.detach().cpu().item()),
+                )
+            optimizer.zero_grad(set_to_none=True)
+            scaler.update()
+            continue
+
         scaler.step(optimizer)
         scaler.update()
         lr_scheduler.step()
@@ -342,7 +582,13 @@ def train_one_epoch_hybrid(
             lr_scheduler.get_last_lr()[0],
             loss_ar=float(loss_ar.item()),
             loss_ctc=float(loss_ctc.item()),
+            **({"loss_dec_ctc": float(loss_dec_ctc.item())} if loss_dec_ctc is not None else {}),
             lambda_ctc_eff=float(lambda_ctc_eff),
+        )
+
+    if (skipped_nonfinite + skipped_empty_ar) > 0:
+        man.log(
+            f"[HybridTrain] skipped_batches={skipped_nonfinite + skipped_empty_ar} (nonfinite={skipped_nonfinite}, empty_ar={skipped_empty_ar})"
         )
 
     man.summarize_epoch()
@@ -434,7 +680,7 @@ def test(
             man.update_iteration(idx, loss.item())
 
             # CTC decoding
-            if man.check_step(epoch + 1, 'eval') and not isinstance(fn_loss, nn.CrossEntropyLoss):
+            if do_eval and not isinstance(fn_loss, nn.CrossEntropyLoss):
                 for pred, len_pred, label in zip(out.cpu(), len_x // model.ratio_ds, y.cpu()):
                     preds.append(ctc_decoder.decode(pred[:len_pred]))
                     labels.append(ctc_decoder.decode(label, True))
@@ -509,7 +755,7 @@ def test(
     # Export predictions
     export_val_full = bool(getattr(man.cfgs, "export_val_full", False))
     is_test_mode = bool(getattr(man.cfgs, "test", False))
-    do_export = is_test_mode or (export_val_full and man.check_step(epoch + 1, 'eval'))
+    do_export = is_test_mode or (export_val_full and do_eval)
 
     if do_export:
         export_dir = os.path.join(man.cfgs.dir_work, "exports")
@@ -522,10 +768,28 @@ def test(
         logger.info("Exported full validation predictions to {}", export_path)
 
     # Evaluation and visualization
-    if man.check_step(epoch + 1, 'eval'):
+    if do_eval:
+        eval_label = 'AR-greedy' if isinstance(fn_loss, nn.CrossEntropyLoss) else 'CTC-bestpath'
+        if not preds or not labels:
+            logger.warning(
+                "[Eval][{}] skipped: empty preds/labels (epoch={} fold={})",
+                eval_label,
+                int(epoch) if epoch is not None else -1,
+                int(getattr(man.cfgs, "idx_fold", -1)),
+            )
+            return
+
         if not isinstance(fn_loss, nn.CrossEntropyLoss):
             visualize(preds, labels, man.cfgs.categories[1:], man.dir_vis, epoch)
+
         results_eval = evaluate(preds, labels)
+        man.update_evaluation(
+            results_eval,
+            preds[:20],
+            labels[:20],
+            key='evaluation',
+            label=eval_label,
+        )
 
 
 def test_hybrid(
@@ -587,6 +851,8 @@ def test_hybrid(
 
     preds_rescore: dict[float, list[str]] = {b: [] for b in betas_ctc}
     labels_rescore: dict[float, list[str]] = {b: [] for b in betas_ctc}
+
+    skipped_nonfinite = 0
 
     def _sanitize_beta(x: float) -> str:
         s = f"{x:.4f}"
@@ -695,7 +961,7 @@ def test_hybrid(
             len_y = len_y.to(man.cfgs.device)
 
             # Encode once; reuse memory for greedy decode/beam search
-            use_amp = bool(x.is_cuda)
+            use_amp = bool(getattr(man.cfgs, "use_amp", True)) and x.is_cuda
             with torch.autocast(device_type='cuda', dtype=torch.float16, enabled=use_amp):
                 feats, enc_pad, enc_lengths = model._encode_with_mask(x, len_x)
 
@@ -710,7 +976,7 @@ def test_hybrid(
                 ar_logits = model.decoder(y_inp, mem, enc_pad)
 
                 # CTC logits from the per-timestep head
-                ctc_logits = model.ctc_head(feats).float()
+                ctc_logits = model.compute_ctc_logits(feats).float()
 
                 loss_ar = fn_loss_ar(
                     ar_logits.reshape(-1, ar_logits.size(-1)),
@@ -728,6 +994,28 @@ def test_hybrid(
                 elif loss_balance_mode == "convex":
                     alpha = max(0.0, min(1.0, lambda_ctc_eff))
                     loss = (1.0 - alpha) * loss_ar + alpha * loss_ctc
+
+            # Skip non-finite loss batches so eval averages don't become NaN.
+            if not (torch.isfinite(loss) and torch.isfinite(loss_ar) and torch.isfinite(loss_ctc)):
+                skipped_nonfinite += 1
+                if skipped_nonfinite <= 5:
+                    ar_finite = bool(torch.isfinite(ar_logits).all().detach().cpu().item())
+                    ctc_finite = bool(torch.isfinite(ctc_logits).all().detach().cpu().item())
+                    logger.warning(
+                        "Non-finite eval loss. Skipping batch. epoch={} iter={} loss={} loss_ar={} loss_ctc={} ar_logits_finite={} ctc_logits_finite={} len_x=[{},{}] len_y=[{},{}]",
+                        epoch,
+                        idx,
+                        float(loss.detach().cpu().item()),
+                        float(loss_ar.detach().cpu().item()),
+                        float(loss_ctc.detach().cpu().item()),
+                        ar_finite,
+                        ctc_finite,
+                        int(len_x.min().item()) if len_x.numel() else -1,
+                        int(len_x.max().item()) if len_x.numel() else -1,
+                        int(len_y.min().item()) if len_y.numel() else -1,
+                        int(len_y.max().item()) if len_y.numel() else -1,
+                    )
+                continue
 
             man.update_iteration(
                 idx,
@@ -824,6 +1112,9 @@ def test_hybrid(
                         best_ids = nbest[best_i][0]
                         preds_rescore[float(beta_ctc)].append(_decode_ids(best_ids))
                         labels_rescore[float(beta_ctc)].append(lab_str)
+
+    if skipped_nonfinite > 0:
+        man.log(f"[HybridEval] skipped_batches={skipped_nonfinite} (nonfinite_loss)")
 
     man.summarize_epoch()
 

@@ -14,7 +14,7 @@ set -x
 
 # ---- Params you can tweak ----
 # Specify the YAML config file to use (path relative to configs/)
-TRAIN_YAML=${TRAIN_YAML:-train_element_word_03.yaml}
+TRAIN_YAML=${TRAIN_YAML:-train_element_word_02_decoder_ctc.yaml}
 
 # Dataset name (can still be overridden)
 DATASET=${DATASET:-onhw_wi_word_rh}  # onhw_wi_word_rh | wi_word_hw6_meta etc.
