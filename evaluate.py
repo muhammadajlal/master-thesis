@@ -8,9 +8,10 @@ import torch
 import yaml
 from thop import profile
 
-from rewi.model import BaseModel, build_encoder
+from rewi.model import BaseModel, DualHeadModel, build_encoder
 from rewi.model.multimodal_lm_model import MultimodalLMModel
 from rewi.model.pretrainedLM import LMConfig
+from rewi.tokenizer import BPETokenizer
 
 import time
 
@@ -121,6 +122,95 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
     Returns:
         dict: Updated results.
     '''
+    def _infer_vocab_and_ids(cfgs: dict):
+        """Mirror main.py's vocab/special-token layout logic.
+
+        Returns:
+            vocab_dec, vocab_ctc, pad_id, bos_id, eos_id
+        """
+        base = int(len(cfgs['categories']))
+        arch_de = str(cfgs.get('arch_de'))
+        ar_mode = arch_de in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
+
+        if bool(cfgs.get('use_bpe', False)):
+            tok_cfg = cfgs.get('tokenizer', {}) or {}
+            model_path = tok_cfg.get('model', None)
+            if not model_path:
+                raise ValueError("use_bpe=true but tokenizer.model is missing in config")
+            tok = BPETokenizer(model_path)
+            vocab_dec = int(tok.vocab_size)
+            pad_id, bos_id, eos_id = int(tok.PAD), int(tok.BOS), int(tok.EOS)
+            vocab_ctc = base
+            return vocab_dec, vocab_ctc, pad_id, bos_id, eos_id
+
+        # Character mode
+        pad_id, bos_id, eos_id = base, base + 1, base + 2
+        vocab_dec = base + (3 if ar_mode else 0)
+        vocab_ctc = base
+        return int(vocab_dec), int(vocab_ctc), int(pad_id), int(bos_id), int(eos_id)
+
+    class _ProfileWrapper(torch.nn.Module):
+        """Force execution of optional branches so THOP counts their params."""
+
+        def __init__(
+            self,
+            model: torch.nn.Module,
+            *,
+            kind: str,
+            force_dec_ctc: bool = False,
+            force_deep_supervision: bool = False,
+        ) -> None:
+            super().__init__()
+            self.model = model
+            self.kind = str(kind)
+            self.force_dec_ctc = bool(force_dec_ctc)
+            self.force_deep_supervision = bool(force_deep_supervision)
+
+        def forward(self, x: torch.Tensor):
+            with torch.no_grad():
+                # DualHeadModel aux branches are gated on model.training.
+                # BaseModel dec-CTC is gated on forward(return_dec_ctc=True).
+                if self.kind == 'dual':
+                    force_train = bool(self.force_dec_ctc or self.force_deep_supervision)
+                    prev_mode = self.model.training
+                    try:
+                        self.model.train(force_train)
+                        B = x.size(0)
+                        y_inp = torch.zeros(B, 2, dtype=torch.long, device=x.device)
+                        out = self.model(x, y_inp=y_inp, return_ar=True, return_ctc=True)
+                        y = out.get('ar_logits', None)
+                        if y is None:
+                            y = out['ctc_logits']
+                        for t in out.get('ar_logits_layers', []) or []:
+                            y = y + (t.sum() * 0.0)
+                        for t in out.get('dec_ctc_logits_layers', []) or []:
+                            y = y + (t.sum() * 0.0)
+                        return y
+                    finally:
+                        self.model.train(prev_mode)
+
+                if self.kind == 'base':
+                    # Try AR-style forward to ensure decoder-side CTC executes.
+                    B = x.size(0)
+                    y_inp = torch.zeros(B, 2, dtype=torch.long, device=x.device)
+                    out = self.model(
+                        x,
+                        y_inp=y_inp,
+                        return_ar_layers=bool(self.force_dec_ctc),
+                        return_dec_ctc=bool(self.force_dec_ctc),
+                    )
+                    if isinstance(out, dict):
+                        y = out['logits']
+                        for t in out.get('dec_ctc_logits_layers', []) or []:
+                            y = y + (t.sum() * 0.0)
+                        for t in out.get('logits_layers', []) or []:
+                            y = y + (t.sum() * 0.0)
+                        return y
+                    return out
+
+                # Fallback: just run the model.
+                return self.model(x)
+
     lm_mode = cfgs.get('arch_de') in {'byt5_small', 't5-small'}
 
     if lm_mode:
@@ -156,18 +246,69 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
 
         macs, params = profile(model, inputs=(x, len_x, labels), verbose=False)
     else:
-        model = BaseModel(
-            cfgs['arch_en'],
-            cfgs['arch_de'],
-            cfgs['num_channel'],
-            len(cfgs['categories']),
-            cfgs['len_seq'],
-        ).eval()
+        vocab_dec, vocab_ctc, pad_id, bos_id, eos_id = _infer_vocab_and_ids(cfgs)
+
+        # Check if hybrid (dual-head) mode
+        dual_cfg = cfgs.get('dual_head', {}) or {}
+        dual_enabled = isinstance(dual_cfg, dict) and bool(dual_cfg.get('enabled', False))
+
+        if dual_enabled:
+            if bool(cfgs.get('use_bpe', False)):
+                raise ValueError("dual_head.enabled currently supports character mode only (use_bpe must be false)")
+
+            tie_cfg = dual_cfg.get('tie', {}) or {}
+            model = DualHeadModel(
+                arch_en=cfgs['arch_en'],
+                arch_ar=cfgs['arch_de'],
+                arch_ctc=str(dual_cfg.get('arch_ctc', 'linear')),
+                in_chan=cfgs['num_channel'],
+                vocab_ar=vocab_dec,
+                vocab_ctc=vocab_ctc,
+                len_seq=cfgs['len_seq'],
+                use_gated_attention=bool(cfgs.get('use_gated_attention', False)),
+                gating_type=str(cfgs.get('gating_type', 'elementwise')),
+                pad_id=pad_id,
+                bos_id=bos_id,
+                eos_id=eos_id,
+                tie_cfg=tie_cfg,
+                dual_cfg=dual_cfg,
+            ).eval()
+        else:
+            model = BaseModel(
+                cfgs['arch_en'],
+                cfgs['arch_de'],
+                cfgs['num_channel'],
+                vocab_dec,
+                cfgs['len_seq'],
+                use_gated_attention=bool(cfgs.get('use_gated_attention', False)),
+                gating_type=str(cfgs.get('gating_type', 'elementwise')),
+                vocab_ctc=vocab_ctc,
+                pad_id=pad_id,
+                decoder_side_ctc_cfg=cfgs.get('decoder_side_ctc', {}) or {},
+            ).eval()
+
         model.infer()
-        x = torch.randn(
-            1, cfgs['num_channel'], 1024 if 'word' in cfgs['dir_dataset'] else 4096
-        )
-        macs, params = profile(model, inputs=(x,))
+        T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+        x = torch.randn(1, cfgs['num_channel'], T)
+
+        if dual_enabled:
+            dec_ctc_cfg = dual_cfg.get('decoder_side_ctc', {}) or {}
+            deep_cfg = dual_cfg.get('deep_supervision', {}) or {}
+            wrap = _ProfileWrapper(
+                model,
+                kind='dual',
+                force_dec_ctc=bool(dec_ctc_cfg.get('enabled', False)),
+                force_deep_supervision=bool(deep_cfg.get('enabled', False)),
+            )
+            macs, params = profile(wrap, inputs=(x,), verbose=False)
+        else:
+            dec_ctc_cfg = cfgs.get('decoder_side_ctc', {}) or {}
+            wrap = _ProfileWrapper(
+                model,
+                kind='base',
+                force_dec_ctc=bool(dec_ctc_cfg.get('enabled', False)),
+            )
+            macs, params = profile(wrap, inputs=(x,), verbose=False)
 
     results['macs'] = int(macs)
     results['params'] = int(params)

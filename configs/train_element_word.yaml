@@ -1,3 +1,35 @@
+# Dual-head configuration for hybrid CTC/Attention model
+dual_head:
+  enabled: false
+  arch_ctc: linear
+  lambda_ar: 1.0
+  lambda_ctc: 0.5  # base value (will be overridden by schedule if enabled)
+  tie:
+    ctc_to_ar_outproj: false  # tie CTC outproj to AR outproj
+    ar_emb_outproj: false    # tie AR embedding outproj to AR outproj
+    ctc_input_space: "dec"  # "enc" or "dec" (dec reuses mem_proj if dims mismatch)
+  lambda_ctc_schedule:
+    enabled: false         # enable/disable schedule (if false, uses static lambda_ctc)
+    type: linear          # schedule type (linear ramp/decay over epochs), not CTC head architecture
+    warmup_epochs: 0      # no warmup, start at max immediately
+    max: 0.6              # high CTC early
+    decay_start: 50       # start decay at epoch 50
+    min: 0.1              # decay to low by epoch 150
+    decay_epochs: 100     # decay over 100 epochs (50→150)
+  loss_balance: sum       # "sum" (default): loss = λ_ar·loss_ar + λ_ctc·loss_ctc (current behavior, no change)
+                          # "normalize": loss = (λ_ar·loss_ar + λ_ctc·loss_ctc) / (λ_ar + λ_ctc) (keeps gradients stable across λ sweeps)
+                          # "convex": loss = (1-α)·loss_ar + α·loss_ctc where α = clamp(λ_ctc, 0, 1)
+
+# AR-only + decoder-side CTC (attention mode)
+decoder_side_ctc:
+  enabled: false
+  mode: attention   # 'attention' or 'pool' (pooling mode uses encoder-decoder attention weights to pool encoder outputs)
+  layers: [1, 2, 3]
+  lambda: 0.5
+  nhead: 4
+  layernorm: true
+
+
 arch_de: 'ar_transformer_s' # decoder architecture
 arch_en: 'blconv_b'
 aug: true # whether to perform data augmentation for train set
@@ -7,7 +39,7 @@ ctc_decoder: best_path
 device: cuda
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/element_word_no_tokenizer_init_lr/ar_transformer_s__wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/element_word_onhw500_new
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_onhw_wd_word_rh
 
 epoch: 300
@@ -25,6 +57,10 @@ num_worker: 16
 seed: 42
 size_batch: 64
 test: false
+save_best_only: true # whether to save only the best checkpoints during training
+export_val_full: false # whether to export full val set decoding results during training
+use_amp: true # whether to use automatic mixed precision (AMP) training, default true
+
 
 tokenizer:
   type: sentencepiece

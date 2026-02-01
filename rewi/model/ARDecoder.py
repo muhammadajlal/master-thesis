@@ -78,7 +78,10 @@ class HeadwiseGating(nn.Module):
 
 class GatedMultiheadAttention(nn.Module):
     """
-    Manual multi-head attention with SDPA output gating (G1).
+    Wrapper around nn.MultiheadAttention with SDPA output gating (G1).
+
+    Uses nn.MultiheadAttention internally so THOP counts parameters
+    identically to vanilla attention (only gating params are additional).
 
     gating_type:
       - "elementwise": per-head, per-dim gating (SDPA Elementwise)
@@ -96,30 +99,19 @@ class GatedMultiheadAttention(nn.Module):
         self.batch_first = True
         self.gating_type = gating_type
 
-        self.q_proj = nn.Linear(d_model, d_model)
-        self.k_proj = nn.Linear(d_model, d_model)
-        self.v_proj = nn.Linear(d_model, d_model)
-        self.out_proj = nn.Linear(d_model, d_model)
+        # Use standard nn.MultiheadAttention for THOP consistency
+        self.mha = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
 
-        self.attn_dropout = nn.Dropout(dropout)
-
+        # Only gating adds extra parameters
         if gating_type == "elementwise":
             self.gating = ElementwiseHeadGating(num_heads, self.head_dim)
         else:  # "headwise"
             self.gating = HeadwiseGating(num_heads, self.head_dim)
-
-
-    def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
-        # (B, T, C) -> (B, H, T, D)
-        B, T, C = x.shape
-        x = x.view(B, T, self.num_heads, self.head_dim)
-        return x.permute(0, 2, 1, 3)
-
-    def _merge_heads(self, x: torch.Tensor) -> torch.Tensor:
-        # (B, H, T, D) -> (B, T, C)
-        B, H, T, D = x.shape
-        x = x.permute(0, 2, 1, 3).contiguous()
-        return x.view(B, T, H * D)
 
     def forward(
         self,
@@ -130,46 +122,61 @@ class GatedMultiheadAttention(nn.Module):
         key_padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         B, T_q, _ = query.shape
-        _, T_k, _ = key.shape
 
-        q = self._split_heads(self.q_proj(query))  # (B, H, T_q, D)
-        k = self._split_heads(self.k_proj(key))    # (B, H, T_k, D)
-        v = self._split_heads(self.v_proj(value))  # (B, H, T_k, D)
+        # Get attention output from nn.MultiheadAttention
+        # We need to intercept the pre-output-projection result to apply gating
+        # Unfortunately nn.MHA doesn't expose this, so we compute attention manually
+        # using the same weights but apply gating before out_proj
+
+        # Access internal weights from nn.MultiheadAttention
+        E = self.d_model
+        w_q, w_k, w_v = self.mha.in_proj_weight.chunk(3)
+        b_q, b_k, b_v = (self.mha.in_proj_bias.chunk(3) 
+                        if self.mha.in_proj_bias is not None 
+                        else (None, None, None))
+
+        # Project Q, K, V
+        q = F.linear(query, w_q, b_q)  # (B, T_q, E)
+        k = F.linear(key, w_k, b_k)    # (B, T_k, E)
+        v = F.linear(value, w_v, b_v)  # (B, T_k, E)
+
+        # Reshape for multi-head: (B, T, E) -> (B, H, T, D)
+        q = q.view(B, T_q, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(B, -1, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Scaled dot-product attention
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)  # (B, H, T_q, T_k)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
 
-        # attn_mask: e.g. causal mask (T_q, T_k) bool; True = masked
+        # Apply attention mask
         if attn_mask is not None:
-            # Make sure mask is broadcastable to (B, H, T_q, T_k)
-            if attn_mask.dim() == 2:        # (T_q, T_k)
-                attn_mask_exp = attn_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T_q, T_k)
-            elif attn_mask.dim() == 3:      # (B, T_q, T_k)
-                attn_mask_exp = attn_mask.unsqueeze(1)               # (B, 1, T_q, T_k)
-            else:                            # already 4D?
-                attn_mask_exp = attn_mask
-
-            if attn_mask_exp.dtype == torch.bool:
-                scores = scores.masked_fill(attn_mask_exp, float("-inf"))
+            if attn_mask.dim() == 2:
+                attn_mask = attn_mask.unsqueeze(0).unsqueeze(0)
+            elif attn_mask.dim() == 3:
+                attn_mask = attn_mask.unsqueeze(1)
+            if attn_mask.dtype == torch.bool:
+                scores = scores.masked_fill(attn_mask, float("-inf"))
             else:
-                # assume additive mask with 0 or -inf
-                scores = scores + attn_mask_exp
+                scores = scores + attn_mask
 
-        # key_padding_mask: (B, T_k) bool; True = masked
+        # Apply key padding mask
         if key_padding_mask is not None:
-            kpm = key_padding_mask.view(B, 1, 1, T_k)  # (B, 1, 1, T_k)
+            kpm = key_padding_mask.view(B, 1, 1, -1)
             scores = scores.masked_fill(kpm, float("-inf"))
 
         attn = F.softmax(scores, dim=-1)
-        attn = self.attn_dropout(attn)
+        attn = F.dropout(attn, p=self.mha.dropout, training=self.training)
 
-        y = torch.matmul(attn, v)  # (B, H, T_q, D) — SDPA output per head
+        # Attention output per head
+        y = torch.matmul(attn, v)  # (B, H, T_q, D)
 
-        # 🔥 Per-head, elementwise gating on SDPA output
-        y = self.gating(y)         # (B, H, T_q, D)
+        # 🔥 Apply gating on SDPA output (before out_proj)
+        y = self.gating(y)
 
-        y = self._merge_heads(y)   # (B, T_q, C)
-        y = self.out_proj(y)       # (B, T_q, C)
+        # Merge heads and apply output projection
+        y = y.transpose(1, 2).contiguous().view(B, T_q, E)
+        y = F.linear(y, self.mha.out_proj.weight, self.mha.out_proj.bias)
+
         return y
 
 
@@ -380,21 +387,16 @@ class ARDecoder(nn.Module):
 
             # ---- your gated GatedTransformerDecoderLayer ----
             elif isinstance(layer, GatedTransformerDecoderLayer):
-                # self- & cross-attn use GatedMultiheadAttention
+                # self- & cross-attn use GatedMultiheadAttention wrapping nn.MultiheadAttention
                 for attn in [layer.self_attn, layer.multihead_attn]:
-                    nn.init.normal_(attn.q_proj.weight, std=attn_std)
-                    nn.init.normal_(attn.k_proj.weight, std=attn_std)
-                    nn.init.normal_(attn.v_proj.weight, std=attn_std)
-                    if attn.q_proj.bias is not None:
-                        nn.init.zeros_(attn.q_proj.bias)
-                    if attn.k_proj.bias is not None:
-                        nn.init.zeros_(attn.k_proj.bias)
-                    if attn.v_proj.bias is not None:
-                        nn.init.zeros_(attn.v_proj.bias)
-
-                    nn.init.normal_(attn.out_proj.weight, std=proj_std)
-                    if attn.out_proj.bias is not None:
-                        nn.init.zeros_(attn.out_proj.bias)
+                    # Access the internal nn.MultiheadAttention
+                    mha = attn.mha
+                    nn.init.normal_(mha.in_proj_weight, std=attn_std)
+                    if mha.in_proj_bias is not None:
+                        nn.init.zeros_(mha.in_proj_bias)
+                    nn.init.normal_(mha.out_proj.weight, std=proj_std)
+                    if mha.out_proj.bias is not None:
+                        nn.init.zeros_(mha.out_proj.bias)
 
                 # MLP
                 nn.init.normal_(layer.linear1.weight, std=fc_std)
