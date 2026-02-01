@@ -1,4 +1,4 @@
-arch_de: 'ar_transformer_s' # decoder architecture
+arch_de: 'bilstm_wide' # decoder architecture
 arch_en: 'blconv_b'
 aug: true # whether to perform data augmentation for train set
 cache: true # whether to cache the whole dataset into rams
@@ -7,7 +7,7 @@ ctc_decoder: best_path
 device: cuda
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv_ARDecoder_no_tokenizer_SameWriter/ar_transformer_s__wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv_bilstm_wide_no_tokenizer/bilstm_wide__wi_word_hw6_meta
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_onhw_wd_word_rh
 
 epoch: 300
@@ -38,7 +38,7 @@ gating_type: elementwise # options: "elementwise", "headwise"
 
 # Input sequence concatenation for training
 concat:
-  enabled: true
+  enabled: false
   # how many samples to concatenate per virtual item
   items_min: 2
   items_max: 6
