@@ -1,9 +1,19 @@
 # Dual-head configuration for hybrid CTC/Attention model
 dual_head:
-  enabled: false
-  arch_ctc: linear
-  lambda_ar: 1.0
-  lambda_ctc: 0.5  # base value (will be overridden by schedule if enabled)
+  enabled: true
+  # Primary head selection for checkpointing/aggregation in hybrid runs.
+  # Options: "ctc", "ar", or "auto" (auto infers from lambda weights).
+  primary: ctc
+
+  # CTC head architecture (per-timestep). For a BiLSTM CTC primary experiment use bilstm_*.
+  arch_ctc: bilstm_b
+
+  # Loss weights (CTC primary, AR auxiliary)
+  lambda_ar: 0.4
+  lambda_ctc: 1.0  # base value (will be overridden by schedule if enabled)
+
+  # Optional: also save best checkpoint by validation (hybrid) loss.
+  save_best_hybrid_loss: false
   tie:
     ctc_to_ar_outproj: false  # tie CTC outproj to AR outproj
     ar_emb_outproj: false    # tie AR embedding outproj to AR outproj
@@ -16,7 +26,7 @@ dual_head:
     decay_start: 50       # start decay at epoch 50
     min: 0.1              # decay to low by epoch 150
     decay_epochs: 100     # decay over 100 epochs (50→150)
-  loss_balance: sum       # "sum" (default): loss = λ_ar·loss_ar + λ_ctc·loss_ctc (current behavior, no change)
+  loss_balance: normalize # "sum" (default): loss = λ_ar·loss_ar + λ_ctc·loss_ctc
                           # "normalize": loss = (λ_ar·loss_ar + λ_ctc·loss_ctc) / (λ_ar + λ_ctc) (keeps gradients stable across λ sweeps)
                           # "convex": loss = (1-α)·loss_ar + α·loss_ctc where α = clamp(λ_ctc, 0, 1)
 
@@ -30,16 +40,18 @@ decoder_side_ctc:
   layernorm: true
 
 
-arch_de: 'ar_transformer_s' # decoder architecture
+# In dual-head (hybrid) mode, `arch_de` is the AR head architecture.
+# Your primary CTC decoding head is configured via `dual_head.arch_ctc` above.
+arch_de: 'ar_transformer_s' # AR head (auxiliary when dual_head.primary=ctc)
 arch_en: 'blconv_b'
 aug: true # whether to perform data augmentation for train set
 cache: true # whether to cache the whole dataset into rams
 checkpoint: null # path to checkpoint to load
 ctc_decoder: best_path
 device: cuda
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/element_word_onhw500_new
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/element_word_onhw500_CTC_primary04
 #dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_onhw_wd_word_rh
 
 epoch: 300
