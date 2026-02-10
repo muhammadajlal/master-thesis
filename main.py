@@ -725,21 +725,123 @@ def _maybe_unfreeze_lm(cfgs, model, optimizer, lr_scheduler, e, helpers):
 
 def _save_checkpoints(cfgs, model, optimizer, lr_scheduler, manager, e):
     """Save best and last checkpoints."""
-    # Best checkpoints based on metrics
-    if bool(getattr(cfgs, "save_best_only", False)):
-        manager.summarize_evaluation()
-        best = manager.results.get("best", {})
-        if isinstance(best, dict):
-            if "character_error_rate" in best and int(best["character_error_rate"][0]) == int(e):
+    def _best_test_loss_epoch(man):
+        best_epoch = None
+        best_val = None
+        for epoch, rec in man.results.items():
+            if not isinstance(epoch, int) or not isinstance(rec, dict):
+                continue
+            test_list = rec.get("test", None)
+            if not isinstance(test_list, list) or not test_list:
+                continue
+            loss_avg = test_list[-1].get("loss_avg", None)
+            if loss_avg is None:
+                continue
+            try:
+                loss_val = float(loss_avg)
+            except Exception:
+                continue
+            if best_val is None or loss_val < best_val:
+                best_val = loss_val
+                best_epoch = int(epoch)
+        return best_epoch, best_val
+
+    def _maybe_save_best_from_bestdict(best_dict: dict, *, prefix: str, also_update_primary: bool):
+        if not isinstance(best_dict, dict):
+            return
+        if "character_error_rate" in best_dict and int(best_dict["character_error_rate"][0]) == int(e):
+            manager.save_checkpoint(
+                model.state_dict(), optimizer.state_dict(),
+                lr_scheduler.state_dict(), filename=f"best_{prefix}_cer.pth"
+            )
+            if also_update_primary:
                 manager.save_checkpoint(
                     model.state_dict(), optimizer.state_dict(),
                     lr_scheduler.state_dict(), filename="best_cer.pth"
                 )
-            if "word_error_rate" in best and int(best["word_error_rate"][0]) == int(e):
+        if "word_error_rate" in best_dict and int(best_dict["word_error_rate"][0]) == int(e):
+            manager.save_checkpoint(
+                model.state_dict(), optimizer.state_dict(),
+                lr_scheduler.state_dict(), filename=f"best_{prefix}_wer.pth"
+            )
+            if also_update_primary:
                 manager.save_checkpoint(
                     model.state_dict(), optimizer.state_dict(),
                     lr_scheduler.state_dict(), filename="best_wer.pth"
                 )
+
+    # Best checkpoints based on metrics/loss
+    if bool(getattr(cfgs, "save_best_only", False)):
+        dual = getattr(cfgs, "dual_head", {}) or {}
+        dual_enabled = bool(getattr(cfgs, "DUAL_HEAD", False)) or bool(dual.get("enabled", False))
+
+        # Always keep backward-compatible best tracking for AR metrics under key='evaluation'.
+        # (Used by existing aggregation code that reads results['best']).
+        manager.summarize_evaluation(key="evaluation")
+        best_ar = manager.results.get("best", {})
+
+        best_ctc = {}
+        if dual_enabled:
+            manager.summarize_evaluation(key="evaluation_ctc")
+            best_ctc = manager.results.get("best_evaluation_ctc", {})
+
+        # Select which head defines best_cer.pth / best_wer.pth.
+        # If not explicitly set, infer from loss weights so that the saved
+        # "best_*" checkpoints match the intended decoding head.
+        primary_raw = dual.get("primary", dual.get("primary_head", None))
+        primary = str(primary_raw).lower() if primary_raw is not None else "auto"
+        if primary in {"", "none", "null"}:
+            primary = "auto"
+
+        if primary == "auto" and dual_enabled:
+            try:
+                lambda_ar_cfg = float(dual.get("lambda_ar", 1.0))
+            except Exception:
+                lambda_ar_cfg = 1.0
+            try:
+                lambda_ctc_cfg = float(dual.get("lambda_ctc", 0.0))
+            except Exception:
+                lambda_ctc_cfg = 0.0
+
+            sched = dual.get("lambda_ctc_schedule", None) or {}
+            sched_enabled = bool(sched.get("enabled", False))
+            if sched_enabled and "max" in sched:
+                try:
+                    lambda_ctc_ref = float(sched.get("max", lambda_ctc_cfg))
+                except Exception:
+                    lambda_ctc_ref = lambda_ctc_cfg
+            else:
+                lambda_ctc_ref = lambda_ctc_cfg
+
+            primary = "ctc" if lambda_ctc_ref >= lambda_ar_cfg else "ar"
+
+        if primary not in {"ar", "ctc", "hybrid_loss"}:
+            primary = "ar"
+
+        # Save per-head best checkpoints and, for the chosen primary head, also update best_cer/best_wer.
+        _maybe_save_best_from_bestdict(best_ar, prefix="ar", also_update_primary=(primary == "ar"))
+        if dual_enabled:
+            _maybe_save_best_from_bestdict(best_ctc, prefix="ctc", also_update_primary=(primary == "ctc"))
+
+        # Save best-by-loss checkpoints (uses validation loss_avg).
+        # In hybrid mode this corresponds to the *hybrid loss* used in test_hybrid.
+        save_best_loss = bool(dual.get("save_best_hybrid_loss", False)) if dual_enabled else bool(getattr(cfgs, "save_best_loss", False))
+        if save_best_loss:
+            be, _ = _best_test_loss_epoch(manager)
+            if be is not None and int(be) == int(e):
+                # Generic name (works for any regime)
+                manager.save_checkpoint(
+                    model.state_dict(), optimizer.state_dict(),
+                    lr_scheduler.state_dict(), filename="best_loss.pth"
+                )
+                # Hybrid-specific alias
+                if dual_enabled:
+                    manager.save_checkpoint(
+                        model.state_dict(), optimizer.state_dict(),
+                        lr_scheduler.state_dict(), filename="best_hybrid_loss.pth"
+                    )
+                # If primary selection is loss-based, also update best_cer/best_wer equivalent is ambiguous;
+                # we keep best_loss.pth as the primary artifact in that case.
 
     # Always save last checkpoint for resuming
     if not cfgs.test:

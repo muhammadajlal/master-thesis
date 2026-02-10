@@ -283,12 +283,19 @@ class RunManager:
 
         return loss_avg
 
-    def summarize_evaluation(self) -> None:
-        '''Summarize the evaluation results.'''
+    def summarize_evaluation(self, key: str = 'evaluation') -> None:
+        """Summarize evaluation results for a given key.
+
+        By default this behaves exactly like the previous implementation and
+        stores the best metrics under self.results['best'].
+
+        For alternate evaluation keys (e.g. 'evaluation_ctc'), this stores the
+        best metrics under self.results[f'best_{key}'].
+        """
         results_eval = [
-            [epoch, result['evaluation']]
+            [epoch, result[key]]
             for epoch, result in self.results.items()
-            if 'evaluation' in result.keys()
+            if isinstance(epoch, int) and isinstance(result, dict) and key in result.keys()
         ]
         if not results_eval:
             # Can happen early in training if freq_eval skips first epochs.
@@ -305,8 +312,9 @@ class RunManager:
                 ):
                     best[metric] = [result[0], float(result[1][metric])]
 
-        self.results['best'] = best
-        logger.info(f'best: {best}')
+        store_key = 'best' if key == 'evaluation' else f'best_{key}'
+        self.results[store_key] = best
+        logger.info(f'best[{store_key}]: {best}')
         self.save_results()
 
     def update_evaluation(

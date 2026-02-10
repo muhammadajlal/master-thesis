@@ -35,16 +35,74 @@ def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
         os.path.join(cfgs['dir_work'], '**', pattern), recursive=True   # <-- CHANGED '**' + recursive=True
     )
 
+    def _infer_primary_head_from_cfg(cfg: dict) -> str:
+        dual = cfg.get("dual_head", {}) or {}
+        if not bool(dual.get("enabled", False)):
+            return "ar"
+
+        primary_raw = dual.get("primary", dual.get("primary_head", None))
+        primary = str(primary_raw).lower() if primary_raw is not None else "auto"
+        if primary in {"", "none", "null"}:
+            primary = "auto"
+        if primary in {"ar", "ctc"}:
+            return primary
+
+        # Auto: infer from the configured loss weights (use schedule.max when enabled)
+        try:
+            lambda_ar_cfg = float(dual.get("lambda_ar", 1.0))
+        except Exception:
+            lambda_ar_cfg = 1.0
+        try:
+            lambda_ctc_cfg = float(dual.get("lambda_ctc", 0.0))
+        except Exception:
+            lambda_ctc_cfg = 0.0
+
+        sched = dual.get("lambda_ctc_schedule", None) or {}
+        sched_enabled = bool(sched.get("enabled", False))
+        if sched_enabled and "max" in sched:
+            try:
+                lambda_ctc_ref = float(sched.get("max", lambda_ctc_cfg))
+            except Exception:
+                lambda_ctc_ref = lambda_ctc_cfg
+        else:
+            lambda_ctc_ref = lambda_ctc_cfg
+
+        return "ctc" if lambda_ctc_ref >= lambda_ar_cfg else "ar"
+
+    def _pick_test_epoch_key(result_fd: dict) -> str:
+        # Backward compatible with older logs that used epoch=-1 for test.
+        if "-1" in result_fd:
+            return "-1"
+        if "0" in result_fd:
+            return "0"
+        # Fall back to the smallest int-like epoch key.
+        int_keys = []
+        for k in result_fd.keys():
+            try:
+                int_keys.append(int(k))
+            except Exception:
+                continue
+        if int_keys:
+            return str(min(int_keys))
+        return "0"
+
     if paths_result:
         for i, path_result in enumerate(sorted(paths_result)):
             with open(path_result, 'r') as f:
                 result_fd = json.load(f)
 
+            primary = _infer_primary_head_from_cfg(cfgs)
+            eval_key = 'evaluation_ctc' if primary == 'ctc' else 'evaluation'
+            best_key = 'best' if eval_key == 'evaluation' else f'best_{eval_key}'
+
             if cfgs['test']:
-                result_best = result_fd['-1']['evaluation']
+                ep = _pick_test_epoch_key(result_fd)
+                # In hybrid test mode, both eval keys are present.
+                result_best = result_fd.get(ep, {}).get(eval_key, result_fd.get(ep, {}).get('evaluation'))
             else:
-                epoch_best = result_fd['best']['character_error_rate'][0]
-                result_best = result_fd[str(epoch_best)]['evaluation']
+                best_dict = result_fd.get(best_key, result_fd.get('best', {}))
+                epoch_best = best_dict['character_error_rate'][0]
+                result_best = result_fd[str(epoch_best)][eval_key]
 
             cer[str(i)] = result_best['character_error_rate']
             wer[str(i)] = result_best['word_error_rate']
