@@ -28,6 +28,9 @@ def draw_sem(
 
     cnt_event = {'delete': 0, 'equal': 0, 'insert': 0, 'substitute': 0}
 
+    # Build lookup set for fast membership check
+    cats_set = set(cats)
+
     for results, hyp, ref in zip(
         out.alignments, out.hypotheses, out.references
     ):
@@ -35,7 +38,8 @@ def draw_sem(
             if event.type in ['substitute']:
                 for i in range(event.ref_start_idx, event.ref_end_idx):
                     for j in range(event.hyp_start_idx, event.hyp_end_idx):
-                        confusion[cats.index(hyp[j])][cats.index(ref[i])] += 1
+                        if ref[i] in cats_set and hyp[j] in cats_set:
+                            confusion[cats.index(hyp[j])][cats.index(ref[i])] += 1
 
             cnt_event[event.type] += (
                 event.hyp_end_idx - event.hyp_start_idx
@@ -44,7 +48,11 @@ def draw_sem(
             )
 
         for char in ref:
-            count[0][cats.index(char)] += 1
+            if char in cats_set:
+                count[0][cats.index(char)] += 1
+
+    # Avoid division by zero for categories with no occurrences
+    count_safe = np.where(count > 0, count, 1)
 
     plt.figure(figsize=(10, 10), dpi=300)
     plt.figtext(
@@ -53,7 +61,7 @@ def draw_sem(
         ''.join([f'{k}: {v}, ' for k, v in cnt_event.items()]),
         ha='center',
     )
-    plt.imshow(1 - (confusion / count), cmap='gray')
+    plt.imshow(1 - (confusion / count_safe), cmap='gray')
     plt.xlabel('Reference')
     plt.ylabel('Hypothesis')
     plt.xticks(np.arange(len(cats)), cats)
@@ -71,6 +79,7 @@ def visualize(
     dir_save: str,
     epoch: int,
     use_sem: bool = True,
+    suffix: str = '',
 ) -> None:
     '''Results visualization.
 
@@ -81,7 +90,8 @@ def visualize(
         dir_save (str): Path to the directory to save.
         epoch (int): Epoch number.
         use_sem (bool, optional): Whether to draw the substitution error matrix. Defaults to True.
+        suffix (str, optional): Filename suffix (e.g. '_ctc') to distinguish multiple matrices. Defaults to ''.
     '''    
     if use_sem:
-        path_save = os.path.join(dir_save, f'mat_se_{epoch}.pdf')
+        path_save = os.path.join(dir_save, f'mat_se_{epoch}{suffix}.pdf')
         draw_sem(labels, preds, cats, path_save)

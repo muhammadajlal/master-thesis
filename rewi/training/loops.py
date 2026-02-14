@@ -779,8 +779,11 @@ def test(
             )
             return
 
-        if not isinstance(fn_loss, nn.CrossEntropyLoss):
-            visualize(preds, labels, man.cfgs.categories[1:], man.dir_vis, epoch)
+        # Make matrix naming explicit across modes.
+        # - AR-only:  mat_se_<epoch>_ar.pdf
+        # - CTC-only: mat_se_<epoch>_ctc.pdf
+        suffix = '_ar' if isinstance(fn_loss, nn.CrossEntropyLoss) else '_ctc'
+        visualize(preds, labels, man.cfgs.categories[1:], man.dir_vis, epoch, suffix=suffix)
 
         results_eval = evaluate(preds, labels)
         man.update_evaluation(
@@ -1119,6 +1122,11 @@ def test_hybrid(
     man.summarize_epoch()
 
     if do_eval:
+        cats = man.cfgs.categories[1:]  # exclude blank
+        # Make matrix naming explicit across modes.
+        visualize(preds_ar, labels_ar, cats, man.dir_vis, epoch, suffix='_ar')
+        visualize(preds_ctc, labels_ctc, cats, man.dir_vis, epoch, suffix='_ctc')
+
         results_ar = evaluate(preds_ar, labels_ar)
         results_ctc = evaluate(preds_ctc, labels_ctc)
         man.update_evaluation(results_ar, preds_ar[:20], labels_ar[:20], key='evaluation', label='AR-greedy')
