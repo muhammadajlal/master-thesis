@@ -2,8 +2,8 @@
 #SBATCH -J rewi-infer-word
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
-#SBATCH -p v100
-#SBATCH --gres=gpu:v100:1
+#SBATCH -p rtx3080
+#SBATCH --gres=gpu:rtx3080:1
 #SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 #SBATCH --array=0-4

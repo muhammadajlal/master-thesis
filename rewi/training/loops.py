@@ -1121,6 +1121,33 @@ def test_hybrid(
 
     man.summarize_epoch()
 
+    # Export full-set predictions for analysis.
+    # Note: For hybrid we export both AR-greedy and CTC-bestpath.
+    export_val_full = bool(getattr(man.cfgs, "export_val_full", False))
+    is_test_mode = bool(getattr(man.cfgs, "test", False))
+    do_export = is_test_mode or (export_val_full and do_eval)
+
+    if do_export and do_eval:
+        export_dir = os.path.join(man.cfgs.dir_work, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        epoch_tag = "best" if epoch is None else f"epoch{epoch}"
+
+        export_path_ar = os.path.join(
+            export_dir,
+            f"val_full_fold{man.cfgs.idx_fold}_{epoch_tag}_ar.json",
+        )
+        with open(export_path_ar, "w", encoding="utf-8") as f:
+            json.dump({"predictions": preds_ar, "labels": labels_ar}, f, ensure_ascii=False)
+        logger.info("Exported full validation predictions (AR) to {}", export_path_ar)
+
+        export_path_ctc = os.path.join(
+            export_dir,
+            f"val_full_fold{man.cfgs.idx_fold}_{epoch_tag}_ctc.json",
+        )
+        with open(export_path_ctc, "w", encoding="utf-8") as f:
+            json.dump({"predictions": preds_ctc, "labels": labels_ctc}, f, ensure_ascii=False)
+        logger.info("Exported full validation predictions (CTC) to {}", export_path_ctc)
+
     if do_eval:
         cats = man.cfgs.categories[1:]  # exclude blank
         # Make matrix naming explicit across modes.

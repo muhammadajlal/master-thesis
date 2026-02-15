@@ -47,6 +47,10 @@ MANIFEST
 /tokenizer/bpe*.vocab
 /tokenizer/bpe*.txt
 /slurm/logs/
+/figures/
+/analysis/quant_analysis_outputs*/
+/analysis/tables/
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
