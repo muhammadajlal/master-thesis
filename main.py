@@ -429,6 +429,88 @@ def _build_standard_optimizer(cfgs, model, dataloader_train):
     return optimizer, scaler, lr_scheduler
 
 
+def _migrate_legacy_mha_keys(state_dict: dict) -> dict:
+    """Migrate old separate-projection MHA keys to nn.MultiheadAttention format.
+
+    Old format (custom GatedMultiheadAttention with manual projections):
+        *.self_attn.q_proj.weight   (D, D)
+        *.self_attn.k_proj.weight   (D, D)
+        *.self_attn.v_proj.weight   (D, D)
+        *.self_attn.q_proj.bias     (D,)
+        *.self_attn.k_proj.bias     (D,)
+        *.self_attn.v_proj.bias     (D,)
+        *.self_attn.out_proj.weight (D, D)
+        *.self_attn.out_proj.bias   (D,)
+
+    New format (nn.MultiheadAttention wrapped inside GatedMultiheadAttention):
+        *.self_attn.mha.in_proj_weight  (3*D, D)
+        *.self_attn.mha.in_proj_bias    (3*D,)
+        *.self_attn.mha.out_proj.weight (D, D)
+        *.self_attn.mha.out_proj.bias   (D,)
+
+    Applies to both self_attn and multihead_attn (cross-attention).
+    """
+    import re
+
+    new_sd = {}
+    consumed = set()
+
+    # Find all attention module prefixes that have old-style keys
+    # Pattern: <prefix>.self_attn.q_proj.weight  or  <prefix>.multihead_attn.q_proj.weight
+    old_prefixes = set()
+    for k in state_dict:
+        m = re.match(r"^(.+\.(self_attn|multihead_attn))\.q_proj\.weight$", k)
+        if m:
+            old_prefixes.add(m.group(1))
+
+    if old_prefixes:
+        logger.info("[MHAMigrate] Found {} attention modules with legacy separate-projection keys", len(old_prefixes))
+
+    for prefix in old_prefixes:
+        q_w = state_dict.get(f"{prefix}.q_proj.weight")
+        k_w = state_dict.get(f"{prefix}.k_proj.weight")
+        v_w = state_dict.get(f"{prefix}.v_proj.weight")
+        q_b = state_dict.get(f"{prefix}.q_proj.bias")
+        k_b = state_dict.get(f"{prefix}.k_proj.bias")
+        v_b = state_dict.get(f"{prefix}.v_proj.bias")
+        o_w = state_dict.get(f"{prefix}.out_proj.weight")
+        o_b = state_dict.get(f"{prefix}.out_proj.bias")
+
+        if q_w is not None and k_w is not None and v_w is not None:
+            # Concatenate Q, K, V into in_proj_weight/bias
+            new_sd[f"{prefix}.mha.in_proj_weight"] = torch.cat([q_w, k_w, v_w], dim=0)
+            consumed.update([
+                f"{prefix}.q_proj.weight",
+                f"{prefix}.k_proj.weight",
+                f"{prefix}.v_proj.weight",
+            ])
+
+            if q_b is not None and k_b is not None and v_b is not None:
+                new_sd[f"{prefix}.mha.in_proj_bias"] = torch.cat([q_b, k_b, v_b], dim=0)
+                consumed.update([
+                    f"{prefix}.q_proj.bias",
+                    f"{prefix}.k_proj.bias",
+                    f"{prefix}.v_proj.bias",
+                ])
+
+        if o_w is not None:
+            new_sd[f"{prefix}.mha.out_proj.weight"] = o_w
+            consumed.add(f"{prefix}.out_proj.weight")
+        if o_b is not None:
+            new_sd[f"{prefix}.mha.out_proj.bias"] = o_b
+            consumed.add(f"{prefix}.out_proj.bias")
+
+    # Copy all non-consumed keys unchanged
+    for k, v in state_dict.items():
+        if k not in consumed:
+            new_sd[k] = v
+
+    if old_prefixes:
+        logger.info("[MHAMigrate] Migrated {} old keys → {} new keys", len(consumed), len(new_sd) - (len(state_dict) - len(consumed)))
+
+    return new_sd
+
+
 def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_train, epoch_start):
     """
     Load checkpoint and handle resume/freeze/finetune modes.
@@ -441,6 +523,10 @@ def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_tr
 
     map_loc = torch.device("cpu") if str(cfgs.device) == "cpu" or not torch.cuda.is_available() else None
     ckp = torch.load(cfgs.checkpoint, map_location=map_loc, weights_only=False)
+
+    # Migrate legacy separate Q/K/V projection keys to nn.MultiheadAttention format
+    ckp["model"] = _migrate_legacy_mha_keys(ckp["model"])
+
     res = model.load_state_dict(ckp["model"], strict=False)
     logger.warning("load_state_dict strict=False | missing={} unexpected={}", res.missing_keys, res.unexpected_keys)
 

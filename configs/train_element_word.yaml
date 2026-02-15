@@ -20,7 +20,7 @@ freq_eval: 5 # frequency (epoch) to evaulate model performance on val set
 freq_log: 50 # frequency (iteration) to log information
 freq_save: 5 # frequency (epoch) to save model checkpoint
 save_best_only: true # whether to save only the best checkpoints during training
-export_val_full: false # whether to export full val set decoding results during training
+export_val_full: true # whether to export full val set decoding results during training
 idx_fold: 0 # cross validation fold index. 0 for non-cross validation. -1 for train for all cross-validation folds automatically
 len_seq: 0
 lr: 0.001

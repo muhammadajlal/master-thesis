@@ -1,4 +1,5 @@
 import os
+import argparse
 import numpy as np
 import pandas as pd
 import unicodedata
@@ -19,7 +20,6 @@ CSV_PATH = "./quant_all_val_predictions_new.csv"   # adjust if needed
 CSV_SEP  = ";"
 
 OUT_DIR  = "./quant_analysis_outputs"
-os.makedirs(OUT_DIR, exist_ok=True)
 
 # How many examples near each quantile (per task)
 K_PER_QUANTILE = 5
@@ -116,10 +116,43 @@ def tail_topk_for_task(task_df: pd.DataFrame, topk: int) -> pd.DataFrame:
         return pd.DataFrame()
     return nz.sort_values("lev_norm", ascending=False).head(topk).copy()
 
+def _parse_args():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv_path", default=CSV_PATH)
+    ap.add_argument("--csv_sep", default=CSV_SEP)
+    ap.add_argument("--out_dir", default=OUT_DIR)
+    ap.add_argument("--k_per_quantile", type=int, default=K_PER_QUANTILE)
+    ap.add_argument("--quantiles", default=",".join(str(q) for q in QUANTILES))
+    ap.add_argument("--topk_tail", type=int, default=TOPK_TAIL)
+    ap.add_argument("--max_show", type=int, default=MAX_SHOW)
+    ap.add_argument(
+        "--verify_d_with_recompute",
+        action="store_true",
+        default=VERIFY_D_WITH_RECOMPUTE,
+    )
+    ap.add_argument(
+        "--no_verify_d_with_recompute",
+        action="store_false",
+        dest="verify_d_with_recompute",
+    )
+    return ap.parse_args()
+
+
+args = _parse_args()
+
+OUT_DIR = args.out_dir
+os.makedirs(OUT_DIR, exist_ok=True)
+
+K_PER_QUANTILE = args.k_per_quantile
+QUANTILES = [float(x) for x in str(args.quantiles).split(",") if str(x).strip()]
+TOPK_TAIL = args.topk_tail
+MAX_SHOW = args.max_show
+VERIFY_D_WITH_RECOMPUTE = args.verify_d_with_recompute
+
 # -----------------------
 # Load + normalize columns
 # -----------------------
-df = pd.read_csv(CSV_PATH, sep=CSV_SEP)
+df = pd.read_csv(args.csv_path, sep=args.csv_sep)
 
 # Your exact headers (capitalized)
 rename_map = {

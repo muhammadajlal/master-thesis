@@ -1,5 +1,6 @@
 import os
 import re
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,7 +11,6 @@ import matplotlib.pyplot as plt
 CSV_PATH = "./quant_all_val_predictions_new.csv"
 CSV_SEP = ";"
 OUT_DIR = "./quant_analysis_outputs"
-os.makedirs(OUT_DIR, exist_ok=True)
 
 # Plot controls
 X_CLIP = 1.5          # clipped histogram/CDF window
@@ -212,10 +212,32 @@ def plot_histograms_and_cdfs(task: str, g: pd.DataFrame, out_dir: str, x_clip: f
     plt.savefig(out, dpi=200, bbox_inches="tight")
     plt.close()
 
+def _parse_args():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--csv_path", default=CSV_PATH)
+    ap.add_argument("--csv_sep", default=CSV_SEP)
+    ap.add_argument("--out_dir", default=OUT_DIR)
+    ap.add_argument("--x_clip", type=float, default=X_CLIP)
+    ap.add_argument("--hist_bins", type=int, default=HIST_BINS)
+    ap.add_argument("--regime_mode", choices=["quantiles", "thresholds"], default=REGIME_MODE)
+    ap.add_argument("--thr", default=",".join(str(x) for x in THR))
+    return ap.parse_args()
+
+
+args = _parse_args()
+
+OUT_DIR = args.out_dir
+os.makedirs(OUT_DIR, exist_ok=True)
+
+X_CLIP = args.x_clip
+HIST_BINS = args.hist_bins
+REGIME_MODE = args.regime_mode
+THR = [float(x) for x in str(args.thr).split(",") if str(x).strip()]
+
 # ============================================================
 # LOAD + FEATURES
 # ============================================================
-df = pd.read_csv(CSV_PATH, sep=CSV_SEP)
+df = pd.read_csv(args.csv_path, sep=args.csv_sep)
 df = standardize_columns(df)
 
 df["task"] = df["task"].astype(str)

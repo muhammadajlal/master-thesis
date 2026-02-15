@@ -6,6 +6,7 @@ This module provides tools for:
 - Grad-CAM 1D visualizations for encoder interpretability
 - Sample selection based on error quantiles
 - Levenshtein distance utilities
+- Encoder feature extraction (t-SNE / PCA, CTC posteriors)
 """
 
 from rewi.analysis.attention import CrossAttnCatcher, attn_to_matrix, save_attn_heatmap
@@ -16,6 +17,11 @@ from rewi.analysis.selection import (
     compute_fold_thresholds,
 )
 from rewi.analysis.metrics import lev_dist
+from rewi.analysis.encoder_features import (
+    extract_encoder_features,
+    extract_ctc_posteriors,
+    load_model_from_checkpoint,
+)
 
 __all__ = [
     # Attention
@@ -32,4 +38,8 @@ __all__ = [
     "compute_fold_thresholds",
     # Metrics
     "lev_dist",
+    # Encoder features
+    "extract_encoder_features",
+    "extract_ctc_posteriors",
+    "load_model_from_checkpoint",
 ]
