@@ -3,25 +3,21 @@
 Comparative analysis of AR-only vs Hybrid CTC-AR encoder representations.
 
 Generates:
-  1. t-SNE / PCA scatter plots of encoder frame embeddings (colored by character)
-  2. Levenshtein distance distribution comparison
-  3. Cosine similarity matrices (intra-sample frame similarity)
-  4. Per-character error rate comparison
+    1. t-SNE / PCA scatter plots of encoder frame embeddings (colored by character)
+    2. Cosine similarity matrices (intra-sample frame similarity)
+    3. Cross-attention maps (teacher-forced)
 
 Usage:
     python analysis/scripts/compare_ar_hybrid.py \
         --ar_ckpt   <path-to-ar-only-best_cer.pth> \
         --hyb_ckpt  <path-to-hybrid-best_cer.pth> \
-        --ar_export <path-to-ar-export-json> \
-        --hyb_export <path-to-hybrid-export-json> \
         --dataset   /path/to/onhw_wi_word_rh \
         --fold 0 \
         --outdir    figures/ar_vs_hybrid \
         [--max_samples 1000] [--device cuda]
 
-All parts are optional — if you only provide exports, only distribution plots
-are generated; if you only provide checkpoints, only embedding plots are
-generated.
+If you want difficulty-based qualitative selection, provide a unified CSV
+using --difficulty_csv along with --difficulty_task.
 """
 
 import argparse
@@ -87,13 +83,11 @@ def parse_args():
     p = argparse.ArgumentParser(description="AR-only vs Hybrid encoder analysis")
     p.add_argument("--ar_ckpt", type=str, default=None, help="AR-only best checkpoint path")
     p.add_argument("--hyb_ckpt", type=str, default=None, help="Hybrid best checkpoint path")
-    p.add_argument("--ar_export", type=str, default=None, help="AR-only export JSON (predictions+labels)")
-    p.add_argument("--hyb_export", type=str, default=None, help="Hybrid export JSON")
     p.add_argument("--dataset", type=str, default=None, help="Dataset root (e.g., onhw_wi_word_rh)")
     p.add_argument("--fold", type=int, default=0)
     p.add_argument("--outdir", type=str, default="figures/ar_vs_hybrid")
     p.add_argument("--max_samples", type=int, default=1000, help="Max samples for feature extraction")
-    p.add_argument("--n_qual_samples", type=int, default=8, help="N samples for qualitative visuals (cosine sim)")
+    p.add_argument("--n_qual_samples", type=int, default=6, help="N samples for qualitative visuals (cosine sim, attention)")
     p.add_argument("--device", type=str, default="cuda")
     p.add_argument("--perplexity", type=int, default=30, help="t-SNE perplexity")
     p.add_argument("--seed", type=int, default=42)
@@ -104,26 +98,37 @@ def parse_args():
         type=str,
         default="auto",
         choices=["auto", "difficulty", "random"],
-        help="auto: use difficulty if an export is provided, else random.",
+        help="auto: use difficulty if a CSV is provided, else random.",
     )
     p.add_argument(
-        "--difficulty_from",
+        "--difficulty_csv",
         type=str,
-        default="auto",
-        choices=["auto", "hyb", "ar"],
-        help="Which export to use for difficulty (auto: prefer --hyb_export if set).",
+        default=None,
+        help="Unified CSV used to select difficulty samples.",
+    )
+    p.add_argument(
+        "--difficulty_task",
+        type=str,
+        default=None,
+        help="Task name in the unified CSV used for difficulty selection.",
+    )
+    p.add_argument(
+        "--difficulty_sep",
+        type=str,
+        default=";",
+        help="CSV separator for --difficulty_csv (default: ';').",
     )
     p.add_argument(
         "--difficulty_quantiles",
         type=str,
-        default="0.50,0.90,0.99",
-        help="Comma-separated quantiles for difficulty picks (default: '0.50,0.90,0.99').",
+        default="0.50,0.50,0.90,0.90,0.99,0.99",
+        help="Comma-separated quantiles for difficulty picks (default: '0.50,0.50,0.90,0.90,0.99,0.99').",
     )
     p.add_argument(
         "--difficulty_n",
         type=int,
-        default=4,
-        help="Number of qualitative examples to pick in difficulty mode (default: 4).",
+        default=6,
+        help="Number of qualitative examples to pick in difficulty mode (default: 6).",
     )
     p.add_argument(
         "--difficulty_no_easy",
@@ -133,7 +138,7 @@ def parse_args():
     p.add_argument(
         "--skip_checkpoints",
         action="store_true",
-        help="Skip checkpoint-based analyses (t-SNE/PCA/cosine sim) and only run export-based metrics.",
+        help="Skip checkpoint-based analyses (t-SNE/PCA/cosine sim).",
     )
     # Model config (must match training)
     p.add_argument("--arch_en", type=str, default="blconv_b")
@@ -325,69 +330,6 @@ def plot_tsne_side_by_side(
     logger.info("Saved side-by-side t-SNE: {}", save_path)
 
 
-# ──────────────── 2. Levenshtein Distribution ──────────────── #
-
-def plot_levenshtein_distribution(
-    preds_ar: list[str], labels_ar: list[str],
-    preds_hyb: list[str], labels_hyb: list[str],
-    save_path: str,
-    title: str = "Levenshtein Distance Distribution",
-    *,
-    normalized: bool = False,
-):
-    r"""Side-by-side histogram + CDF of per-sample Levenshtein distances.
-
-    If normalized=True, plots distance divided by reference length, i.e.
-    $d_\sim = d / |y|$, which is comparable across varying word lengths.
-    """
-    try:
-        from Levenshtein import distance as lev_dist
-    except ImportError:
-        from rewi.analysis.metrics import levenshtein_distance as lev_dist
-
-    dists_ar_raw = [lev_dist(p, l) for p, l in zip(preds_ar, labels_ar)]
-    dists_hyb_raw = [lev_dist(p, l) for p, l in zip(preds_hyb, labels_hyb)]
-
-    if normalized:
-        dists_ar = [d / max(1, len(l)) for d, l in zip(dists_ar_raw, labels_ar)]
-        dists_hyb = [d / max(1, len(l)) for d, l in zip(dists_hyb_raw, labels_hyb)]
-        x_label = "Normalized Levenshtein Distance (d / |ref|)"
-    else:
-        dists_ar = dists_ar_raw
-        dists_hyb = dists_hyb_raw
-        x_label = "Levenshtein Distance"
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), dpi=150)
-
-    # Histogram
-    if normalized:
-        bins = np.linspace(0.0, max(max(dists_ar), max(dists_hyb), 1e-6), 40)
-    else:
-        bins = np.arange(0, max(max(dists_ar), max(dists_hyb)) + 2) - 0.5
-
-    ax1.hist(dists_ar, bins=bins, alpha=0.6, label=f"AR-only (mean={np.mean(dists_ar):.3f})", density=True, color="C0")
-    ax1.hist(dists_hyb, bins=bins, alpha=0.6, label=f"Hybrid (mean={np.mean(dists_hyb):.3f})", density=True, color="C1")
-    ax1.set_xlabel(x_label)
-    ax1.set_ylabel("Density")
-    ax1.set_title(f"{title}{' (normalized)' if normalized else ''} — Histogram")
-    ax1.legend()
-
-    # CDF
-    for dists, label, color in [(dists_ar, "AR-only", "C0"), (dists_hyb, "Hybrid", "C1")]:
-        sorted_d = np.sort(dists)
-        cdf = np.arange(1, len(sorted_d) + 1) / len(sorted_d)
-        ax2.plot(sorted_d, cdf, label=label, color=color)
-    ax2.set_xlabel(x_label)
-    ax2.set_ylabel("Cumulative Proportion")
-    ax2.set_title(f"{title}{' (normalized)' if normalized else ''} — CDF")
-    ax2.legend()
-
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    plt.close()
-    logger.info("Saved Levenshtein distribution: {}", save_path)
-
-
 # ──────────────── 3. Cosine Similarity Matrix ──────────────── #
 
 def _segments_from_char_labels(chars: list[str]):
@@ -449,6 +391,80 @@ def _parse_quantiles(s: str, *, default: tuple[float, ...] = (0.50, 0.90, 0.99))
     return out if out else list(default)
 
 
+def _standardize_columns(df):
+    col_map = {c: "".join(str(c).split()).lower() for c in df.columns}
+
+    targets = {
+        "task": ["task"],
+        "fold": ["fold"],
+        "json_path": ["json_path", "jsonpath"],
+        "sample_index": ["sample_index", "sampleindex"],
+        "prediction": ["prediction", "pred"],
+        "label": ["label", "gt", "groundtruth"],
+        "levenshtein_distance": ["levenshtein_distance", "levenshteindistance", "lev", "distance"],
+    }
+
+    rename = {}
+    for original, norm in col_map.items():
+        for canon, aliases in targets.items():
+            if norm in aliases:
+                rename[original] = canon
+    df = df.rename(columns=rename)
+
+    required = ["task", "fold", "sample_index", "prediction", "label", "levenshtein_distance"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(
+            f"Missing required columns in CSV after normalization: {missing}\n"
+            f"Found columns: {list(df.columns)}"
+        )
+    return df
+
+
+def _load_difficulty_samples_from_csv(
+    csv_path: str,
+    *,
+    sep: str,
+    task: str | None,
+    fold: int,
+) -> tuple[list[str], list[str], list[int], dict[int, str], str]:
+    import pandas as pd
+
+    df = pd.read_csv(csv_path, sep=sep)
+    df = _standardize_columns(df)
+
+    df["task"] = df["task"].astype(str)
+    if task is None:
+        tasks = sorted(set(df["task"].tolist()))
+        if len(tasks) != 1:
+            raise ValueError(
+                "--difficulty_task is required when CSV has multiple tasks. "
+                f"Found tasks: {tasks}"
+            )
+        task = tasks[0]
+
+    df = df[df["task"] == task].copy()
+    if df.empty:
+        raise ValueError(f"No rows found for task '{task}' in difficulty CSV")
+
+    df["fold"] = pd.to_numeric(df["fold"], errors="coerce").astype("Int64")
+    if fold >= 0:
+        df = df[df["fold"] == fold].copy()
+        if df.empty:
+            raise ValueError(f"No rows found for task '{task}' and fold {fold} in difficulty CSV")
+
+    df["prediction"] = df["prediction"].astype(str)
+    df["label"] = df["label"].astype(str)
+    df["sample_index"] = pd.to_numeric(df["sample_index"], errors="coerce")
+    df = df.dropna(subset=["sample_index"])
+
+    preds = df["prediction"].tolist()
+    labels = df["label"].tolist()
+    sample_ids = df["sample_index"].astype(int).tolist()
+    label_map = {int(s): str(l) for s, l in zip(sample_ids, labels)}
+    return preds, labels, sample_ids, label_map, task
+
+
 def _choose_difficulty_indices(
     preds: list[str],
     labels: list[str],
@@ -475,21 +491,35 @@ def _choose_difficulty_indices(
     chosen: list[int] = []
     tags: dict[int, str] = {}
 
-    if include_easy:
+    # If the user asked for exactly as many quantile picks as n (e.g. 6 picks for
+    # 0.50,0.50,0.90,0.90,0.99,0.99), do NOT prepend an "easy" example; it would
+    # otherwise crowd out the requested quantile picks.
+    want_easy = bool(include_easy) and (n > len(q))
+
+    if want_easy:
         easy = np.where(d_norm == 0.0)[0]
         if easy.size > 0:
             idx_easy = int(easy[0])
             chosen.append(idx_easy)
             tags[idx_easy] = "easy0"
 
+    # Track duplicate quantiles for unique tags (e.g. p50a, p50b)
+    _q_total: dict[int, int] = {}
+    for qq in q:
+        _q_total[int(round(qq * 100))] = _q_total.get(int(round(qq * 100)), 0) + 1
+    _q_seen: dict[int, int] = {}
+
     for qq in q:
         qq = float(qq)
+        qq_key = int(round(qq * 100))
+        _q_seen[qq_key] = _q_seen.get(qq_key, 0) + 1
+        suffix = chr(ord('a') + _q_seen[qq_key] - 1) if _q_total[qq_key] > 1 else ""
         target = float(np.quantile(d_norm, qq))
         order = np.argsort(np.abs(d_norm - target)).tolist()
         for idx in order:
             if idx not in chosen:
                 chosen.append(int(idx))
-                tags[int(idx)] = f"p{int(round(qq * 100)):02d}"
+                tags[int(idx)] = f"p{qq_key:02d}{suffix}"
                 break
 
     # Fill remaining with a stable, seeded choice among remaining.
@@ -517,6 +547,33 @@ def _choose_difficulty_indices(
         ],
     }
     return chosen, meta
+
+
+def _choose_difficulty_sample_ids(
+    preds: list[str],
+    labels: list[str],
+    sample_ids: list[int],
+    *,
+    n: int,
+    quantiles: list[float],
+    include_easy: bool,
+    seed: int,
+) -> tuple[list[int], dict[str, object]]:
+    if len(sample_ids) != len(preds):
+        raise ValueError("sample_ids length mismatch with preds")
+
+    idxs, meta = _choose_difficulty_indices(
+        preds,
+        labels,
+        n=n,
+        quantiles=quantiles,
+        include_easy=include_easy,
+        seed=seed,
+    )
+    chosen_sample_ids = [int(sample_ids[i]) for i in idxs]
+    for item, sid in zip(meta.get("chosen", []), chosen_sample_ids):
+        item["sample_index"] = int(sid)
+    return chosen_sample_ids, meta
 
 
 def plot_cosine_similarity(
@@ -594,16 +651,25 @@ def plot_cosine_similarity_comparison(
 
     from sklearn.metrics.pairwise import cosine_similarity
 
-    # Build sample_id -> difficulty info mapping
-    diff_map = {}
+    # Build subset_pos/sample_id -> difficulty info mapping.
+    # NOTE: In qualitative subset extraction, sample_idx is typically 0..(n-1).
+    # For CSV difficulty selection we also store `subset_pos` in meta.
+    diff_map: dict[int, dict[str, object]] = {}
     if difficulty_meta is not None and "chosen" in difficulty_meta:
         for item in difficulty_meta["chosen"]:
-            idx = item.get("idx")
-            if idx is not None:
-                diff_map[int(idx)] = {
-                    "tag": item.get("tag", ""),
-                    "norm_ld": item.get("norm_ld", 0.0),
-                }
+            key = item.get("subset_pos")
+            if key is None:
+                key = item.get("sample_index")
+            if key is None:
+                key = item.get("idx")
+            if key is None:
+                continue
+            diff_map[int(key)] = {
+                "tag": item.get("tag", ""),
+                "norm_ld": item.get("norm_ld", None),
+                "label": item.get("label", None),
+                "sample_index": item.get("sample_index", None),
+            }
 
     for sample_id in chosen:
         # AR
@@ -618,14 +684,20 @@ def plot_cosine_similarity_comparison(
         c_hyb = [feats_hyb["char_labels"][i] for i, m in enumerate(mask_hyb) if m]
 
         # Get difficulty info if available
-        diff_info = diff_map.get(sample_id, {})
-        diff_tag = diff_info.get("tag", "")
+        diff_info = diff_map.get(int(sample_id), {})
+        diff_tag = str(diff_info.get("tag", "") or "")
         norm_ld = diff_info.get("norm_ld", None)
         title_suffix = ""
-        if diff_tag:
-            title_suffix = f" [{diff_tag}"
+        # Always show norm_LD if present, even if tag is empty.
+        if diff_tag or (norm_ld is not None):
+            title_suffix = " ["
+            if diff_tag:
+                title_suffix += f"{diff_tag}"
             if norm_ld is not None:
-                title_suffix += f", norm_LD={norm_ld:.3f}"
+                try:
+                    title_suffix += (", " if diff_tag else "") + f"norm_LD={float(norm_ld):.3f}"
+                except Exception:
+                    title_suffix += (", " if diff_tag else "") + f"norm_LD={norm_ld}"
             title_suffix += "]"
 
         fig, (ax1, ax2) = plt.subplots(
@@ -682,7 +754,7 @@ def plot_cosine_similarity_comparison(
 
         # Move suptitle higher so it can't collide with per-axis titles/labels
         fig.suptitle(
-            f'Cosine Similarity — "{word_ar}" (sample {sample_id}){title_suffix}',
+            f'Cosine Similarity — GT: "{word_ar}" (subset_pos {sample_id}){title_suffix}',
             fontsize=13,
             y=1.12,
         )
@@ -693,79 +765,344 @@ def plot_cosine_similarity_comparison(
         logger.info("Saved cosine similarity comparison: {}", path)
 
 
-# ──────────────── 4. Per-Character Error Rate ──────────────── #
+# ──────── 3b. Diagonal Dominance Metrics (DD, Leak, M_off) ──────── #
 
-def compute_per_char_error(
-    preds: list[str], labels: list[str], categories: list[str],
-) -> dict[str, dict]:
-    """Compute per-character-class error rates (substitution, deletion, insertion).
+def compute_dd_leak_moff(
+    sim: np.ndarray, boundaries: list[int],
+) -> dict[str, float]:
+    """Compute DD(w), Leak(w), M_off(w) from a cosine-similarity matrix.
 
-    Returns dict: char -> {total, correct, substituted, deleted, sub_rate, del_rate}
+    Args:
+        sim: (T, T) cosine similarity matrix.
+        boundaries: segment boundaries [b0, b1, ..., bK] where segment i = [b_i, b_{i+1}).
+
+    Returns:
+        dict with keys DD, Leak, M_off.
     """
-    import jiwer
+    K = len(boundaries) - 1  # number of segments
+    if K <= 1:
+        return {"DD": float("nan"), "Leak": float("nan"), "M_off": float("nan")}
 
-    stats = {c: {'total': 0, 'correct': 0, 'substituted': 0, 'deleted': 0}
-             for c in categories if c != ''}
+    dd_per_seg: list[float] = []
+    leak_per_seg: list[float] = []
+    off_values: list[np.ndarray] = []
 
-    out = jiwer.process_characters(labels, preds)
-    for alignment, ref_str, hyp_str in zip(out.alignments, out.references, out.hypotheses):
-        for event in alignment:
-            if event.type == 'equal':
-                for i in range(event.ref_start_idx, event.ref_end_idx):
-                    c = ref_str[i]
-                    if c in stats:
-                        stats[c]['total'] += 1
-                        stats[c]['correct'] += 1
-            elif event.type == 'substitute':
-                for i in range(event.ref_start_idx, event.ref_end_idx):
-                    c = ref_str[i]
-                    if c in stats:
-                        stats[c]['total'] += 1
-                        stats[c]['substituted'] += 1
-            elif event.type == 'delete':
-                for i in range(event.ref_start_idx, event.ref_end_idx):
-                    c = ref_str[i]
-                    if c in stats:
-                        stats[c]['total'] += 1
-                        stats[c]['deleted'] += 1
+    for i in range(K):
+        si = slice(boundaries[i], boundaries[i + 1])
+        self_sim = float(sim[si, si].mean())
 
-    # Compute rates
-    for c, s in stats.items():
-        tot = max(s['total'], 1)
-        s['sub_rate'] = s['substituted'] / tot
-        s['del_rate'] = s['deleted'] / tot
-        s['error_rate'] = (s['substituted'] + s['deleted']) / tot
+        cross_vals: list[np.ndarray] = []
+        adj_vals: list[np.ndarray] = []
+        for j in range(K):
+            if j == i:
+                continue
+            sj = slice(boundaries[j], boundaries[j + 1])
+            block = sim[si, sj]
+            cross_vals.append(block.ravel())
+            off_values.append(block.ravel())
+            if abs(j - i) == 1:
+                adj_vals.append(block.ravel())
 
-    return stats
+        cross_sim = float(np.concatenate(cross_vals).mean()) if cross_vals else 0.0
+        dd_per_seg.append(self_sim - cross_sim)
+        if adj_vals:
+            leak_per_seg.append(float(np.concatenate(adj_vals).mean()))
+
+    return {
+        "DD": float(np.mean(dd_per_seg)),
+        "Leak": float(np.mean(leak_per_seg)) if leak_per_seg else float("nan"),
+        "M_off": float(np.concatenate(off_values).mean()) if off_values else float("nan"),
+    }
 
 
-def plot_per_char_error_comparison(
-    stats_ar: dict, stats_hyb: dict,
-    save_path: str,
-    title: str = "Per-Character Error Rate: AR-only vs Hybrid",
-):
-    """Bar chart comparing per-character error rates."""
-    chars = sorted(set(stats_ar.keys()) | set(stats_hyb.keys()))
-    chars = [c for c in chars if c != '']
+def compute_dd_leak_moff_over_samples(feats: dict) -> dict[str, float]:
+    """Compute DD/Leak/M_off averaged over all samples in a feature dict.
 
-    er_ar = [stats_ar.get(c, {}).get('error_rate', 0) for c in chars]
-    er_hyb = [stats_hyb.get(c, {}).get('error_rate', 0) for c in chars]
+    Args:
+        feats: dict from extract_encoder_features with keys
+               'features', 'char_labels', 'sample_idx'.
 
-    x = np.arange(len(chars))
-    w = 0.35
+    Returns:
+        dict with mean/std for DD, Leak, M_off and n_samples.
+    """
+    from sklearn.metrics.pairwise import cosine_similarity
 
-    fig, ax = plt.subplots(figsize=(max(14, len(chars) * 0.4), 6), dpi=150)
-    ax.bar(x - w / 2, er_ar, w, label='AR-only', alpha=0.8, color='C0')
-    ax.bar(x + w / 2, er_hyb, w, label='Hybrid', alpha=0.8, color='C1')
-    ax.set_xticks(x)
-    ax.set_xticklabels(chars, fontsize=7)
-    ax.set_ylabel("Error Rate (sub + del)")
-    ax.set_title(title, fontsize=13)
-    ax.legend()
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=150)
-    plt.close()
-    logger.info("Saved per-character error comparison: {}", save_path)
+    unique_samples = np.unique(feats["sample_idx"])
+    dd_list: list[float] = []
+    leak_list: list[float] = []
+    moff_list: list[float] = []
+
+    for sid in unique_samples:
+        mask = feats["sample_idx"] == sid
+        f = feats["features"][mask]
+        chars = [feats["char_labels"][i] for i, m in enumerate(mask) if m]
+        if f.shape[0] < 2:
+            continue
+
+        sim = cosine_similarity(f)
+        boundaries, _ = _segments_from_char_labels(chars)
+        metrics = compute_dd_leak_moff(sim, boundaries)
+
+        if not np.isnan(metrics["DD"]):
+            dd_list.append(metrics["DD"])
+        if not np.isnan(metrics["Leak"]):
+            leak_list.append(metrics["Leak"])
+        if not np.isnan(metrics["M_off"]):
+            moff_list.append(metrics["M_off"])
+
+    return {
+        "DD_mean": float(np.mean(dd_list)) if dd_list else float("nan"),
+        "DD_std": float(np.std(dd_list)) if dd_list else float("nan"),
+        "Leak_mean": float(np.mean(leak_list)) if leak_list else float("nan"),
+        "Leak_std": float(np.std(leak_list)) if leak_list else float("nan"),
+        "M_off_mean": float(np.mean(moff_list)) if moff_list else float("nan"),
+        "M_off_std": float(np.std(moff_list)) if moff_list else float("nan"),
+        "n_samples": len(dd_list),
+    }
+
+
+# ──────────────── 5. Cross-Attention Maps ──────────────── #
+
+class UniversalCrossAttnCatcher:
+    """Captures cross-attention weights from both vanilla and gated decoders.
+
+    For **gated** (GatedMultiheadAttention): reads ``_last_attn_weights``
+    attribute that is stored right after softmax inside the module.
+
+    For **vanilla** (nn.MultiheadAttention): patches forward to enable
+    ``need_weights=True`` and captures the returned attention tensor.
+    """
+
+    def __init__(self):
+        self.weights: list["torch.Tensor"] = []
+        self._patched: list[tuple] = []
+        self._handles: list = []
+
+    def clear(self):
+        self.weights.clear()
+
+    def _vanilla_hook(self, module, inp, out):
+        if isinstance(out, tuple) and len(out) >= 2 and out[1] is not None:
+            self.weights.append(out[1].detach().cpu())
+
+    def _gated_hook(self, module, inp, out):
+        if hasattr(module, "_last_attn_weights"):
+            self.weights.append(module._last_attn_weights.cpu())
+
+    def patch_decoder(self, decoder: "nn.Module"):
+        import torch.nn as nn
+        from rewi.model.ARDecoder import GatedMultiheadAttention
+
+        for name, m in decoder.named_modules():
+            if "self_attn" in name:
+                continue
+            if "multihead_attn" not in name:
+                continue
+
+            if isinstance(m, GatedMultiheadAttention):
+                h = m.register_forward_hook(self._gated_hook)
+                self._handles.append(h)
+            elif isinstance(m, nn.MultiheadAttention):
+                orig = m.forward
+
+                def _make_wrapped(original):
+                    def wrapped(*args, **kwargs):
+                        kwargs["need_weights"] = True
+                        kwargs["average_attn_weights"] = False
+                        return original(*args, **kwargs)
+                    return wrapped
+
+                m.forward = _make_wrapped(orig)
+                self._patched.append((m, orig))
+                h = m.register_forward_hook(self._vanilla_hook)
+                self._handles.append(h)
+
+    def unpatch(self):
+        for h in self._handles:
+            h.remove()
+        self._handles.clear()
+        for m, orig in self._patched:
+            m.forward = orig
+        self._patched.clear()
+
+
+def _attn_list_to_matrix(
+    attn_list: list["torch.Tensor"],
+    expected_tgt_len: int | None = None,
+) -> np.ndarray | None:
+    """Average a list of per-layer attention tensors into (tgt, src)."""
+    import torch
+
+    if not attn_list:
+        return None
+    mats = []
+    for a in attn_list:
+        t = a
+        while t.dim() > 2:
+            t = t.mean(dim=0)
+        mats.append(t)
+    M = torch.stack(mats, dim=0).mean(dim=0)
+    M = M - M.min()
+    if M.max() > 0:
+        M = M / M.max()
+    M = M.numpy()
+    if expected_tgt_len is not None:
+        if M.shape[0] != expected_tgt_len and M.shape[1] == expected_tgt_len:
+            M = M.T
+    return M
+
+
+def extract_cross_attention_teacher_forced(
+    model: "nn.Module",
+    dataloader: "DataLoader",
+    device: str,
+    categories: list[str],
+) -> list[dict | None]:
+    """Extract per-sample cross-attention maps under teacher forcing.
+
+    Each result dict contains:
+        attn: np.ndarray (T_tgt, T_src) averaged over heads & layers.
+        label: str  ground-truth word.
+        tgt_tokens: list[str]  target token labels (BOS + chars).
+    """
+    import torch
+
+    vocab_ctc = len(categories)
+    BOS_ID = vocab_ctc + 1  # layout: PAD=Vctc, BOS=Vctc+1, EOS=Vctc+2
+
+    catcher = UniversalCrossAttnCatcher()
+    if hasattr(model, "decoder"):
+        catcher.patch_decoder(model.decoder)
+    elif hasattr(model, "dec"):
+        catcher.patch_decoder(model.dec)
+
+    model.eval()
+    results: list[dict | None] = []
+
+    with torch.no_grad():
+        for x, y, len_x, len_y in dataloader:
+            B = x.size(0)
+            x = x.to(device)
+
+            L = int(len_y[0])
+            lab_ids = y[0, :L].tolist() if y.dim() == 2 else []
+            y_inp = torch.tensor(
+                [[BOS_ID] + lab_ids], dtype=torch.long, device=device,
+            )
+
+            catcher.clear()
+
+            # Forward (works for both BaseModel and DualHeadModel)
+            from rewi.model import DualHeadModel
+            if isinstance(model, DualHeadModel):
+                model(x, in_lengths=len_x.to(device), y_inp=y_inp)
+            else:
+                model(x, in_lengths=len_x.to(device), y_inp=y_inp)
+
+            if catcher.weights:
+                M = _attn_list_to_matrix(catcher.weights, expected_tgt_len=y_inp.size(1))
+                label_str = "".join(
+                    categories[i] for i in lab_ids
+                    if 0 <= i < len(categories) and i != 0
+                )
+                tgt_tokens = ["<bos>"] + [
+                    categories[i] if 0 <= i < len(categories) else "?"
+                    for i in lab_ids
+                ]
+                results.append(
+                    {"attn": M, "label": label_str, "tgt_tokens": tgt_tokens}
+                )
+            else:
+                results.append(None)
+
+    catcher.unpatch()
+    return results
+
+
+def plot_attention_comparison(
+    attn_ar: list[dict | None],
+    attn_hyb: list[dict | None],
+    save_dir: str,
+    difficulty_meta: dict[str, object] | None = None,
+) -> None:
+    """Side-by-side cross-attention heatmaps for AR-only vs Hybrid."""
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Build subset_pos/sample_id -> difficulty info mapping.
+    diff_map: dict[int, dict[str, object]] = {}
+    if difficulty_meta is not None and "chosen" in difficulty_meta:
+        for item in difficulty_meta["chosen"]:
+            key = item.get("subset_pos")
+            if key is None:
+                key = item.get("sample_index")
+            if key is None:
+                key = item.get("idx")
+            if key is None:
+                continue
+            diff_map[int(key)] = {
+                "tag": item.get("tag", ""),
+                "norm_ld": item.get("norm_ld", None),
+                "label": item.get("label", None),
+                "sample_index": item.get("sample_index", None),
+            }
+
+    n = min(len(attn_ar), len(attn_hyb))
+    for i in range(n):
+        a_ar = attn_ar[i]
+        a_hyb = attn_hyb[i]
+        if a_ar is None or a_hyb is None:
+            continue
+
+        label = a_ar["label"]
+        tgt_ar = a_ar["tgt_tokens"]
+        tgt_hyb = a_hyb["tgt_tokens"]
+
+        diff_info = diff_map.get(int(i), {})
+        diff_tag = str(diff_info.get("tag", "") or "")
+        norm_ld = diff_info.get("norm_ld", None)
+        title_suffix = ""
+        if diff_tag or (norm_ld is not None):
+            title_suffix = " ["
+            if diff_tag:
+                title_suffix += f"{diff_tag}"
+            if norm_ld is not None:
+                try:
+                    title_suffix += (", " if diff_tag else "") + f"norm_LD={float(norm_ld):.3f}"
+                except Exception:
+                    title_suffix += (", " if diff_tag else "") + f"norm_LD={norm_ld}"
+            title_suffix += "]"
+
+        fig, (ax1, ax2) = plt.subplots(
+            1, 2, figsize=(18, 6), dpi=150, constrained_layout=True,
+        )
+
+        for ax, M, tgt, name in [
+            (ax1, a_ar["attn"], tgt_ar, "AR-only"),
+            (ax2, a_hyb["attn"], tgt_hyb, "Hybrid"),
+        ]:
+            if M is None:
+                ax.set_axis_off()
+                continue
+            im = ax.imshow(M, aspect="auto", origin="lower", cmap="viridis")
+            ax.set_xlabel("Encoder frame", fontsize=10)
+            ax.set_ylabel("Decoder token", fontsize=10)
+            ax.set_title(f'{name} — "{label}"', fontsize=11)
+            if len(tgt) <= 30:
+                ax.set_yticks(range(len(tgt)))
+                ax.set_yticklabels(tgt, fontsize=7)
+            ax.tick_params(axis="both", labelsize=8)
+
+        fig.colorbar(im, ax=[ax1, ax2], shrink=0.85, label="Attention weight", pad=0.02)
+        fig.suptitle(
+            f'Cross-Attention — GT: "{label}"{title_suffix}',
+            fontsize=13, y=1.05,
+        )
+
+        safe_label = label[:10].replace("/", "_")
+        path = os.path.join(save_dir, f"attn_sample{i:04d}_{safe_label}.pdf")
+        fig.savefig(path, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved attention comparison: {}", path)
 
 
 # ──────────────── Main ──────────────── #
@@ -785,15 +1122,13 @@ def main():
     # Resolve user-provided paths.
     args.ar_ckpt = _resolve_path(args.ar_ckpt)
     args.hyb_ckpt = _resolve_path(args.hyb_ckpt)
-    args.ar_export = _resolve_path(args.ar_export)
-    args.hyb_export = _resolve_path(args.hyb_export)
     args.dataset = _resolve_path(args.dataset)
+    args.difficulty_csv = _resolve_path(args.difficulty_csv)
 
     _require_exists(args.ar_ckpt, name="--ar_ckpt")
     _require_exists(args.hyb_ckpt, name="--hyb_ckpt")
-    _require_exists(args.ar_export, name="--ar_export")
-    _require_exists(args.hyb_export, name="--hyb_export")
     _require_exists(args.dataset, name="--dataset")
+    _require_exists(args.difficulty_csv, name="--difficulty_csv")
 
     os.makedirs(args.outdir, exist_ok=True)
     np.random.seed(args.seed)
@@ -803,68 +1138,46 @@ def main():
     # Decide qualitative sample indices for visuals (cosine similarity).
     qual_indices: list[int] | None = None
     qual_meta: dict[str, object] | None = None
+    qual_label_map: dict[int, str] | None = None
     mode = str(args.difficulty_mode)
-    export_source = None
-    if str(args.difficulty_from) == "hyb":
-        export_source = args.hyb_export
-    elif str(args.difficulty_from) == "ar":
-        export_source = args.ar_export
-    else:
-        export_source = args.hyb_export or args.ar_export
 
-    if mode == "difficulty" or (mode == "auto" and export_source is not None):
-        if export_source is None:
-            raise ValueError("difficulty mode requires an export JSON (use --hyb_export or --ar_export)")
-        with open(export_source) as f:
-            exp = json.load(f)
-        preds_exp = exp.get("predictions")
-        labels_exp = exp.get("labels")
-        if not isinstance(preds_exp, list) or not isinstance(labels_exp, list):
-            raise ValueError("Export JSON must contain 'predictions' and 'labels' lists")
+    if mode == "difficulty" or (mode == "auto" and args.difficulty_csv is not None):
+        if args.difficulty_csv is None:
+            raise ValueError("difficulty mode requires --difficulty_csv")
+        preds_exp, labels_exp, sample_ids, label_map, task_name = _load_difficulty_samples_from_csv(
+            args.difficulty_csv,
+            sep=str(args.difficulty_sep),
+            task=args.difficulty_task,
+            fold=int(args.fold),
+        )
         quantiles = _parse_quantiles(args.difficulty_quantiles)
-        qual_indices, qual_meta = _choose_difficulty_indices(
+        qual_indices, qual_meta = _choose_difficulty_sample_ids(
             [str(x) for x in preds_exp],
             [str(x) for x in labels_exp],
+            sample_ids,
             n=int(args.difficulty_n),
             quantiles=quantiles,
             include_easy=(not bool(args.difficulty_no_easy)),
             seed=int(args.seed),
         )
-        logger.info("Qualitative indices (difficulty): {}", qual_indices)
+        qual_meta["task"] = task_name
+        qual_meta["fold"] = int(args.fold)
+        qual_label_map = label_map
+        logger.info("Qualitative indices (difficulty from CSV): {}", qual_indices)
 
-    # ── Part A: Export-based analyses (Levenshtein, per-char errors) ── #
-    if args.ar_export and args.hyb_export:
-        logger.info("=== Export-based analyses ===")
-        with open(args.ar_export) as f:
-            ar_data = json.load(f)
-        with open(args.hyb_export) as f:
-            hyb_data = json.load(f)
+        # Provide a stable mapping for visualization annotations.
+        # In the qualitative subset loader we preserve order = qual_indices.
+        if isinstance(qual_meta, dict) and "chosen" in qual_meta:
+            pos_map = {int(ds_idx): int(pos) for pos, ds_idx in enumerate(qual_indices)}
+            for item in qual_meta.get("chosen", []):
+                try:
+                    ds_idx = item.get("sample_index", None)
+                    if ds_idx is not None:
+                        item["subset_pos"] = int(pos_map[int(ds_idx)])
+                except Exception:
+                    pass
 
-        preds_ar, labels_ar = ar_data['predictions'], ar_data['labels']
-        preds_hyb, labels_hyb = hyb_data['predictions'], hyb_data['labels']
-
-        # Levenshtein distribution
-        plot_levenshtein_distribution(
-            preds_ar, labels_ar, preds_hyb, labels_hyb,
-            save_path=os.path.join(args.outdir, "levenshtein_distribution.pdf"),
-        )
-
-        # Normalized Levenshtein distribution (distance / |ref|)
-        plot_levenshtein_distribution(
-            preds_ar, labels_ar, preds_hyb, labels_hyb,
-            save_path=os.path.join(args.outdir, "levenshtein_distribution_norm.pdf"),
-            normalized=True,
-        )
-
-        # Per-character error rates
-        stats_ar = compute_per_char_error(preds_ar, labels_ar, categories)
-        stats_hyb = compute_per_char_error(preds_hyb, labels_hyb, categories)
-        plot_per_char_error_comparison(
-            stats_ar, stats_hyb,
-            save_path=os.path.join(args.outdir, "per_char_error_rate.pdf"),
-        )
-
-    # ── Part B: Checkpoint-based analyses (t-SNE, cosine sim) ── #
+    # ── Checkpoint-based analyses (t-SNE, cosine sim) ── #
     if not getattr(args, "skip_checkpoints", False) and (args.ar_ckpt or args.hyb_ckpt) and args.dataset:
         import torch
         from torch.utils.data import DataLoader, Subset
@@ -901,26 +1214,22 @@ def main():
             if len(qual_indices) == 0:
                 raise ValueError("Difficulty-picked qualitative indices are out of range for the dataset")
 
-            # Optional sanity-check: export ordering should match dataset ordering.
-            if qual_meta is not None and export_source is not None:
-                try:
-                    with open(export_source) as f:
-                        exp = json.load(f)
-                    exp_labels = exp.get("labels")
-                    if isinstance(exp_labels, list) and len(exp_labels) == len(dataset):
-                        mism = 0
-                        for i in qual_indices:
-                            if str(dataset.annos[int(i)]["label"]) != str(exp_labels[int(i)]):
-                                mism += 1
-                        if mism > 0:
-                            logger.warning(
-                                "{} / {} qualitative indices have label mismatch between export and dataset. "
-                                "This suggests export ordering may not match dataset ordering.",
-                                mism,
-                                len(qual_indices),
-                            )
-                except Exception:
-                    pass
+            # Optional sanity-check: CSV labels should match dataset labels.
+            if qual_label_map is not None:
+                mism = 0
+                for i in qual_indices:
+                    csv_label = qual_label_map.get(int(i))
+                    if csv_label is None:
+                        continue
+                    if str(dataset.annos[int(i)]["label"]) != str(csv_label):
+                        mism += 1
+                if mism > 0:
+                    logger.warning(
+                        "{} / {} qualitative indices have label mismatch between CSV and dataset. "
+                        "This suggests CSV ordering may not match dataset ordering.",
+                        mism,
+                        len(qual_indices),
+                    )
 
         subset = Subset(dataset, qual_indices)
         loader_qual = DataLoader(subset, batch_size=1, num_workers=2, collate_fn=fn_collate, shuffle=False)
@@ -987,10 +1296,39 @@ def main():
                 perplexity=args.perplexity, seed=args.seed,
             )
 
-            # Cosine similarity comparison on the SAME qualitative subset.
+        # ── DD / Leak / M_off (averaged over all extracted samples) ── #
+        dd_ar = dd_hyb = None
+        if feats_ar is not None:
+            dd_ar = compute_dd_leak_moff_over_samples(feats_ar)
+            logger.info(
+                "AR-only  DD={DD_mean:.4f}±{DD_std:.4f}  Leak={Leak_mean:.4f}±{Leak_std:.4f}  "
+                "M_off={M_off_mean:.4f}±{M_off_std:.4f}  (n={n_samples})",
+                **dd_ar,
+            )
+        if feats_hyb is not None:
+            dd_hyb = compute_dd_leak_moff_over_samples(feats_hyb)
+            logger.info(
+                "Hybrid   DD={DD_mean:.4f}±{DD_std:.4f}  Leak={Leak_mean:.4f}±{Leak_std:.4f}  "
+                "M_off={M_off_mean:.4f}±{M_off_std:.4f}  (n={n_samples})",
+                **dd_hyb,
+            )
+        if dd_ar is not None or dd_hyb is not None:
+            dd_report = {}
+            if dd_ar is not None:
+                dd_report["ar"] = dd_ar
+            if dd_hyb is not None:
+                dd_report["hyb"] = dd_hyb
+            with open(os.path.join(args.outdir, "dd_leak_moff.json"), "w") as f:
+                json.dump(dd_report, f, indent=2)
+            logger.info("Saved DD/Leak/M_off report: {}", os.path.join(args.outdir, "dd_leak_moff.json"))
+
+        # ── Qualitative visual analyses on the SAME subset ── #
+        if feats_ar is not None and feats_hyb is not None:
             try:
                 feats_ar_q = None
                 feats_hyb_q = None
+                attn_ar_q = None
+                attn_hyb_q = None
 
                 if args.ar_ckpt:
                     vocab_ar = len(categories) + 3
@@ -1001,6 +1339,9 @@ def main():
                     )
                     model_ar_q = load_model_from_checkpoint(args.ar_ckpt, model_ar_q, args.device)
                     feats_ar_q = extract_encoder_features(model_ar_q, loader_qual, args.device, categories, max_samples=10**9)
+                    attn_ar_q = extract_cross_attention_teacher_forced(
+                        model_ar_q, loader_qual, args.device, categories,
+                    )
                     del model_ar_q
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
@@ -1016,13 +1357,16 @@ def main():
                     )
                     model_hyb_q = load_model_from_checkpoint(args.hyb_ckpt, model_hyb_q, args.device)
                     feats_hyb_q = extract_encoder_features(model_hyb_q, loader_qual, args.device, categories, max_samples=10**9)
+                    attn_hyb_q = extract_cross_attention_teacher_forced(
+                        model_hyb_q, loader_qual, args.device, categories,
+                    )
                     del model_hyb_q
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
 
                 if feats_ar_q is not None and feats_hyb_q is not None:
                     # In subset extraction, sample_idx is 0..(n-1) for both models.
-                    chosen_ids = list(range(min(len(qual_indices), 4)))
+                    chosen_ids = list(range(len(qual_indices)))
                     plot_cosine_similarity_comparison(
                         feats_ar_q,
                         feats_hyb_q,
@@ -1032,8 +1376,16 @@ def main():
                         chosen_sample_ids=chosen_ids,
                         difficulty_meta=qual_meta,
                     )
+
+                if attn_ar_q is not None and attn_hyb_q is not None:
+                    plot_attention_comparison(
+                        attn_ar_q,
+                        attn_hyb_q,
+                        os.path.join(args.outdir, "attention"),
+                        difficulty_meta=qual_meta,
+                    )
             except Exception as e:
-                logger.warning("Cosine similarity qualitative plot skipped: {}", e)
+                logger.warning("Qualitative visual analyses skipped: {}", e)
 
     logger.info("=== Analysis complete. Outputs in: {} ===", args.outdir)
 
