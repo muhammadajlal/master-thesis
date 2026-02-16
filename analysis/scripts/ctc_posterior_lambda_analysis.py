@@ -472,6 +472,8 @@ def plot_metrics_vs_lambda(metrics: list[QuantMetrics], save_path: str) -> None:
     axes[0].set_xlabel("λ_ctc")
     axes[0].set_ylabel("Mean per-frame entropy (nats)")
     axes[0].set_title("Entropy (all frames) ↓")
+    axes[0].axhline(uniform_entropy, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_entropy:.2f}")
+    axes[0].legend(fontsize=8)
     axes[0].grid(True, alpha=0.3)
 
     # 2) Entropy (NON-BLANK frames)
@@ -481,6 +483,8 @@ def plot_metrics_vs_lambda(metrics: list[QuantMetrics], save_path: str) -> None:
     axes[1].set_xlabel("λ_ctc")
     axes[1].set_ylabel("Mean per-frame entropy (nats)")
     axes[1].set_title("Entropy (non-blank frames) ↓")
+    axes[1].axhline(uniform_entropy, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_entropy:.2f}")
+    axes[1].legend(fontsize=8)
     axes[1].grid(True, alpha=0.3)
 
     # 3) Max prob (ALL frames)
@@ -491,6 +495,8 @@ def plot_metrics_vs_lambda(metrics: list[QuantMetrics], save_path: str) -> None:
     axes[2].set_ylabel("Mean max P(c|t)")
     axes[2].set_ylim(0, 1.05)
     axes[2].set_title("Peakiness (all frames) ↑")
+    axes[2].axhline(uniform_max_prob, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_max_prob:.3f}")
+    axes[2].legend(fontsize=8)
     axes[2].grid(True, alpha=0.3)
 
     # 4) Max prob (NON-BLANK frames)
@@ -501,6 +507,8 @@ def plot_metrics_vs_lambda(metrics: list[QuantMetrics], save_path: str) -> None:
     axes[3].set_ylabel("Mean max P(c|t)")
     axes[3].set_ylim(0, 1.05)
     axes[3].set_title("Peakiness (non-blank frames) ↑")
+    axes[3].axhline(uniform_max_prob, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_max_prob:.3f}")
+    axes[3].legend(fontsize=8)
     axes[3].grid(True, alpha=0.3)
 
     # 5) Blank occupancy (bar)
@@ -592,6 +600,11 @@ def plot_metrics_vs_lambda_fold_averaged(
     )
     axes = axes.ravel()
 
+    # Uniform-distribution baselines
+    V = len(CATEGORIES_WORD)
+    uniform_entropy = float(np.log(V))
+    uniform_max_prob = 1.0 / V
+
     # Helper: optionally draw faint per-fold curves
     def _maybe_draw_per_fold(ax, M):
         if not show_per_fold:
@@ -605,6 +618,8 @@ def plot_metrics_vs_lambda_fold_averaged(
     axes[0].set_xlabel("λ_ctc")
     axes[0].set_ylabel("Mean per-frame entropy (nats)")
     axes[0].set_title("Entropy (all frames, fold-avg) ↓")
+    axes[0].axhline(uniform_entropy, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_entropy:.2f}")
+    axes[0].legend(fontsize=8)
     axes[0].grid(True, alpha=0.3)
 
     # 2) Entropy (NON-BLANK)
@@ -613,6 +628,8 @@ def plot_metrics_vs_lambda_fold_averaged(
     axes[1].set_xlabel("λ_ctc")
     axes[1].set_ylabel("Mean per-frame entropy (nats)")
     axes[1].set_title("Entropy (non-blank, fold-avg) ↓")
+    axes[1].axhline(uniform_entropy, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_entropy:.2f}")
+    axes[1].legend(fontsize=8)
     axes[1].grid(True, alpha=0.3)
 
     # 3) Max prob (ALL)
@@ -622,6 +639,8 @@ def plot_metrics_vs_lambda_fold_averaged(
     axes[2].set_ylabel("Mean max P(c|t)")
     axes[2].set_ylim(0, 1.05)
     axes[2].set_title("Peakiness (all frames, fold-avg) ↑")
+    axes[2].axhline(uniform_max_prob, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_max_prob:.3f}")
+    axes[2].legend(fontsize=8)
     axes[2].grid(True, alpha=0.3)
 
     # 4) Max prob (NON-BLANK)
@@ -631,6 +650,8 @@ def plot_metrics_vs_lambda_fold_averaged(
     axes[3].set_ylabel("Mean max P(c|t)")
     axes[3].set_ylim(0, 1.05)
     axes[3].set_title("Peakiness (non-blank, fold-avg) ↑")
+    axes[3].axhline(uniform_max_prob, ls="--", color="gray", alpha=0.6, label=f"uniform={uniform_max_prob:.3f}")
+    axes[3].legend(fontsize=8)
     axes[3].grid(True, alpha=0.3)
 
     # 5) Blank occupancy
@@ -943,14 +964,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--difficulty_quantiles",
         type=str,
-        default="0.50,0.90,0.99",
-        help="Comma-separated quantiles for difficulty picks (default: '0.50,0.90,0.99').",
+        default="0.50,0.50,0.90,0.90,0.99,0.99",
+        help="Comma-separated quantiles for difficulty picks (default: '0.50,0.50,0.90,0.90,0.99,0.99').",
     )
     p.add_argument(
         "--difficulty_n",
         type=int,
-        default=4,
-        help="Number of qualitative examples to pick when --difficulty_export is set (default: 4).",
+        default=6,
+        help="Number of qualitative examples to pick when --difficulty_export is set (default: 6).",
     )
     p.add_argument(
         "--difficulty_no_easy",

@@ -165,6 +165,8 @@ class GatedMultiheadAttention(nn.Module):
             scores = scores.masked_fill(kpm, float("-inf"))
 
         attn = F.softmax(scores, dim=-1)
+        # Store attention weights for external analysis (e.g., cross-attention visualization)
+        self._last_attn_weights = attn.detach()
         attn = F.dropout(attn, p=self.mha.dropout, training=self.training)
 
         # Attention output per head

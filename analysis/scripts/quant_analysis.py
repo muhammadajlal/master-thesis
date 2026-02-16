@@ -152,6 +152,161 @@ def regimes_thresholds(g: pd.DataFrame, thr=(0.10, 0.30, 0.60)) -> pd.Series:
         "thr1": t1, "thr2": t2, "thr3": t3,
     })
 
+# ---------------- EXPORT-BASED COMPARISONS ----------------
+def _infer_categories(labels: list[str]) -> list[str]:
+    chars = sorted(set("".join(labels)))
+    return [c for c in chars if c != ""]
+
+
+def plot_levenshtein_distribution_compare(
+    dists_a: np.ndarray,
+    dists_b: np.ndarray,
+    label_a: str,
+    label_b: str,
+    save_path: str,
+    title: str,
+    *,
+    normalized: bool = False,
+):
+    dists_a = np.asarray(dists_a)
+    dists_b = np.asarray(dists_b)
+
+    if normalized:
+        x_label = "Normalized Levenshtein Distance (d / |ref|)"
+        bins = np.linspace(0.0, max(float(dists_a.max()), float(dists_b.max()), 1e-6), 40)
+    else:
+        x_label = "Levenshtein Distance"
+        bins = np.arange(0, max(int(dists_a.max()), int(dists_b.max())) + 2) - 0.5
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), dpi=150)
+
+    ax1.hist(dists_a, bins=bins, alpha=0.6, label=f"{label_a} (mean={np.mean(dists_a):.3f})", density=True, color="C0")
+    ax1.hist(dists_b, bins=bins, alpha=0.6, label=f"{label_b} (mean={np.mean(dists_b):.3f})", density=True, color="C1")
+    ax1.set_xlabel(x_label)
+    ax1.set_ylabel("Density")
+    ax1.set_title(f"{title}{' (normalized)' if normalized else ''} — Histogram")
+    ax1.legend()
+
+    for dists, label, color in [(dists_a, label_a, "C0"), (dists_b, label_b, "C1")]:
+        sorted_d = np.sort(dists)
+        cdf = np.arange(1, len(sorted_d) + 1) / len(sorted_d)
+        ax2.plot(sorted_d, cdf, label=label, color=color)
+    ax2.set_xlabel(x_label)
+    ax2.set_ylabel("Cumulative Proportion")
+    ax2.set_title(f"{title}{' (normalized)' if normalized else ''} — CDF")
+    ax2.legend()
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
+
+def compute_per_char_error(
+    preds: list[str], labels: list[str], categories: list[str],
+) -> dict[str, dict]:
+    try:
+        import jiwer
+    except ImportError as exc:
+        raise ImportError("jiwer is required for per-character error rates") from exc
+
+    stats = {c: {"total": 0, "correct": 0, "substituted": 0, "deleted": 0}
+             for c in categories if c != ""}
+
+    out = jiwer.process_characters(labels, preds)
+    for alignment, ref_str, hyp_str in zip(out.alignments, out.references, out.hypotheses):
+        for event in alignment:
+            if event.type == "equal":
+                for i in range(event.ref_start_idx, event.ref_end_idx):
+                    c = ref_str[i]
+                    if c in stats:
+                        stats[c]["total"] += 1
+                        stats[c]["correct"] += 1
+            elif event.type == "substitute":
+                for i in range(event.ref_start_idx, event.ref_end_idx):
+                    c = ref_str[i]
+                    if c in stats:
+                        stats[c]["total"] += 1
+                        stats[c]["substituted"] += 1
+            elif event.type == "delete":
+                for i in range(event.ref_start_idx, event.ref_end_idx):
+                    c = ref_str[i]
+                    if c in stats:
+                        stats[c]["total"] += 1
+                        stats[c]["deleted"] += 1
+
+    for c, s in stats.items():
+        tot = max(s["total"], 1)
+        s["sub_rate"] = s["substituted"] / tot
+        s["del_rate"] = s["deleted"] / tot
+        s["error_rate"] = (s["substituted"] + s["deleted"]) / tot
+
+    return stats
+
+
+def plot_per_char_error_comparison(
+    stats_a: dict,
+    stats_b: dict,
+    *,
+    label_a: str,
+    label_b: str,
+    save_path: str,
+    title: str,
+):
+    chars = sorted(set(stats_a.keys()) | set(stats_b.keys()))
+    chars = [c for c in chars if c != ""]
+
+    er_a = [stats_a.get(c, {}).get("error_rate", 0) for c in chars]
+    er_b = [stats_b.get(c, {}).get("error_rate", 0) for c in chars]
+
+    x = np.arange(len(chars))
+    w = 0.35
+
+    fig, ax = plt.subplots(figsize=(max(14, len(chars) * 0.4), 6), dpi=150)
+    ax.bar(x - w / 2, er_a, w, label=label_a, alpha=0.8, color="C0")
+    ax.bar(x + w / 2, er_b, w, label=label_b, alpha=0.8, color="C1")
+    ax.set_xticks(x)
+    ax.set_xticklabels(chars, fontsize=7)
+    ax.set_ylabel("Error Rate (sub + del)")
+    ax.set_title(title, fontsize=13)
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
+
+def plot_char_frequency_distribution(
+    labels: list[str],
+    categories: list[str],
+    *,
+    save_path: str,
+    title: str,
+):
+    counts = {c: 0 for c in categories if c != ""}
+    for lbl in labels:
+        for ch in lbl:
+            if ch in counts:
+                counts[ch] += 1
+
+    total = sum(counts.values())
+    if total == 0:
+        print("Warning: no characters found in labels; skipping frequency plot")
+        return
+
+    chars = [c for c in categories if c != ""]
+    freqs = [counts[c] / total for c in chars]
+
+    fig, ax = plt.subplots(figsize=(max(14, len(chars) * 0.4), 5), dpi=150)
+    x = np.arange(len(chars))
+    ax.bar(x, freqs, color="steelblue", alpha=0.85, edgecolor="black", linewidth=0.3)
+    ax.set_xticks(x)
+    ax.set_xticklabels(chars, fontsize=7)
+    ax.set_ylabel("Relative frequency")
+    ax.set_title(title, fontsize=13)
+    ax.grid(True, axis="y", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150)
+    plt.close()
+
 # ---------------- PLOTTING (single pipeline) ----------------
 def plot_exact_rate_by_fold(task: str, g: pd.DataFrame, out_dir: str):
     per_fold = g.groupby("fold")["exact"].mean().sort_index() * 100.0
@@ -221,6 +376,17 @@ def _parse_args():
     ap.add_argument("--hist_bins", type=int, default=HIST_BINS)
     ap.add_argument("--regime_mode", choices=["quantiles", "thresholds"], default=REGIME_MODE)
     ap.add_argument("--thr", default=",".join(str(x) for x in THR))
+    ap.add_argument(
+        "--compare_tasks",
+        default=None,
+        help="Comma-separated task names for export-based comparisons (e.g. 'ar_task,hyb_task').",
+    )
+    ap.add_argument(
+        "--compare_fold",
+        type=int,
+        default=None,
+        help="Optional fold filter for compare_tasks.",
+    )
     return ap.parse_args()
 
 
@@ -308,6 +474,73 @@ for task, g in df.groupby("task"):
     plot_histograms_and_cdfs(task, g, OUT_DIR, x_clip=X_CLIP)
 
 # ============================================================
+# EXPORT-BASED COMPARISONS (FROM UNIFIED CSV)
+# ============================================================
+if args.compare_tasks:
+    parts = [p.strip() for p in str(args.compare_tasks).split(",") if p.strip()]
+    if len(parts) != 2:
+        raise ValueError("--compare_tasks must contain exactly two task names separated by a comma")
+    task_a, task_b = parts[0], parts[1]
+
+    df_a = df[df["task"] == task_a].copy()
+    df_b = df[df["task"] == task_b].copy()
+    if args.compare_fold is not None:
+        df_a = df_a[df_a["fold"] == args.compare_fold].copy()
+        df_b = df_b[df_b["fold"] == args.compare_fold].copy()
+
+    if df_a.empty or df_b.empty:
+        raise ValueError("compare_tasks selection is empty; check task names and compare_fold")
+
+    out_subdir = os.path.join(OUT_DIR, f"compare_{_slug(task_a)}_vs_{_slug(task_b)}")
+    os.makedirs(out_subdir, exist_ok=True)
+
+    dists_a = df_a["levenshtein_distance"].to_numpy()
+    dists_b = df_b["levenshtein_distance"].to_numpy()
+    plot_levenshtein_distribution_compare(
+        dists_a,
+        dists_b,
+        task_a,
+        task_b,
+        save_path=os.path.join(out_subdir, "levenshtein_distribution.pdf"),
+        title=f"Levenshtein Distance Distribution: {task_a} vs {task_b}",
+        normalized=False,
+    )
+
+    plot_levenshtein_distribution_compare(
+        df_a["lev_norm"].to_numpy(),
+        df_b["lev_norm"].to_numpy(),
+        task_a,
+        task_b,
+        save_path=os.path.join(out_subdir, "levenshtein_distribution_norm.pdf"),
+        title=f"Normalized Levenshtein Distance: {task_a} vs {task_b}",
+        normalized=True,
+    )
+
+    preds_a = df_a["prediction"].astype(str).tolist()
+    labels_a = df_a["label"].astype(str).tolist()
+    preds_b = df_b["prediction"].astype(str).tolist()
+    labels_b = df_b["label"].astype(str).tolist()
+
+    categories = _infer_categories(labels_a + labels_b)
+    stats_a = compute_per_char_error(preds_a, labels_a, categories)
+    stats_b = compute_per_char_error(preds_b, labels_b, categories)
+    plot_per_char_error_comparison(
+        stats_a,
+        stats_b,
+        label_a=task_a,
+        label_b=task_b,
+        save_path=os.path.join(out_subdir, "per_char_error_rate.pdf"),
+        title=f"Per-Character Error Rate: {task_a} vs {task_b}",
+    )
+
+    plot_char_frequency_distribution(
+        labels_b,
+        categories,
+        save_path=os.path.join(out_subdir, "char_frequency_distribution.pdf"),
+        title=f"Character Frequency Distribution ({task_b} labels)",
+    )
+
+# ============================================================
 # DONE
 # ============================================================
 print("Done. Outputs saved to:", OUT_DIR)
@@ -323,3 +556,9 @@ print(" - *_levnorm_hist_unclipped.png")
 print(f" - *_levnorm_hist_clip{X_CLIP}.png")
 print(" - *_levnorm_cdf_unclipped.png")
 print(f" - *_levnorm_cdf_xmax{X_CLIP}.png")
+if args.compare_tasks:
+    print("Compare tasks outputs:")
+    print(" - levenshtein_distribution.pdf")
+    print(" - levenshtein_distribution_norm.pdf")
+    print(" - per_char_error_rate.pdf")
+    print(" - char_frequency_distribution.pdf")
