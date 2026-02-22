@@ -50,6 +50,10 @@ MANIFEST
 /figures/
 /analysis/quant_analysis_outputs*/
 /analysis/tables/
+/vendor/
+/lm/
+/results/
+
 
 # Installer logs
 pip-log.txt
