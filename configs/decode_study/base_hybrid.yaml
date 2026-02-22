@@ -1,0 +1,60 @@
+# ═══════════════════════════════════════════════════════════════════
+# Decoding Study — Base Config (Hybrid model: AR+CTC on OnHW500 WI)
+# ═══════════════════════════════════════════════════════════════════
+# Uses the best hybrid model (hybrid_06, λ_ctc=0.6) for both AR and CTC arms.
+
+# ── Model ────────────────────────────────────────────────────────
+arch_en: 'blconv_b'
+arch_de: 'ar_transformer_s'
+num_channel: 13
+len_seq: 0
+use_bpe: false
+use_gated_attention: true
+gating_type: elementwise
+
+dual_head:
+  enabled: true
+  arch_ctc: linear
+  lambda_ar: 1.0
+  lambda_ctc: 0.6
+  tie:
+    ctc_to_ar_outproj: false
+    ar_emb_outproj: false
+    ctc_input_space: "dec"
+  loss_balance: sum
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
+
+# ── Checkpoint (hybrid_06, best_cer, fold 0) ─────────────────────
+checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_hybrid_06/ar_transformer_s__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth
+
+# ── Dataset ──────────────────────────────────────────────────────
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+idx_fold: 0
+cache: true
+
+# ── Runtime ──────────────────────────────────────────────────────
+device: cuda
+seed: 42
+num_worker: 4
+size_batch: 64
+max_len: 200
+
+# ── Decoding parameters ─────────────────────────────────────────
+decoder: ar
+method: greedy
+beam_size: 4
+alpha: 0.6
+eos_bias: 0.0
+min_len: 0
+min_len_ratio: 0.0
+
+# ── LM parameters ───────────────────────────────────────────────
+lm_path: null
+lm_weight: 0.0
+insertion_bonus: 0.0
+length_bonus: 0.0
+nbest_size: 16
+
+# ── Output ───────────────────────────────────────────────────────
+outdir: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/decode_study
