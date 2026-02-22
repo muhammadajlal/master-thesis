@@ -2,8 +2,8 @@
 #SBATCH -J rewi-cv
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
-#SBATCH -p v100
-#SBATCH --gres=gpu:v100:1
+#SBATCH -p rtx3080
+#SBATCH --gres=gpu:rtx3080:1
 #SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 #SBATCH --array=0-4
@@ -14,7 +14,7 @@ set -x
 
 # ---- Params you can tweak ----
 # Specify the YAML config file to use (path relative to configs/)
-TRAIN_YAML=${TRAIN_YAML:-hybrid/train_element_word_06.yaml}
+TRAIN_YAML=${TRAIN_YAML:-train.yaml}
 
 # Dataset name (can still be overridden)
 DATASET=${DATASET:-onhw_wi_word_rh}  # onhw_wi_word_rh | wi_word_hw6_meta etc.
@@ -150,7 +150,36 @@ echo "=============================="
 cd "$PROJ"
 which $PY_BIN
 $PY_BIN -V
-nvidia-smi -L || true
+
+# ========== GPU VERIFICATION ==========
+echo "Verifying GPU allocation..."
+if ! command -v nvidia-smi &> /dev/null; then
+    echo "ERROR: nvidia-smi not found. GPU may not be available."
+    exit 1
+fi
+
+nvidia-smi -L
+if [[ $? -ne 0 ]]; then
+    echo "ERROR: nvidia-smi failed. GPU not accessible."
+    exit 1
+fi
+
+# Check CUDA_VISIBLE_DEVICES is set by Slurm
+if [[ -z "${CUDA_VISIBLE_DEVICES:-}" ]]; then
+    echo "WARNING: CUDA_VISIBLE_DEVICES not set. Attempting to continue..."
+fi
+
+# Verify at least one GPU is visible
+GPU_COUNT=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
+if [[ "$GPU_COUNT" -eq 0 ]]; then
+    echo "ERROR: No GPUs detected by nvidia-smi"
+    exit 1
+fi
+
+echo "GPU verification passed. Found $GPU_COUNT GPU(s)."
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<not set>}"
+nvidia-smi --query-gpu=index,name,memory.total --format=csv
+echo "======================================"
 
 export HF_HOME=/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/.cache/huggingface
 export TRANSFORMERS_CACHE=$HF_HOME/transformers
