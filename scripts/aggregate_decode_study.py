@@ -24,7 +24,6 @@ import os
 import re
 import sys
 from collections import defaultdict
-from pathlib import Path
 
 import numpy as np
 
@@ -102,19 +101,56 @@ def compute_cv_stats(group: list[dict]) -> dict:
     }
 
 
-def print_main_table(groups: dict[str, list[dict]], outdir: str):
-    """Print the main ablation table."""
-    # Define row order for the final table (Stage D)
-    final_rows = [
-        ("AR greedy", "stageA0_ar_greedy"),
-        ("AR calibrated beam", None),  # Will be filled with best from A
-        ("AR beam + LM (rescore)", None),  # Best from C1
-        ("AR beam + LM (shallow)", None),  # Best from C2
-        ("CTC greedy", "stageB1_ctc_greedy"),
-        ("CTC beam", None),  # Best from B2
-        ("CTC beam + LM", None),  # Best from B3
-    ]
+def load_baseline(baseline_path: str | None) -> dict | None:
+    """Load baseline CER/WER stats from a results.json file."""
+    if not baseline_path:
+        return None
+    if not os.path.isfile(baseline_path):
+        print(f"Warning: baseline file not found: {baseline_path}")
+        return None
+    try:
+        with open(baseline_path) as f:
+            data = json.load(f)
+        return {
+            "cer_mean": float(data["cer"]["mean"]),
+            "cer_std": float(data["cer"].get("std", 0.0)),
+            "wer_mean": float(data["wer"]["mean"]),
+            "wer_std": float(data["wer"].get("std", 0.0)),
+        }
+    except Exception as e:
+        print(f"Warning: failed to load baseline {baseline_path}: {e}")
+        return None
 
+
+def baseline_for_stage(stage_or_key: str, baseline_ar: dict | None, baseline_ctc: dict | None) -> dict | None:
+    """Select baseline based on stage family.
+
+    AR-family: stageA, stageC, stageD1, stageD2
+    CTC-family: stageB, stageD3
+    """
+    if stage_or_key.startswith(("stageA", "stageC", "stageD1", "stageD2")):
+        return baseline_ar
+    if stage_or_key.startswith(("stageB", "stageD3")):
+        return baseline_ctc
+    return baseline_ar or baseline_ctc
+
+
+def compute_baseline_from_group(groups: dict[str, list[dict]], group_key: str) -> dict | None:
+    """Compute a baseline dict from an existing grouped experiment key."""
+    grp = groups.get(group_key)
+    if not grp:
+        return None
+    stats = compute_cv_stats(grp)
+    return {
+        "cer_mean": stats["cer_mean"],
+        "cer_std": stats["cer_std"],
+        "wer_mean": stats["wer_mean"],
+        "wer_std": stats["wer_std"],
+    }
+
+
+def print_main_table(groups: dict[str, list[dict]], outdir: str, baseline_ar: dict | None, baseline_ctc: dict | None):
+    """Print the main ablation table."""
     # Find best in each stage by CER
     def find_best(prefix: str) -> tuple[str | None, dict | None]:
         candidates = {k: v for k, v in groups.items() if k.startswith(prefix)}
@@ -146,7 +182,21 @@ def print_main_table(groups: dict[str, list[dict]], outdir: str):
     print("\n" + "=" * 100)
     print("MAIN ABLATION TABLE (Thesis Table)")
     print("=" * 100)
-    header = f"{'Row':<30s} {'CER↓':>12s} {'WER↓':>12s} {'NED P95':>10s} {'NED P99':>10s} {'EOS%':>8s} {'LenRat':>8s} {'ms/smp':>8s} {'Config':>30s}"
+    if baseline_ar:
+        print(f"Baseline[AR]  CER={baseline_ar['cer_mean']:.4f}  WER={baseline_ar['wer_mean']:.4f}")
+    if baseline_ctc:
+        print(f"Baseline[CTC] CER={baseline_ctc['cer_mean']:.4f}  WER={baseline_ctc['wer_mean']:.4f}")
+    show_delta = bool(baseline_ar or baseline_ctc)
+    if show_delta:
+        header = (
+            f"{'Row':<30s} {'CER↓':>12s} {'ΔCER':>10s} {'WER↓':>12s} {'ΔWER':>10s} "
+            f"{'NED P95':>10s} {'NED P99':>10s} {'EOS%':>8s} {'LenRat':>8s} {'ms/smp':>8s} {'Config':>30s}"
+        )
+    else:
+        header = (
+            f"{'Row':<30s} {'CER↓':>12s} {'WER↓':>12s} {'NED P95':>10s} {'NED P99':>10s} "
+            f"{'EOS%':>8s} {'LenRat':>8s} {'ms/smp':>8s} {'Config':>30s}"
+        )
     print(header)
     print("-" * 100)
 
@@ -156,14 +206,31 @@ def print_main_table(groups: dict[str, list[dict]], outdir: str):
             return
         stats = compute_cv_stats(group)
         n = stats["n_folds"]
-        cer_s = f"{stats['cer_mean']:.4f}±{stats['cer_std']:.4f}" if n > 1 else f"{stats['cer_mean']:.4f}"
-        wer_s = f"{stats['wer_mean']:.4f}±{stats['wer_std']:.4f}" if n > 1 else f"{stats['wer_mean']:.4f}"
-        print(
-            f"{label:<30s} {cer_s:>12s} {wer_s:>12s} "
-            f"{stats['ned_p95_mean']:>10.4f} {stats['ned_p99_mean']:>10.4f} "
-            f"{stats['early_eos_rate']:>8.3f} {stats['length_ratio_mean']:>8.3f} "
-            f"{stats['runtime_ms']:>8.1f} {(key or ''):>30s}"
-        )
+        cer_s = f"{stats['cer_mean']:.4f}" if n <= 1 else f"{stats['cer_mean']:.4f}±{stats['cer_std']:.4f}"
+        wer_s = f"{stats['wer_mean']:.4f}" if n <= 1 else f"{stats['wer_mean']:.4f}±{stats['wer_std']:.4f}"
+        baseline = baseline_for_stage(key or "", baseline_ar, baseline_ctc)
+        if show_delta:
+            if baseline:
+                dcer = stats["cer_mean"] - baseline["cer_mean"]
+                dwer = stats["wer_mean"] - baseline["wer_mean"]
+                dcer_s = f"{dcer:>10.4f}"
+                dwer_s = f"{dwer:>10.4f}"
+            else:
+                dcer_s = f"{'N/A':>10s}"
+                dwer_s = f"{'N/A':>10s}"
+            print(
+                f"{label:<30s} {cer_s:>12s} {dcer_s} {wer_s:>12s} {dwer_s} "
+                f"{stats['ned_p95_mean']:>10.4f} {stats['ned_p99_mean']:>10.4f} "
+                f"{stats['early_eos_rate']:>8.3f} {stats['length_ratio_mean']:>8.3f} "
+                f"{stats['runtime_ms']:>8.1f} {(key or ''):>30s}"
+            )
+        else:
+            print(
+                f"{label:<30s} {cer_s:>12s} {wer_s:>12s} "
+                f"{stats['ned_p95_mean']:>10.4f} {stats['ned_p99_mean']:>10.4f} "
+                f"{stats['early_eos_rate']:>8.3f} {stats['length_ratio_mean']:>8.3f} "
+                f"{stats['runtime_ms']:>8.1f} {(key or ''):>30s}"
+            )
 
     # AR rows
     ar_greedy = groups.get("stageA0_ar_greedy")
@@ -194,14 +261,19 @@ def print_main_table(groups: dict[str, list[dict]], outdir: str):
         ("ctc_beam_lm", best_b3_key, best_b3),
     ]:
         if grp:
-            table_data[label] = {**compute_cv_stats(grp), "config_key": key}
+            stats = compute_cv_stats(grp)
+            baseline = baseline_for_stage(key or "", baseline_ar, baseline_ctc)
+            if baseline:
+                stats["delta_cer_mean"] = stats["cer_mean"] - baseline["cer_mean"]
+                stats["delta_wer_mean"] = stats["wer_mean"] - baseline["wer_mean"]
+            table_data[label] = {**stats, "config_key": key}
 
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "main_table.json"), "w") as f:
         json.dump(table_data, f, indent=2)
 
 
-def print_sweep_tables(groups: dict[str, list[dict]], outdir: str):
+def print_sweep_tables(groups: dict[str, list[dict]], outdir: str, baseline_ar: dict | None, baseline_ctc: dict | None):
     """Print detailed sweep tables for each stage."""
     stage_order = ["stageA1", "stageA2", "stageA3", "stageB2", "stageB3", "stageC1", "stageC2"]
     stage_names = {
@@ -221,24 +293,55 @@ def print_sweep_tables(groups: dict[str, list[dict]], outdir: str):
         if not stage_groups:
             continue
 
-        print(f"\n{'─' * 80}")
+        print(f"\n{'-' * 80}")
         print(f"  {stage_names.get(stage, stage)}")
-        print(f"{'─' * 80}")
-        print(f"  {'Config':<50s} {'CER↓':>10s} {'WER↓':>10s} {'NED P95':>8s} {'ms/smp':>8s}")
+        print(f"{'-' * 80}")
+        stage_baseline = baseline_for_stage(stage, baseline_ar, baseline_ctc)
+        if stage_baseline is baseline_ctc:
+            print(f"  Baseline: CTC  CER={stage_baseline['cer_mean']:.4f}  WER={stage_baseline['wer_mean']:.4f}")
+        elif stage_baseline is baseline_ar:
+            print(f"  Baseline: AR   CER={stage_baseline['cer_mean']:.4f}  WER={stage_baseline['wer_mean']:.4f}")
+        else:
+            print("  Baseline: N/A")
+        if baseline_ar or baseline_ctc:
+            print(f"  {'Config':<50s} {'CER↓':>10s} {'ΔCER':>8s} {'WER↓':>10s} {'ΔWER':>8s} {'NED P95':>8s} {'ms/smp':>8s}")
+        else:
+            print(f"  {'Config':<50s} {'CER↓':>10s} {'WER↓':>10s} {'NED P95':>8s} {'ms/smp':>8s}")
 
         sweep_data = []
         for key in sorted(stage_groups.keys()):
             grp = stage_groups[key]
             stats = compute_cv_stats(grp)
             short_key = key.replace(f"{stage}_", "")
-            print(f"  {short_key:<50s} {stats['cer_mean']:>10.4f} {stats['wer_mean']:>10.4f} {stats['ned_p95_mean']:>8.4f} {stats['runtime_ms']:>8.1f}")
-            sweep_data.append({"key": key, **stats})
+            if baseline_ar or baseline_ctc:
+                if stage_baseline:
+                    dcer = stats["cer_mean"] - stage_baseline["cer_mean"]
+                    dwer = stats["wer_mean"] - stage_baseline["wer_mean"]
+                    dcer_s = f"{dcer:>8.4f}"
+                    dwer_s = f"{dwer:>8.4f}"
+                else:
+                    dcer_s = f"{'N/A':>8s}"
+                    dwer_s = f"{'N/A':>8s}"
+                print(
+                    f"  {short_key:<50s} {stats['cer_mean']:>10.4f} {dcer_s} "
+                    f"{stats['wer_mean']:>10.4f} {dwer_s} {stats['ned_p95_mean']:>8.4f} {stats['runtime_ms']:>8.1f}"
+                )
+                if stage_baseline:
+                    sweep_data.append({"key": key, **stats, "delta_cer_mean": dcer, "delta_wer_mean": dwer})
+                else:
+                    sweep_data.append({"key": key, **stats})
+            else:
+                print(
+                    f"  {short_key:<50s} {stats['cer_mean']:>10.4f} {stats['wer_mean']:>10.4f} "
+                    f"{stats['ned_p95_mean']:>8.4f} {stats['runtime_ms']:>8.1f}"
+                )
+                sweep_data.append({"key": key, **stats})
 
         with open(os.path.join(outdir, f"sweep_{stage}.json"), "w") as f:
             json.dump(sweep_data, f, indent=2)
 
 
-def print_lm_weight_data(groups: dict[str, list[dict]], outdir: str):
+def print_lm_weight_data(groups: dict[str, list[dict]], outdir: str, baseline_ar: dict | None, baseline_ctc: dict | None):
     """Extract performance vs LM weight λ data for plots."""
     os.makedirs(outdir, exist_ok=True)
 
@@ -251,6 +354,9 @@ def print_lm_weight_data(groups: dict[str, list[dict]], outdir: str):
         if m:
             lw = float(m.group(1))
             stats = compute_cv_stats(grp)
+            if baseline_ctc:
+                stats["delta_cer_mean"] = stats["cer_mean"] - baseline_ctc["cer_mean"]
+                stats["delta_wer_mean"] = stats["wer_mean"] - baseline_ctc["wer_mean"]
             ctc_lm_data.append({"lm_weight": lw, **stats, "config": key})
 
     # AR + LM (rescoring)
@@ -262,6 +368,9 @@ def print_lm_weight_data(groups: dict[str, list[dict]], outdir: str):
         if m:
             lw = float(m.group(1))
             stats = compute_cv_stats(grp)
+            if baseline_ar:
+                stats["delta_cer_mean"] = stats["cer_mean"] - baseline_ar["cer_mean"]
+                stats["delta_wer_mean"] = stats["wer_mean"] - baseline_ar["wer_mean"]
             ar_rescore_data.append({"lm_weight": lw, **stats, "config": key})
 
     # AR + LM (shallow fusion)
@@ -273,6 +382,9 @@ def print_lm_weight_data(groups: dict[str, list[dict]], outdir: str):
         if m:
             lw = float(m.group(1))
             stats = compute_cv_stats(grp)
+            if baseline_ar:
+                stats["delta_cer_mean"] = stats["cer_mean"] - baseline_ar["cer_mean"]
+                stats["delta_wer_mean"] = stats["wer_mean"] - baseline_ar["wer_mean"]
             ar_shallow_data.append({"lm_weight": lw, **stats, "config": key})
 
     plot_data = {
@@ -283,7 +395,7 @@ def print_lm_weight_data(groups: dict[str, list[dict]], outdir: str):
     with open(os.path.join(outdir, "lm_weight_plot_data.json"), "w") as f:
         json.dump(plot_data, f, indent=2)
 
-    print("\n── LM Weight vs CER (for plotting) ──")
+    print("\n-- LM Weight vs CER (for plotting) --")
     for name, data in plot_data.items():
         if data:
             print(f"\n  {name}:")
@@ -291,7 +403,7 @@ def print_lm_weight_data(groups: dict[str, list[dict]], outdir: str):
                 print(f"    λ={d['lm_weight']:.2f}  CER={d['cer_mean']:.4f}  WER={d['wer_mean']:.4f}")
 
 
-def generate_latex(groups: dict[str, list[dict]], outdir: str):
+def generate_latex(groups: dict[str, list[dict]], outdir: str, baseline_ar: dict | None, baseline_ctc: dict | None):
     """Generate LaTeX table source."""
     os.makedirs(outdir, exist_ok=True)
 
@@ -326,9 +438,16 @@ def generate_latex(groups: dict[str, list[dict]], outdir: str):
     latex.append(r"  \centering")
     latex.append(r"  \caption{Decoding study ablation on OnHW500 WI (word-level, 5-fold CV).}")
     latex.append(r"  \label{tab:decode_study}")
-    latex.append(r"  \begin{tabular}{l c c c c c}")
+    show_delta = bool(baseline_ar or baseline_ctc)
+    if show_delta:
+        latex.append(r"  \begin{tabular}{l c c c c c c}")
+    else:
+        latex.append(r"  \begin{tabular}{l c c c c c}")
     latex.append(r"    \toprule")
-    latex.append(r"    Method & CER$\downarrow$ & WER$\downarrow$ & NED P95 & NED P99 & ms/sample \\")
+    if show_delta:
+        latex.append(r"    Method & CER$\downarrow$ & $\Delta$CER & WER$\downarrow$ & $\Delta$WER & NED P95 & ms/sample \\")
+    else:
+        latex.append(r"    Method & CER$\downarrow$ & WER$\downarrow$ & NED P95 & NED P99 & ms/sample \\")
     latex.append(r"    \midrule")
 
     for label, grp in rows:
@@ -337,7 +456,7 @@ def generate_latex(groups: dict[str, list[dict]], outdir: str):
         elif label in best_configs and best_configs[label] is not None:
             stats = best_configs[label]
         else:
-            latex.append(f"    {label} & --- & --- & --- & --- & --- \\\\")
+            latex.append(f"    {label} & --- & --- & --- & --- & --- \\")
             continue
 
         n = stats["n_folds"]
@@ -348,11 +467,25 @@ def generate_latex(groups: dict[str, list[dict]], outdir: str):
             cer_s = f"${stats['cer_mean']:.3f}$"
             wer_s = f"${stats['wer_mean']:.3f}$"
 
-        latex.append(
-            f"    {label} & {cer_s} & {wer_s} "
-            f"& ${stats['ned_p95_mean']:.3f}$ & ${stats['ned_p99_mean']:.3f}$ "
-            f"& ${stats['runtime_ms']:.1f}$ \\\\"
-        )
+        row_baseline = baseline_ctc if label.startswith("CTC") else baseline_ar
+        if show_delta and row_baseline:
+            dcer = stats["cer_mean"] - row_baseline["cer_mean"]
+            dwer = stats["wer_mean"] - row_baseline["wer_mean"]
+            latex.append(
+                f"    {label} & {cer_s} & ${dcer:.3f}$ & {wer_s} & ${dwer:.3f}$ "
+                f"& ${stats['ned_p95_mean']:.3f}$ & ${stats['runtime_ms']:.1f}$ \\\\"
+            )
+        elif show_delta:
+            latex.append(
+                f"    {label} & {cer_s} & --- & {wer_s} & --- "
+                f"& ${stats['ned_p95_mean']:.3f}$ & ${stats['runtime_ms']:.1f}$ \\\\"
+            )
+        else:
+            latex.append(
+                f"    {label} & {cer_s} & {wer_s} "
+                f"& ${stats['ned_p95_mean']:.3f}$ & ${stats['ned_p99_mean']:.3f}$ "
+                f"& ${stats['runtime_ms']:.1f}$ \\\\"
+            )
 
         if label == "AR + LM (shallow)":
             latex.append(r"    \midrule")
@@ -378,7 +511,23 @@ def main():
         "--outdir", type=str,
         default="/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/decode_study/tables",
     )
+    parser.add_argument(
+        "--baseline_json", type=str, default=None,
+        help="Deprecated fallback baseline path (applied to both AR/CTC if specific baselines are not given)",
+    )
+    parser.add_argument(
+        "--baseline_ar_json", type=str, default=None,
+        help="AR baseline results.json (used for stages A/C/D1/D2)",
+    )
+    parser.add_argument(
+        "--baseline_ctc_json", type=str, default=None,
+        help="CTC baseline results.json (used for stages B/D3)",
+    )
     args = parser.parse_args()
+
+    baseline_fallback = load_baseline(args.baseline_json)
+    baseline_ar = load_baseline(args.baseline_ar_json) or baseline_fallback
+    baseline_ctc = load_baseline(args.baseline_ctc_json) or baseline_fallback
 
     # Load results
     all_results = load_all_results(args.results_dir)
@@ -392,22 +541,36 @@ def main():
     groups = group_by_experiment(all_results)
     print(f"Found {len(groups)} unique experiments across folds")
 
+    if baseline_ar is None:
+        baseline_ar = compute_baseline_from_group(groups, "stageA0_ar_greedy")
+        if baseline_ar:
+            print("Note: Using stageA0_ar_greedy as AR baseline.")
+    if baseline_ctc is None:
+        baseline_ctc = compute_baseline_from_group(groups, "stageB1_ctc_greedy")
+        if baseline_ctc:
+            print("Note: Using stageB1_ctc_greedy as CTC baseline.")
+
     # Print detailed sweep tables
-    print_sweep_tables(groups, args.outdir)
+    print_sweep_tables(groups, args.outdir, baseline_ar, baseline_ctc)
 
     # Print main ablation table
-    print_main_table(groups, args.outdir)
+    print_main_table(groups, args.outdir, baseline_ar, baseline_ctc)
 
     # LM weight data for plots
-    print_lm_weight_data(groups, args.outdir)
+    print_lm_weight_data(groups, args.outdir, baseline_ar, baseline_ctc)
 
     # Generate LaTeX
-    generate_latex(groups, args.outdir)
+    generate_latex(groups, args.outdir, baseline_ar, baseline_ctc)
 
     # Save full summary
     summary = {}
     for key, grp in sorted(groups.items()):
-        summary[key] = compute_cv_stats(grp)
+        stats = compute_cv_stats(grp)
+        row_baseline = baseline_for_stage(key, baseline_ar, baseline_ctc)
+        if row_baseline:
+            stats["delta_cer_mean"] = stats["cer_mean"] - row_baseline["cer_mean"]
+            stats["delta_wer_mean"] = stats["wer_mean"] - row_baseline["wer_mean"]
+        summary[key] = stats
     with open(os.path.join(args.outdir, "full_summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     print(f"\nFull summary saved to {os.path.join(args.outdir, 'full_summary.json')}")

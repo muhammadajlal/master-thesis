@@ -49,10 +49,12 @@ export TRANSFORMERS_OFFLINE=1
 
 # ── Resolve checkpoint per fold ──────────────────────────────────
 RESULTS_BASE=/home/woody/iwso/iwso214h/imu-hwr/results/hwr2
+OUTDIR_BASE=${OUTDIR_BASE:-results/hwr2}
 
 if [[ "$MODEL" == "hybrid" ]]; then
     CKPT="${RESULTS_BASE}/train_element_word_hybrid_06/ar_transformer_s__onhw_wi_word_rh/fold_${FOLD}/${FOLD}/checkpoints/best_cer.pth"
     BASE_CFG="configs/decode_study/base_hybrid.yaml"
+    OUTDIR="${OUTDIR_BASE}/decode_study_hybrid"
 elif [[ "$MODEL" == "rewi_ctc" ]]; then
     CTC_DIR="${RESULTS_BASE}/blconv_bilstm_wide_no_tokenizer/bilstm_wide__onhw_wi_word_rh/fold_${FOLD}/${FOLD}"
     if [[ -f "${CTC_DIR}/checkpoints/best_cer.pth" ]]; then
@@ -62,6 +64,7 @@ elif [[ "$MODEL" == "rewi_ctc" ]]; then
         exit 1
     fi
     BASE_CFG="configs/decode_study/base_rewi_ctc.yaml"
+    OUTDIR="${OUTDIR_BASE}/decode_study_rewi_ctc"
 else
     # AR-only: need to find best epoch per fold from JSON results
     # Use best_cer checkpoint if available
@@ -83,6 +86,7 @@ else:
         CKPT="${AR_DIR}/checkpoints/${BEST_EPOCH}.pth"
     fi
     BASE_CFG="configs/decode_study/base_ar.yaml"
+    OUTDIR="${OUTDIR_BASE}/decode_study_ar"
 fi
 
 echo "Checkpoint: $CKPT"
@@ -103,10 +107,12 @@ elif [[ -f "lm/char_5gram.binary" ]]; then
 fi
 
 # ── Run sweep ────────────────────────────────────────────────────
-export FOLD MODEL LM_PATH
+export FOLD MODEL LM_PATH CHECKPOINT="$CKPT" OUTDIR
+echo "Output dir: $OUTDIR"
 bash scripts/run_decode_study.sh \
     --fold "$FOLD" \
     --model "$MODEL" \
-    --lm "$LM_PATH"
+    --lm "$LM_PATH" \
+    --checkpoint "$CKPT"
 
 echo "═══ Fold $FOLD complete ═══"

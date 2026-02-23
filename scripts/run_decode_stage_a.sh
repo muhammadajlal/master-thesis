@@ -6,6 +6,7 @@ set -euo pipefail
 
 FOLD=${FOLD:-0}
 MODEL=${MODEL:-hybrid}  # "hybrid" or "ar"
+CHECKPOINT=${CHECKPOINT:-}
 OUTDIR=${OUTDIR:-results/hwr2/decode_study}
 PYTHON=${PYTHON:-python3}
 SKIP_DONE=${SKIP_DONE:-1}
@@ -33,6 +34,7 @@ run() {
         --idx_fold "$FOLD" \
         --outdir "$OUTDIR" \
         --tag "${tag}__fold${FOLD}" \
+        ${CHECKPOINT:+--checkpoint "$CHECKPOINT"} \
         "$@"
 }
 

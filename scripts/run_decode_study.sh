@@ -46,12 +46,14 @@ if [[ -z "$LM_PATH" ]]; then
 fi
 
 # Parse arguments
+CHECKPOINT=${CHECKPOINT:-}
 while [[ $# -gt 0 ]]; do
     case $1 in
         --fold) FOLD="$2"; shift 2;;
         --model) MODEL="$2"; shift 2;;
         --lm) LM_PATH="$2"; shift 2;;
         --neural-lm) NEURAL_LM_PATH="$2"; shift 2;;
+        --checkpoint) CHECKPOINT="$2"; shift 2;;
         *) echo "Unknown arg: $1"; exit 1;;
     esac
 done
@@ -67,6 +69,7 @@ fi
 echo "═══════════════════════════════════════════════════════════"
 echo "  Decoding Study — fold=$FOLD model=$MODEL"
 echo "  Config: $BASE_CFG"
+echo "  Checkpoint: ${CHECKPOINT:-<from YAML>}"
 echo "  KenLM: $LM_PATH"
 echo "  Neural LM: $NEURAL_LM_PATH"
 echo "═══════════════════════════════════════════════════════════"
@@ -80,6 +83,8 @@ run() {
     $PYTHON decode_study.py -c "$BASE_CFG" \
         --idx_fold "$FOLD" \
         --tag "${tag}__fold${FOLD}" \
+        ${CHECKPOINT:+--checkpoint "$CHECKPOINT"} \
+        ${OUTDIR:+--outdir "$OUTDIR"} \
         "$@"
 }
 

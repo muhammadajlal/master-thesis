@@ -62,8 +62,15 @@ if [[ ! -f "$CKPT" ]]; then
     exit 1
 fi
 
+# ── Resolve output directory ─────────────────────────────────────
+if [[ "$MODEL" == "hybrid" ]]; then
+    OUTDIR="results/hwr2/decode_study_hybrid"
+else
+    OUTDIR="results/hwr2/decode_study_ar"
+fi
+
 # ── Run stage C only ────────────────────────────────────────────
-export FOLD MODEL
+export FOLD MODEL CHECKPOINT="$CKPT" OUTDIR
 PYTHON="$PY_BIN" bash scripts/run_decode_stage_c.sh --fold "$FOLD" --model "$MODEL"
 
 echo "═══ Fold $FOLD stage C complete ═══"
