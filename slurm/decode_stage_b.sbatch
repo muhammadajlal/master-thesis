@@ -37,6 +37,29 @@ if [[ "$MODEL" != "hybrid" && "$MODEL" != "rewi_ctc" ]]; then
     exit 1
 fi
 
+# ── Resolve checkpoint per fold ──────────────────────────────────
+RESULTS_BASE=/home/woody/iwso/iwso214h/imu-hwr/results/hwr2
+
+if [[ "$MODEL" == "hybrid" ]]; then
+    CKPT="${RESULTS_BASE}/train_element_word_hybrid_06/ar_transformer_s__onhw_wi_word_rh/fold_${FOLD}/${FOLD}/checkpoints/best_cer.pth"
+    OUTDIR="results/hwr2/decode_study_hybrid"
+else
+    CTC_DIR="${RESULTS_BASE}/blconv_bilstm_wide_no_tokenizer/bilstm_wide__onhw_wi_word_rh/fold_${FOLD}/${FOLD}"
+    if [[ -f "${CTC_DIR}/checkpoints/best_cer.pth" ]]; then
+        CKPT="${CTC_DIR}/checkpoints/best_cer.pth"
+    else
+        echo "ERROR: REWI CTC checkpoint not found: ${CTC_DIR}/checkpoints/best_cer.pth"
+        exit 1
+    fi
+    OUTDIR="results/hwr2/decode_study_rewi_ctc"
+fi
+
+echo "Checkpoint: $CKPT"
+if [[ ! -f "$CKPT" ]]; then
+    echo "ERROR: Checkpoint not found: $CKPT"
+    exit 1
+fi
+
 # Resolve per-fold KenLM path
 LM_PATH=""
 if [[ -f "lm/fold_${FOLD}/char_5gram.binary" ]]; then
@@ -48,7 +71,7 @@ elif [[ -f "lm/char_5gram.binary" ]]; then
     echo "WARNING: Using global LM for fold $FOLD (not per-fold)"
 fi
 
-export FOLD MODEL LM_PATH
+export FOLD MODEL LM_PATH CHECKPOINT="$CKPT" OUTDIR
 PYTHON="$PY_BIN" bash scripts/run_decode_stage_b.sh
 
 echo "═══ Fold $FOLD stage B complete ═══"

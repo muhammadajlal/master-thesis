@@ -7,6 +7,7 @@ set -euo pipefail
 # ── Defaults ─────────────────────────────────────────────────────
 FOLD=${FOLD:-0}
 MODEL=${MODEL:-hybrid}  # "ar" or "hybrid" or "rewi_ctc"
+CHECKPOINT=${CHECKPOINT:-}
 NEURAL_LM_PATH=${NEURAL_LM_PATH:-results/hwr2/pretrain_ar_decoder_word/run_1512332/0/checkpoints/best_loss.pth}
 OUTDIR=${OUTDIR:-results/hwr2/decode_study}
 PYTHON=${PYTHON:-python3}
@@ -34,6 +35,7 @@ run() {
         --idx_fold "$FOLD" \
         --outdir "$OUTDIR" \
         --tag "${tag}__fold${FOLD}" \
+        ${CHECKPOINT:+--checkpoint "$CHECKPOINT"} \
         "$@"
 }
 

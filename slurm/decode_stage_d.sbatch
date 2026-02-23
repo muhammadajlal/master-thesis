@@ -71,8 +71,17 @@ if [[ ! -f "$NEURAL_LM_PATH" ]]; then
     exit 1
 fi
 
+# ── Resolve output directory ─────────────────────────────────────
+if [[ "$MODEL" == "hybrid" ]]; then
+    OUTDIR="results/hwr2/decode_study_hybrid"
+elif [[ "$MODEL" == "rewi_ctc" ]]; then
+    OUTDIR="results/hwr2/decode_study_rewi_ctc"
+else
+    OUTDIR="results/hwr2/decode_study_ar"
+fi
+
 # ── Run stage D only ────────────────────────────────────────────
-export FOLD MODEL NEURAL_LM_PATH
+export FOLD MODEL NEURAL_LM_PATH CHECKPOINT="$CKPT" OUTDIR
 PYTHON="$PY_BIN" bash scripts/run_decode_stage_d.sh --fold "$FOLD" --model "$MODEL" --neural-lm "$NEURAL_LM_PATH"
 
 echo "═══ Fold $FOLD stage D complete ═══"
