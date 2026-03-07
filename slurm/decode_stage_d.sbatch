@@ -2,9 +2,9 @@
 #SBATCH -J rewi-cv-d
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
-#SBATCH -p a100
-#SBATCH --gres=gpu:a100:1
-#SBATCH --cpus-per-task=16
+#SBATCH -p v100
+#SBATCH --gres=gpu:v100:1
+#SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 #SBATCH --array=0-4
 # ═══════════════════════════════════════════════════════════════════
@@ -14,7 +14,7 @@ set -euo pipefail
 
 FOLD=${SLURM_ARRAY_TASK_ID}
 MODEL=${MODEL:-hybrid}  # "hybrid" | "ar" | "rewi_ctc"
-NEURAL_LM_PATH=${NEURAL_LM_PATH:-results/hwr2/pretrain_ar_decoder_word/run_1512332/0/checkpoints/best_loss.pth}
+NEURAL_LM_PATH=${NEURAL_LM_PATH:-/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_ar_decoder_word/run_1512332/0/checkpoints/best_loss.pth}
 
 WORK=/home/woody/iwso/iwso214h
 PROJ=$WORK/imu-hwr/work/REWI_work

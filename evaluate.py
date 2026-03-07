@@ -11,6 +11,7 @@ from thop import profile
 from rewi.model import BaseModel, DualHeadModel, build_encoder
 from rewi.model.multimodal_lm_model import MultimodalLMModel
 from rewi.model.pretrainedLM import LMConfig
+from rewi.model.vlm_model import VLMModel
 from rewi.tokenizer import BPETokenizer
 
 import time
@@ -269,9 +270,59 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
                 # Fallback: just run the model.
                 return self.model(x)
 
-    lm_mode = cfgs.get('arch_de') in {'byt5_small', 't5-small'}
+    arch_de = str(cfgs.get('arch_de', ''))
+    lm_mode = arch_de in {'byt5_small', 't5-small'}
+    vlm_mode = bool(cfgs.get('vlm_enabled', False)) or arch_de == 'vlm'
 
-    if lm_mode:
+    if vlm_mode:
+        # Build encoder + VLM wrapper mirroring main.py
+        encoder = build_encoder(cfgs['num_channel'], cfgs['arch_en'], cfgs['len_seq'])
+        ratio_ds = int(getattr(encoder, 'ratio_ds', 1))
+        d_cnn = int(cfgs.get('d_cnn', 512))
+
+        vlm_cfg = cfgs.get('vlm', {}) or {}
+        lm_name = str(vlm_cfg.get('lm_name', 'gpt2'))
+
+        model = VLMModel(
+            encoder=encoder,
+            ratio_ds=ratio_ds,
+            d_cnn=d_cnn,
+            lm_name_or_path=lm_name,
+            num_queries=int(vlm_cfg.get('num_queries', 32)),
+            qformer_layers=int(vlm_cfg.get('qformer_layers', 4)),
+            qformer_nhead=int(vlm_cfg.get('qformer_nhead', 8)),
+            qformer_dropout=float(vlm_cfg.get('qformer_dropout', 0.1)),
+            prompt_text=str(vlm_cfg.get('prompt_text', 'Transcribe the handwritten text from IMU sensor signals:')),
+            num_soft_tokens=int(vlm_cfg.get('num_soft_tokens', 20)),
+            freeze_encoder=bool(cfgs.get('freeze', False)),
+            freeze_lm=bool(vlm_cfg.get('freeze_lm', True)),
+            use_lora=bool(vlm_cfg.get('use_lora', False)),
+            lora_r=int(vlm_cfg.get('lora_r', 16)),
+            lora_alpha=int(vlm_cfg.get('lora_alpha', 32)),
+            lora_dropout=float(vlm_cfg.get('lora_dropout', 0.05)),
+            lora_target_modules=vlm_cfg.get('lora_target_modules', None),
+            max_new_tokens=int(vlm_cfg.get('max_new_tokens', 64)),
+            num_beams=int(vlm_cfg.get('num_beams', 1)),
+            local_files_only=bool(vlm_cfg.get('local_files_only', True)),
+            z_dropout=float(vlm_cfg.get('z_dropout', 0.1)),
+            label_smoothing=float(vlm_cfg.get('label_smoothing', 0.0)),
+        ).eval()
+
+        # Dummy inputs for profiling (word vs sentence length heuristic)
+        T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+        x = torch.randn(1, cfgs['num_channel'], T)
+        len_x = torch.tensor([T], dtype=torch.long)
+        labels = torch.zeros((1, 8), dtype=torch.long)
+
+        try:
+            macs, params = profile(model, inputs=(x, len_x, labels), verbose=False)
+        except Exception as exc:
+            # THOP may not fully support HF Transformer internals; always return params.
+            params = sum(p.numel() for p in model.parameters())
+            macs = 0
+            print(f"[WARN] THOP MACs failed for VLM; returning macs=0. Error: {exc}")
+
+    elif lm_mode:
         # Build encoder + LM wrapper mirroring main.py
         encoder = build_encoder(cfgs['num_channel'], cfgs['arch_en'], cfgs['len_seq'])
         ratio_ds = int(getattr(encoder, 'ratio_ds', 1))

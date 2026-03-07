@@ -2,8 +2,8 @@
 #SBATCH -J rewi-cv
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
-#SBATCH -p rtx3080
-#SBATCH --gres=gpu:rtx3080:1
+#SBATCH -p v100
+#SBATCH --gres=gpu:v100:1
 #SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 #SBATCH --array=0-4
@@ -14,7 +14,7 @@ set -x
 
 # ---- Params you can tweak ----
 # Specify the YAML config file to use (path relative to configs/)
-TRAIN_YAML=${TRAIN_YAML:-train.yaml}
+TRAIN_YAML=${TRAIN_YAML:-train-vlm-gpt2.yaml}
 
 # Dataset name (can still be overridden)
 DATASET=${DATASET:-onhw_wi_word_rh}  # onhw_wi_word_rh | wi_word_hw6_meta etc.
@@ -183,8 +183,19 @@ echo "======================================"
 
 export HF_HOME=/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/.cache/huggingface
 export TRANSFORMERS_CACHE=$HF_HOME/transformers
-export HF_HUB_OFFLINE=1
-export TRANSFORMERS_OFFLINE=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# Optional online mode for models not pre-cached locally (e.g., GPT-2 / TinyLlama)
+HF_ONLINE=${HF_ONLINE:-0}
+if [[ "${HF_ONLINE,,}" == "1" || "${HF_ONLINE,,}" == "true" || "${HF_ONLINE,,}" == "yes" ]]; then
+  unset HF_HUB_OFFLINE
+  unset TRANSFORMERS_OFFLINE
+  echo "HF mode: ONLINE (HF_ONLINE=${HF_ONLINE})"
+else
+  export HF_HUB_OFFLINE=1
+  export TRANSFORMERS_OFFLINE=1
+  echo "HF mode: OFFLINE (HF_ONLINE=${HF_ONLINE})"
+fi
 
 echo "Running fold ${FOLD} with config: $TMPCFG"
 $PY_BIN main.py -c "$TMPCFG"
