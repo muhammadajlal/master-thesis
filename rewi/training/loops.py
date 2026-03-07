@@ -52,6 +52,10 @@ def train_one_epoch_lm(
     """
     Train multimodal LM model for one epoch.
     
+    Supports gradient accumulation via ``cfgs.grad_accum_steps`` (default 1).
+    When > 1, gradients are accumulated over that many mini-batches before
+    an optimiser step, simulating a larger effective batch size.
+    
     Args:
         dataloader: Training dataloader yielding (x, len_x, labels, texts).
         model: MultimodalLMModel instance.
@@ -66,6 +70,9 @@ def train_one_epoch_lm(
 
     use_amp = bool(getattr(man.cfgs, "lm_use_amp", False))
     amp_dtype = torch.float16  # V100-friendly
+    accum_steps = int(getattr(man.cfgs, "grad_accum_steps", 1))
+
+    optimizer.zero_grad(set_to_none=True)
 
     for idx, (x, len_x, labels, _texts) in enumerate(dataloader):
         x = x.to(man.cfgs.device)
@@ -80,8 +87,6 @@ def train_one_epoch_lm(
             )
             continue
 
-        optimizer.zero_grad(set_to_none=True)
-
         # Forward with AMP
         autocast_ctx = (
             torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp)
@@ -90,48 +95,52 @@ def train_one_epoch_lm(
         )
         with autocast_ctx:
             out = model(x, len_x, labels=labels)
-            loss = out.loss
+            loss = out.loss / accum_steps  # scale loss for accumulation
 
         # Skip non-finite losses
         if not torch.isfinite(loss):
             logger.warning(
                 "Non-finite loss. epoch={} iter={} lr={} loss={}",
-                epoch, idx, lr_scheduler.get_last_lr()[0], loss
+                epoch, idx, lr_scheduler.get_last_lr()[0], loss * accum_steps
             )
             optimizer.zero_grad(set_to_none=True)
-            if scaler is not None:
-                scaler.update()
             continue
 
-        # Backward + step
+        # Backward (accumulate gradients)
         if scaler is not None:
             scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            
-            if not torch.isfinite(grad_norm):
-                logger.warning(
-                    "Non-finite grad norm. epoch={} iter={} grad_norm={}",
-                    epoch, idx, grad_norm
-                )
-                optimizer.zero_grad(set_to_none=True)
-                scaler.update()
-                continue
-
-            scaler.step(optimizer)
-            scaler.update()
         else:
             loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            
-            if not torch.isfinite(grad_norm):
-                optimizer.zero_grad(set_to_none=True)
-                continue
-                
-            optimizer.step()
 
-        lr_scheduler.step()
-        man.update_iteration(idx, float(loss.item()), lr_scheduler.get_last_lr()[0])
+        # Step only every accum_steps iterations (or at end of epoch)
+        is_accum_step = ((idx + 1) % accum_steps == 0) or (idx + 1 == len(dataloader))
+        if is_accum_step:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+                if not torch.isfinite(grad_norm):
+                    logger.warning(
+                        "Non-finite grad norm. epoch={} iter={} grad_norm={}",
+                        epoch, idx, grad_norm
+                    )
+                    optimizer.zero_grad(set_to_none=True)
+                    scaler.update()
+                else:
+                    scaler.step(optimizer)
+                    scaler.update()
+            else:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+                if not torch.isfinite(grad_norm):
+                    optimizer.zero_grad(set_to_none=True)
+                else:
+                    optimizer.step()
+
+            optimizer.zero_grad(set_to_none=True)
+            lr_scheduler.step()
+
+        man.update_iteration(idx, float(loss.item() * accum_steps), lr_scheduler.get_last_lr()[0])
 
     man.summarize_epoch()
     

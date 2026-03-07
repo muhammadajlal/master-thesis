@@ -23,11 +23,8 @@ def decode_ids_to_text(y: torch.Tensor, len_y: torch.Tensor, categories: List[st
         texts.append("".join(chars))
     return texts
 
-def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128):
-    x, y, len_x, len_y = base_collate_fn(batch)
-
-    # y is token IDs in "char categories space". Convert to python strings.
-    # Assumption: y uses pad_id for padding.
+def _chars_to_strings(y, len_y, categories, pad_id):
+    """Convert char-level token IDs to Python strings."""
     texts = []
     for i in range(y.size(0)):
         seq = y[i, :len_y[i]].tolist()
@@ -36,6 +33,13 @@ def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_lab
         # map to chars
         chars = [categories[t] for t in seq if 0 <= t < len(categories)]
         texts.append("".join(chars))
+    return texts
+
+
+def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128):
+    x, y, len_x, len_y = base_collate_fn(batch)
+
+    texts = _chars_to_strings(y, len_y, categories, pad_id)
 
     tok = hf_tokenizer(
         texts,
@@ -48,5 +52,43 @@ def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_lab
     labels = tok["input_ids"]
     # HF expects -100 for ignore positions
     labels = labels.masked_fill(labels == hf_tokenizer.pad_token_id, -100)
+
+    return x, len_x, labels, texts
+
+
+def vlm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128):
+    """Collate for VLM (decoder-only LM).
+
+    Similar to ``lm_collate`` but appends EOS to the text labels so the model
+    learns to produce an end-of-sequence token, and uses attention-mask-based
+    padding detection (required when pad_token == eos_token, as in GPT-2).
+
+    Returns:
+        ``(x, len_x, labels, texts)`` where *labels* contains token IDs with
+        ``-100`` for padding positions.
+    """
+    import torch
+
+    x, y, len_x, len_y = base_collate_fn(batch)
+
+    texts = _chars_to_strings(y, len_y, categories, pad_id)
+
+    # Append EOS token so the model learns to stop generating
+    eos_token = hf_tokenizer.eos_token or ""
+    texts_with_eos = [t + eos_token for t in texts]
+
+    tok = hf_tokenizer(
+        texts_with_eos,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=max_label_len,
+    )
+
+    labels = tok["input_ids"].clone()
+    attn = tok["attention_mask"]  # 1=real, 0=pad
+
+    # Use attention mask to determine padding (correct even when pad==eos)
+    labels[attn == 0] = -100
 
     return x, len_x, labels, texts

@@ -42,7 +42,10 @@ from rewi.utils import seed_everything, seed_worker
 # LM-specific modules
 from rewi.model.multimodal_lm_model import MultimodalLMModel
 from rewi.model.pretrainedLM import LMConfig
-from rewi.dataset.lm_collate import lm_collate
+from rewi.dataset.lm_collate import lm_collate, vlm_collate
+
+# VLM-specific modules
+from rewi.model.vlm_model import VLMModel
 
 # Training loops and utilities
 from rewi.training import (
@@ -106,8 +109,45 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
         model: Model instance moved to device.
     """
     LM_MODE = cfgs.arch_de in {"byt5_small", "t5-small"}
-    
-    if LM_MODE:
+    VLM_MODE = bool(getattr(cfgs, "vlm_enabled", False))
+
+    if VLM_MODE:
+        encoder = build_encoder(cfgs.num_channel, cfgs.arch_en, cfgs.len_seq).to(cfgs.device)
+        ratio_ds = int(getattr(encoder, "ratio_ds", 1))
+        d_cnn = int(getattr(cfgs, "d_cnn", encoder.dim_out))
+
+        vlm_cfg = getattr(cfgs, "vlm", {}) or {}
+        lm_name = str(vlm_cfg.get("lm_name", "gpt2"))
+
+        model = VLMModel(
+            encoder=encoder,
+            ratio_ds=ratio_ds,
+            d_cnn=d_cnn,
+            lm_name_or_path=lm_name,
+            num_queries=int(vlm_cfg.get("num_queries", 32)),
+            qformer_layers=int(vlm_cfg.get("qformer_layers", 4)),
+            qformer_nhead=int(vlm_cfg.get("qformer_nhead", 8)),
+            qformer_dropout=float(vlm_cfg.get("qformer_dropout", 0.1)),
+            prompt_text=str(vlm_cfg.get("prompt_text", "Transcribe the handwritten text from IMU sensor signals:")),
+            num_soft_tokens=int(vlm_cfg.get("num_soft_tokens", 20)),
+            freeze_encoder=bool(getattr(cfgs, "freeze", False)),
+            freeze_lm=bool(vlm_cfg.get("freeze_lm", True)),
+            use_lora=bool(vlm_cfg.get("use_lora", False)),
+            lora_r=int(vlm_cfg.get("lora_r", 16)),
+            lora_alpha=int(vlm_cfg.get("lora_alpha", 32)),
+            lora_dropout=float(vlm_cfg.get("lora_dropout", 0.05)),
+            lora_target_modules=vlm_cfg.get("lora_target_modules", None),
+            max_new_tokens=int(vlm_cfg.get("max_new_tokens", 64)),
+            num_beams=int(vlm_cfg.get("num_beams", 1)),
+            local_files_only=bool(vlm_cfg.get("local_files_only", True)),
+            z_dropout=float(vlm_cfg.get("z_dropout", 0.1)),
+            label_smoothing=float(vlm_cfg.get("label_smoothing", 0.0)),
+        ).to(cfgs.device)
+
+        # Attach ratio_ds for dataloader compatibility
+        model.ratio_ds = ratio_ds
+
+    elif LM_MODE:
         encoder = build_encoder(cfgs.num_channel, cfgs.arch_en, cfgs.len_seq).to(cfgs.device)
         ratio_ds = int(getattr(encoder, "ratio_ds", 1))
 
@@ -208,6 +248,8 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
         dataloader_test: Test/validation dataloader.
         train_batch_size: Effective training batch size.
     """
+    VLM_MODE = bool(getattr(cfgs, "vlm_enabled", False))
+
     # Test dataset
     dataset_test = HRDataset(
         os.path.join(cfgs.dir_dataset, 'val.json'),
@@ -219,7 +261,17 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
     )
 
     collate_test = fn_collate
-    if LM_MODE:
+    if VLM_MODE:
+        hf_tok = model.tokenizer
+        collate_test = lambda batch: vlm_collate(
+            batch,
+            base_collate_fn=fn_collate,
+            hf_tokenizer=hf_tok,
+            categories=cfgs.categories,
+            pad_id=cfgs.PAD_ID,
+            max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+        )
+    elif LM_MODE:
         hf_tok = model.lm.tokenizer
         collate_test = lambda batch: lm_collate(
             batch,
@@ -273,8 +325,19 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
             dataset_train = base_train
             collate_train = fn_collate
 
-        # Wrap collate for LM mode
-        if LM_MODE:
+        # Wrap collate for LM / VLM mode
+        if VLM_MODE:
+            base_collate = collate_train
+            hf_tok = model.tokenizer
+            collate_train = lambda batch: vlm_collate(
+                batch,
+                base_collate_fn=base_collate,
+                hf_tokenizer=hf_tok,
+                categories=cfgs.categories,
+                pad_id=cfgs.PAD_ID,
+                max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+            )
+        elif LM_MODE:
             base_collate = collate_train
             hf_tok = model.lm.tokenizer
             collate_train = lambda batch: lm_collate(
@@ -340,7 +403,10 @@ def build_optimizer_and_scheduler(cfgs, model, dataloader_train, LM_MODE: bool):
         scaler: GradScaler for mixed precision.
         lr_scheduler: Learning rate scheduler.
     """
-    if LM_MODE:
+    VLM_MODE = bool(getattr(cfgs, "vlm_enabled", False))
+    if VLM_MODE:
+        return _build_vlm_optimizer(cfgs, model, dataloader_train)
+    elif LM_MODE:
         return _build_lm_optimizer(cfgs, model, dataloader_train)
     else:
         return _build_standard_optimizer(cfgs, model, dataloader_train)
@@ -393,6 +459,83 @@ def _build_lm_optimizer(cfgs, model, dataloader_train):
                 CosineAnnealingLR(optimizer, len(dataloader_train) * (cfgs.epoch - cfgs.epoch_warmup)),
             ],
             [len(dataloader_train) * cfgs.epoch_warmup],
+        )
+    else:
+        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _: 1.0)
+
+    return optimizer, scaler, lr_scheduler
+
+
+def _build_vlm_optimizer(cfgs, model, dataloader_train):
+    """Build discriminative LR optimizer for VLM mode.
+
+    Parameter groups:
+        enc       – CNN encoder (if trainable)
+        qformer   – Q-Former connector
+        prompt    – soft prefix vectors
+        lm        – decoder-only LM (LoRA / unfrozen params)
+    """
+    vlm_cfg = getattr(cfgs, "vlm", {}) or {}
+    lr_enc = float(getattr(cfgs, "lr_enc", 1e-4))
+    lr_connector = float(vlm_cfg.get("lr_connector", 1e-4))
+    lr_prompt = float(vlm_cfg.get("lr_prompt", 1e-4))
+    lr_lm = float(vlm_cfg.get("lr_lm", 1e-5))
+    wd = float(getattr(cfgs, "weight_decay", 0.01))
+
+    param_groups = []
+
+    # Encoder
+    enc_params = [p for p in model.encoder.parameters() if p.requires_grad]
+    if enc_params:
+        param_groups.append({"name": "enc", "params": enc_params, "lr": lr_enc})
+
+    # Q-Former
+    qf_params = [p for p in model.qformer.parameters() if p.requires_grad]
+    if qf_params:
+        param_groups.append({"name": "qformer", "params": qf_params, "lr": lr_connector})
+
+    # Prompt (soft prefix)
+    prompt_params = [p for p in model.prompt_manager.parameters() if p.requires_grad]
+    if prompt_params:
+        param_groups.append({"name": "prompt", "params": prompt_params, "lr": lr_prompt})
+
+    # LM (LoRA or unfrozen parameters)
+    lm_params = [p for p in model.lm.parameters() if p.requires_grad]
+    if lm_params:
+        param_groups.append({"name": "lm_dec", "params": lm_params, "lr": lr_lm})
+
+    if not param_groups:
+        raise ValueError("No trainable parameters — check freeze/LoRA settings")
+
+    optimizer = torch.optim.AdamW(param_groups, weight_decay=wd)
+    scaler = GradScaler(enabled=bool(getattr(cfgs, "lm_use_amp", False)))
+
+    logger.info(
+        "[VLM OptGroups] enc={} qformer={} prompt={} lm={} | "
+        "lr_enc={} lr_conn={} lr_prompt={} lr_lm={}",
+        sum(p.numel() for p in enc_params),
+        sum(p.numel() for p in qf_params),
+        sum(p.numel() for p in prompt_params),
+        sum(p.numel() for p in lm_params),
+        lr_enc, lr_connector, lr_prompt, lr_lm,
+    )
+
+    if dataloader_train is not None:
+        accum = int(getattr(cfgs, "grad_accum_steps", 1))
+        steps_per_epoch = max(1, len(dataloader_train) // accum)
+        warmup_steps = steps_per_epoch * cfgs.epoch_warmup
+        decay_steps = steps_per_epoch * (cfgs.epoch - cfgs.epoch_warmup)
+        logger.info(
+            "[VLM Scheduler] accum={} steps_per_epoch={} warmup_steps={} decay_steps={}",
+            accum, steps_per_epoch, warmup_steps, decay_steps,
+        )
+        lr_scheduler = SequentialLR(
+            optimizer,
+            [
+                LinearLR(optimizer, 0.01, total_iters=warmup_steps),
+                CosineAnnealingLR(optimizer, decay_steps),
+            ],
+            [warmup_steps],
         )
     else:
         lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _: 1.0)
@@ -947,10 +1090,15 @@ def main(cfgs: argparse.Namespace) -> None:
     # Determine training regime
     AR_MODE = cfgs.arch_de in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
     LM_MODE = cfgs.arch_de in {"byt5_small", "t5-small"}
+    VLM_MODE = bool(getattr(cfgs, "vlm_enabled", False))
+
+    # VLM uses LM training loops — treat it as LM_MODE for loop routing
+    LOOP_LM = LM_MODE or VLM_MODE
 
     # Attach derived flags for debug-friendly logging
     cfgs.AR_MODE = bool(AR_MODE)
     cfgs.LM_MODE = bool(LM_MODE)
+    cfgs.VLM_MODE = bool(VLM_MODE)
 
     # Set up tokenizer
     tok, vocab_dec, PAD_ID, BOS_ID, EOS_ID = setup_tokenizer(cfgs)
@@ -965,6 +1113,8 @@ def main(cfgs: argparse.Namespace) -> None:
     dual_enabled_cfg = bool(dual.get("enabled", False))
     if LM_MODE:
         cfgs.TRAINING_REGIME = "lm"
+    elif VLM_MODE:
+        cfgs.TRAINING_REGIME = "vlm"
     elif AR_MODE and dual_enabled_cfg:
         cfgs.TRAINING_REGIME = "hybrid_ar_ctc"
     elif AR_MODE:
@@ -981,11 +1131,11 @@ def main(cfgs: argparse.Namespace) -> None:
     model = build_model(cfgs, manager)
 
     # Build dataloaders
-    dataloader_train, dataloader_test, _ = build_dataloaders(cfgs, model, tok, LM_MODE)
+    dataloader_train, dataloader_test, _ = build_dataloaders(cfgs, model, tok, LOOP_LM)
 
     # Build optimizer and scheduler
     optimizer, scaler, lr_scheduler = build_optimizer_and_scheduler(
-        cfgs, model, dataloader_train, LM_MODE
+        cfgs, model, dataloader_train, LOOP_LM
     )
 
     # Debug: verify optimizer coverage
@@ -1008,7 +1158,7 @@ def main(cfgs: argparse.Namespace) -> None:
     run_training_loop(
         cfgs, model, optimizer, scaler, lr_scheduler, manager,
         dataloader_train, dataloader_test, ctc_decoder, tok,
-        epoch_start, AR_MODE, LM_MODE
+        epoch_start, AR_MODE, LOOP_LM
     )
 
 

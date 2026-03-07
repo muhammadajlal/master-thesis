@@ -11,8 +11,8 @@ Reads all decode_study results and produces:
 
 Usage:
     python scripts/aggregate_decode_study.py \
-        --results_dir /path/to/decode_study/ \
-        --outdir results/hwr2/decode_study/tables
+        --results_dir /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/results/hwr2/decode_study_hybrid \
+        --outdir /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/results/hwr2/decode_study_aggregated_hybrid
 """
 
 from __future__ import annotations

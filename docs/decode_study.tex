@@ -1,0 +1,258 @@
+% =========================
+% Decoding Study: Calibrated Decoding and External LM Integration
+% for IMU Handwriting Recognition
+% =========================
+% Generated tables and figures are in:
+%   results/hwr2/decode_study_thesis_analysis/
+%
+% Required figures (copy to your figures/ path):
+%   figures/ar_calibration.pdf
+%   figures/cer_vs_lm_weight.pdf
+%   figures/ctc_lm_heatmap.pdf
+%   figures/ar_rescore_heatmap.pdf
+%   figures/runtime_vs_cer.pdf
+
+
+\subsection{Decoding Study}
+\label{sec:decode-study}
+
+To understand the contribution of decoding strategy to final recognition quality,
+we conduct a systematic decoding study across three model architectures trained
+on the OnHW500 writer-independent word-level dataset using 5-fold cross-validation.
+The three models are:
+\begin{enumerate}[nosep]
+    \item \textbf{Hybrid (CTC+AR):} A \texttt{DualHeadModel} with a shared \texttt{blconv\_b} encoder, an autoregressive Transformer decoder (\texttt{ar\_transformer\_s}), and a linear CTC head, trained jointly with $\lambda_\text{AR}=1.0$ and $\lambda_\text{CTC}=0.6$.
+    \item \textbf{AR-only:} A \texttt{BaseModel} with the same encoder and AR Transformer decoder, trained with cross-entropy loss only.
+    \item \textbf{REWI (CTC):} The CTC baseline from~\cite{li2025rewi} with \texttt{blconv\_b} encoder and a \texttt{bilstm\_wide} decoder, trained with CTC loss.
+\end{enumerate}
+
+\noindent
+The study is organized into four stages of increasing complexity (A--D), each sweeping a different dimension of the decoding pipeline.
+All experiments are evaluated on the validation split, and we report CER and WER averaged over the five folds.
+
+
+% ─── Stage A: AR Calibration ──────────────────────────────────────────
+\subsubsection{Stage A: Autoregressive Beam Search Calibration}
+\label{sec:decode-stage-a}
+
+We first calibrate the AR decoder's beam search by sweeping three hyperparameters on the hybrid and AR-only models.
+Given the encoder output $\mathbf{h}$, AR beam search produces an $N$-best list by maintaining $B$ active hypotheses.
+Each partial hypothesis $\hat{y}_{1:t}$ is scored as:
+\begin{equation}
+    S(\hat{y}_{1:t}) = \frac{1}{|\hat{y}_{1:t}|^{\alpha}} \sum_{i=1}^{t} \log P_\text{AR}(y_i \mid y_{<i}, \mathbf{h}) + \gamma \cdot \mathbf{1}[y_t = \texttt{EOS}],
+    \label{eq:ar-beam-score}
+\end{equation}
+where $\alpha$ is the length normalization exponent and $\gamma$ is the EOS bias.
+We additionally enforce a minimum output length of $r \cdot T'$ characters, where $T'$ is the encoder output length.
+
+We sweep beam size $B \in \{1, 2, 4, 8, 16\}$, length normalization $\alpha \in \{0.0, 0.2, 0.4, 0.6, 0.8\}$ (at $B\!=\!4$), EOS bias $\gamma \in \{-2, -1, 0, +1\}$ (at $B\!=\!4$, $\alpha\!=\!0.6$), and minimum-length ratio $r \in \{0.6, 0.8\}$.
+
+\paragraph{Results.}
+The calibration results for the hybrid model are shown in Figure~\ref{fig:ar-calibration}.
+Beam search yields a modest improvement over greedy decoding: the best configuration ($B\!=\!4$, $\alpha\!=\!0.0$) achieves CER~$=0.0634 \pm 0.059$, a relative reduction of 2.0\% from the greedy baseline of CER~$=0.0647 \pm 0.060$.
+Increasing the beam size beyond $B\!=\!4$ brings negligible gains ($B\!=\!16$: CER~$=0.0634$) while incurring a $4\times$ runtime increase (from 136\,ms to 551\,ms per sample).
+Length normalization with $\alpha > 0$ consistently \emph{hurts} CER, suggesting that the AR decoder's implicit length calibration is already well-tuned; $\alpha\!=\!0.0$ (no normalization) is optimal.
+Positive EOS bias ($\gamma\!=\!+1$) slightly improves CER, while negative bias ($\gamma\!=\!-2$) degrades it, indicating that the decoder slightly underestimates end-of-sequence probability.
+
+For the AR-only model, the pattern is similar but the absolute gains from beam search are even smaller: CER drops from 0.0654 to 0.0649 (relative $-$0.8\%), confirming that greedy decoding is near-optimal for well-trained AR decoders on short word-level targets.
+
+
+% ─── Stage B: CTC + KenLM ────────────────────────────────────────────
+\subsubsection{Stage B: CTC Decoding with $n$-gram Language Model}
+\label{sec:decode-stage-b}
+
+For the CTC head of the hybrid model and the standalone CTC baseline (REWI),
+we evaluate prefix beam search with optional 5-gram character-level KenLM integration.
+Each fold uses a fold-specific LM trained on the training split labels.
+The CTC beam score with LM shallow fusion is:
+\begin{equation}
+    S(\hat{y}) = \log P_\text{CTC}(\hat{y} \mid \mathbf{x}) + \lambda \cdot \log P_\text{LM}(\hat{y}) + \beta \cdot |\hat{y}|,
+    \label{eq:ctc-beam-lm}
+\end{equation}
+where $\lambda$ is the LM weight and $\beta$ is the insertion bonus (which counteracts the LM's tendency to prefer shorter sequences).
+
+We sweep beam size $B \in \{10, 25, 50\}$, LM weight $\lambda \in \{0.1, 0.2, 0.4, 0.8, 1.2\}$, and insertion bonus $\beta \in \{-0.5, -0.2, 0.0, 0.2, 0.5\}$.
+
+\paragraph{Results.}
+The CTC+KenLM results reveal the most dramatic improvements in the entire study (Figure~\ref{fig:ctc-lm-heatmap}).
+For the hybrid model's CTC head, CTC greedy decoding yields CER~$=0.1082$; adding KenLM with the best configuration ($\lambda\!=\!1.2$, $\beta\!=\!0.5$) reduces this to CER~$=0.0845$, a \textbf{21.9\% relative reduction}.
+WER improves from $0.2686$ to $0.1695$ ($-$36.9\% relative).
+Notably, CTC beam search \emph{without} LM ($B\!=\!50$) slightly \emph{degrades} CER from $0.1082$ to $0.1122$, indicating that the vanilla CTC prefix beam search does not improve over best-path decoding in this low-resource character-level setting.
+
+For the standalone REWI CTC baseline, the greedy CER is already lower at $0.0730$ (the dedicated BiLSTM decoder is stronger than the hybrid's linear CTC head), and the best CTC+KenLM configuration ($\lambda\!=\!1.2$, $\beta\!=\!-0.5$) yields CER~$=0.0806$.
+Here, LM integration \emph{increases} CER, as the CTC baseline's greedy output is already well-calibrated and the character LM introduces more errors than it corrects.
+
+
+% ─── Stage C: AR + KenLM ─────────────────────────────────────────────
+\subsubsection{Stage C: Autoregressive Decoding with $n$-gram Rescoring and Shallow Fusion}
+\label{sec:decode-stage-c}
+
+We investigate two strategies for integrating the per-fold KenLM into AR decoding:
+
+\paragraph{$N$-best Rescoring (C1).}
+The AR beam search produces an $N$-best list, and each hypothesis is rescored by linearly interpolating the AR and LM log-probabilities:
+\begin{equation}
+    S(\hat{y}) = \frac{\log P_\text{AR}(\hat{y} \mid \mathbf{x})}{|\hat{y}|^{\alpha}} + \lambda \cdot \log P_\text{LM}(\hat{y}) + \beta \cdot |\hat{y}|.
+    \label{eq:ar-rescore}
+\end{equation}
+We sweep $N \in \{8, 16, 32\}$, $\lambda \in \{0.1, 0.2, 0.4, 0.8\}$, and $\beta \in \{-0.2, 0.0, 0.2\}$.
+
+\paragraph{Shallow Fusion (C2).}
+The LM score is added at each beam step:
+\begin{equation}
+    s_t = \log P_\text{AR}(y_t \mid y_{<t}, \mathbf{h}) + \lambda \cdot \log P_\text{LM}(y_t \mid y_{<t}).
+    \label{eq:ar-shallow}
+\end{equation}
+We sweep $B \in \{2, 4, 8\}$ and $\lambda \in \{0.05, 0.1, 0.2, 0.4\}$.
+
+\paragraph{Results.}
+As shown in Table~\ref{tab:decode_study_cross_model} and Figure~\ref{fig:ar-rescore-heatmap}, KenLM integration provides \emph{negligible} benefit for AR decoding.
+The best $N$-best rescoring result for the hybrid model (CER~$=0.0648$, $N\!=\!8$, $\lambda\!=\!0.1$, $\beta\!=\!-0.2$) matches greedy performance (CER~$=0.0647$).
+Shallow fusion shows a similarly marginal picture: CER~$=0.0649$ at best ($B\!=\!2$, $\lambda\!=\!0.1$), though WER improves slightly from $0.0977$ to $0.0967$ ($-$1.0\%).
+Configurations with positive length bonus ($\beta\!=\!+0.2$) cause severe degradation (CER up to $0.10{-}0.12$), as the bonus encourages pathologically long predictions.
+
+The AR-only model exhibits the same insensitivity: best CER values for rescoring ($0.0655$) and shallow fusion ($0.0653$) are within noise of greedy ($0.0654$).
+
+This finding is consistent across both models and both integration strategies:
+\emph{an external $n$-gram LM does not improve AR word-level recognition}, because the Transformer decoder already captures character-level language statistics through its cross-attention and self-attention layers during training.
+
+
+% ─── Stage D: Neural LM ──────────────────────────────────────────────
+\subsubsection{Stage D: Neural Language Model Rescoring}
+\label{sec:decode-stage-d}
+
+To test whether a more expressive language model can improve AR decoding,
+we replace KenLM with a \emph{neural} LM: a pretrained autoregressive Transformer
+(\texttt{ar\_transformer\_s}) trained on character-level text-only data (same corpus
+as the decoder pretraining described in Section~\ref{sec:results-setup}).
+This model is used exclusively for $N$-best rescoring (Equation~\ref{eq:ar-rescore}),
+with the same sweep over $N$, $\lambda$, and $\beta$ as Stage~C1.
+
+\paragraph{Results.}
+Neural LM rescoring \emph{degrades} performance substantially.
+For the hybrid model, the best configuration achieves CER~$=0.0746$,
+a \textbf{15.3\% relative increase} over greedy (CER~$=0.0647$).
+The AR-only model shows an even larger degradation: CER rises from $0.0654$ to $0.0833$ ($+$27.4\% relative).
+
+We attribute this to two factors:
+\begin{enumerate}[nosep]
+    \item \textbf{Domain mismatch:} The neural LM was pretrained on a general German+English text corpus, while the OnHW500 vocabulary consists of isolated German handwritten words. The LM assigns high probability to sub-word patterns that are inconsistent with the recognition task's vocabulary distribution.
+    \item \textbf{Score scale incompatibility:} The neural LM produces per-character log-probabilities on a different scale than the recognition model, and simple linear interpolation with a scalar $\lambda$ cannot adequately calibrate this mismatch.
+\end{enumerate}
+
+\noindent
+Note: Due to computational constraints (Slurm wall-time limits), only the $N$-best rescoring sub-stage (D1) completed; shallow fusion (D2) and CTC+Neural~LM (D3) were not evaluated.
+Given the clear negative signal from D1, we do not expect these sub-stages to yield improvements.
+
+
+% ─── Cross-model Summary ─────────────────────────────────────────────
+\subsubsection{Cross-Model Summary and Discussion}
+\label{sec:decode-summary}
+
+Table~\ref{tab:decode_study_cross_model} presents a comprehensive comparison of all decoding methods across the three model architectures.
+Figure~\ref{fig:runtime-vs-cer} plots CER against per-sample runtime, and
+Figure~\ref{fig:cer-lm-weight} shows CER sensitivity to LM weight for both CTC and AR heads.
+
+\paragraph{Key findings.}
+\begin{enumerate}
+    \item \textbf{AR decoding is near-optimal with greedy search.}
+    Across both hybrid and AR-only models, greedy decoding achieves CER within 0.0013 of the best calibrated beam search.
+    Neither $n$-gram nor neural LM integration improves AR CER beyond the greedy baseline.
+    The Transformer decoder's self-attention already captures sufficient character-level language statistics, making external LMs redundant for word-level targets.
+
+    \item \textbf{LM integration dramatically benefits CTC.}
+    The hybrid model's CTC head improves from CER~$=0.1082$ (greedy) to $0.0845$ (CTC+KenLM), a 21.9\% relative reduction.
+    This confirms that CTC's conditional independence assumption creates a gap that an external LM can partially fill.
+    However, the best CTC+KenLM result ($0.0845$) still lags far behind the AR head ($0.0634$), suggesting that CTC with LM augmentation cannot close the gap to autoregressive decoding on this task.
+
+    \item \textbf{Hybrid CTC head vs.\ standalone CTC baseline.}
+    The REWI CTC baseline (CER~$=0.0730$) substantially outperforms the hybrid model's linear CTC head (CER~$=0.1082$) on greedy decoding.
+    This is expected: the hybrid's CTC head uses a single linear projection from the shared encoder, while the REWI baseline employs a dedicated BiLSTM decoder.
+    The hybrid model's encoder is primarily optimized for the AR objective ($\lambda_\text{AR}\!=\!1.0$ vs.\ $\lambda_\text{CTC}\!=\!0.6$), so its CTC path is a secondary output.
+
+    \item \textbf{Neural LM rescoring is counterproductive.}
+    Pretrained neural LM rescoring increases CER by 15--27\% relative, regardless of the base model, indicating fundamental domain mismatch.
+    A task-specific neural LM (e.g., trained on the same vocabulary distribution) might perform better, but developing such a model was outside the scope of this study.
+
+    \item \textbf{Runtime--accuracy trade-off.}
+    Greedy AR decoding at 38\,ms/sample achieves the best balance of accuracy and speed.
+    CTC+KenLM requires 194\,ms/sample for its substantially worse CER.
+    AR beam search ($B\!=\!4$) at 136\,ms/sample provides a marginal CER improvement of 0.0013, which may not justify the $3.6\times$ slowdown in latency-sensitive applications.
+\end{enumerate}
+
+
+% ─── Tables ──────────────────────────────────────────────────────────
+
+\begin{table}[t]
+  \centering
+  \caption{Decoding study: cross-model CER and WER comparison on OnHW500 WI (word-level, 5-fold CV).
+           Best result per column in \textbf{bold}; ``---'' indicates method not applicable to the model.}
+  \label{tab:decode_study_cross_model}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{l cc cc cc}
+    \toprule
+    & \multicolumn{2}{c}{Hybrid (CTC+AR)} & \multicolumn{2}{c}{AR-only} & \multicolumn{2}{c}{REWI (CTC)} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}
+    Method & CER & WER & CER & WER & CER & WER \\
+    \midrule
+    \multicolumn{7}{l}{\textit{Autoregressive decoding}} \\
+    \quad Greedy         & $.065\pm.060$ & $.098\pm.068$ & $.065\pm.061$ & $.100\pm.070$ & ---   & --- \\
+    \quad Calibrated beam ($B\!=\!4$) & $\mathbf{.063\pm.059}$ & $.097\pm.068$ & $.065\pm.060$ & $.100\pm.070$ & ---   & --- \\
+    \quad + KenLM rescore  & $.065\pm.059$ & $.098\pm.069$ & $.066\pm.061$ & $.099\pm.070$ & ---   & --- \\
+    \quad + KenLM shallow  & $.065\pm.060$ & $\mathbf{.097\pm.068}$ & $.065\pm.061$ & $\mathbf{.099\pm.070}$ & ---   & --- \\
+    \quad + Neural LM rescore & $.075\pm.062$ & $.114\pm.073$ & $.083\pm.064$ & $.124\pm.074$ & ---   & --- \\
+    \midrule
+    \multicolumn{7}{l}{\textit{CTC decoding}} \\
+    \quad Greedy         & $.108\pm.068$ & $.269\pm.092$ & ---   & --- & $\mathbf{.073\pm.061}$ & $\mathbf{.152\pm.090}$ \\
+    \quad Beam ($B\!=\!50$, no LM) & $.112\pm.068$ & $.283\pm.093$ & ---   & --- & $.113\pm.057$ & $.271\pm.073$ \\
+    \quad + KenLM        & $.085\pm.066$ & $.170\pm.090$ & ---   & --- & $.081\pm.057$ & $.158\pm.075$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+% ─── Figures ─────────────────────────────────────────────────────────
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/ar_calibration.pdf}
+    \caption{Stage~A: AR beam search calibration for the hybrid model.
+    \textbf{Left:}~CER vs.\ beam size.
+    \textbf{Right:}~CER vs.\ length normalization exponent~$\alpha$.
+    Beam sizes $\ge 4$ saturate; $\alpha = 0$ (no normalization) is optimal.}
+    \label{fig:ar-calibration}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/ctc_lm_heatmap.pdf}
+    \caption{Stage~B: CTC+KenLM CER heatmap over LM weight~$\lambda$ and insertion bonus~$\beta$ for the hybrid model's CTC head.
+    The optimal setting ($\lambda\!=\!1.2$, $\beta\!=\!0.5$) achieves CER~$=0.0845$, a 21.9\% relative improvement over CTC greedy ($0.1082$).}
+    \label{fig:ctc-lm-heatmap}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/ar_rescore_heatmap.pdf}
+    \caption{Stage~C1: AR $N$-best rescoring with KenLM for the hybrid model.
+    CER is largely insensitive to LM weight, and positive length bonus~$\beta\!=\!0.2$ causes severe degradation.}
+    \label{fig:ar-rescore-heatmap}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/cer_vs_lm_weight.pdf}
+    \caption{CER as a function of LM weight for CTC+KenLM (left axis, rising from high base) and AR+KenLM shallow fusion (right axis, flat near 0.065).
+    LM integration benefits CTC substantially but leaves AR performance unchanged.}
+    \label{fig:cer-lm-weight}
+\end{figure}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/runtime_vs_cer.pdf}
+    \caption{Inference runtime vs.\ CER for all evaluated decoding methods (hybrid model).
+    AR greedy (38\,ms, CER~$=0.065$) offers the best accuracy--latency trade-off.
+    CTC+KenLM (194\,ms, CER~$=0.085$) provides the largest absolute improvement for CTC but remains far from AR accuracy.}
+    \label{fig:runtime-vs-cer}
+\end{figure}
