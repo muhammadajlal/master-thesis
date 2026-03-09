@@ -62,6 +62,7 @@ class VLMModel(nn.Module):
         lora_target_modules: Which LM modules to apply LoRA to.
         max_new_tokens:     Maximum tokens generated at inference.
         num_beams:          Beam width for generation.
+        repetition_penalty: Penalty for repeated tokens during generation (1.0 = off).
         local_files_only:   Enforce offline HuggingFace loading.
         z_dropout:          Dropout applied to IMU modality tokens (conditioning noise).
     """
@@ -95,6 +96,7 @@ class VLMModel(nn.Module):
         lora_target_modules: list[str] | None = None,
         max_new_tokens: int = 64,
         num_beams: int = 1,
+        repetition_penalty: float = 1.0,
         local_files_only: bool = True,
         z_dropout: float = 0.1,
         label_smoothing: float = 0.0,
@@ -104,6 +106,7 @@ class VLMModel(nn.Module):
         self.d_cnn = int(d_cnn)
         self.max_new_tokens = max_new_tokens
         self.num_beams = num_beams
+        self.repetition_penalty = repetition_penalty
         self.use_lora = use_lora
         self.label_smoothing = label_smoothing
 
@@ -381,6 +384,7 @@ class VLMModel(nn.Module):
             attention_mask=attn_mask,
             max_new_tokens=self.max_new_tokens,
             num_beams=self.num_beams,
+            repetition_penalty=self.repetition_penalty,
             eos_token_id=self.tokenizer.eos_token_id,
             pad_token_id=self.tokenizer.pad_token_id,
             do_sample=False,

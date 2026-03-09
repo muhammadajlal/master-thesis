@@ -1,6 +1,6 @@
 # =========================
 # VLM: CNN encoder + GPT-2 decoder-only LM (Q-Former connector)
-# Word dataset (WI), OnHW500
+# STABILO's Word dataset (WI)
 # =========================
 #
 # Architecture:
@@ -66,7 +66,7 @@ freeze: false                     # Unfreeze encoder for encoder-decoder alignme
 aug: true                         # Enable augmentation (critical for regularisation)
 
 # ── Data / paths ───────────────────────────────────────────
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
 dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v2
 checkpoint: null
 idx_fold: 0
@@ -79,7 +79,7 @@ cache: true
 
 # ── Training schedule ─────────────────────────────────────
 epoch: 600
-epoch_warmup: 30
+epoch_warmup: 60
 freq_eval: 5
 freq_log: 50
 freq_save: 10
@@ -126,10 +126,10 @@ concat:
   disable_base_aug_in_concat: true
 
 # ── Labels (word-level, same as other word configs) ────────
-categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
+#categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
 
 # ── Labels (sent-level, same as other word configs) ────────
-#categories: ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(",")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "] 
+categories: ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(",")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "] 
 
 # ── CTC decoder (unused in VLM; kept for compat) ──────────
 ctc_decoder: best_path
