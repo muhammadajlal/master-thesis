@@ -1,26 +1,23 @@
 # =========================
-# VLM: CNN encoder + GPT-2 decoder-only LM (Q-Former connector)
+# VLM v3: CNN encoder + GPT-2 decoder-only LM (Q-Former connector)
 # Word dataset (WI), OnHW500
 # =========================
 #
-# Architecture:
-#   IMU → BLConv encoder → Q-Former (16 tokens) → [soft prefix | prompt | IMU | text] → GPT-2
-#
-# This follows the VLM recipe (BLIP-2 / Flamingo style):
-#   - Q-Former compresses variable-length encoder features into K=16 tokens
-#   - Fixed text prompt + 20 learned soft-prefix vectors condition the LM
-#   - GPT-2 generates the transcript autoregressively
-#   - LoRA is applied to GPT-2 attention layers (freeze LM otherwise)
+# Changes vs v2:
+#   - num_queries: 16 → 32  (richer modality representation)
+#   - repetition_penalty: 1.2  (reduce repetitive outputs)
+#   - epoch: 300 → 500  (train longer)
+#   - Resume-ready: Slurm script auto-sets checkpoint to last.pth
 
 # ── VLM mode flag ──────────────────────────────────────────
 vlm_enabled: true
 
 # ── Encoder ────────────────────────────────────────────────
 arch_en: "blconv_b"
-arch_de: "vlm"          # Not used for model selection; vlm_enabled is the flag
+arch_de: "vlm"
 num_channel: 13
 len_seq: 0
-d_cnn: 512              # BLConv output dim
+d_cnn: 512
 
 # ── VLM configuration ─────────────────────────────────────
 vlm:
@@ -29,56 +26,57 @@ vlm:
   local_files_only: true
 
   # Q-Former connector
-  num_queries: 16                 # Number of output modality tokens (K)
-  qformer_layers: 2               # Cross-attention Transformer depth
-  qformer_nhead: 8                # Attention heads in Q-Former
+  num_queries: 32                 # ↑ from 16: richer modality tokens
+  qformer_layers: 2
+  qformer_nhead: 8
   qformer_dropout: 0.15
 
   # Prompt / prefix
   prompt_text: "Transcribe the handwritten text from IMU sensor signals:"
-  num_soft_tokens: 20             # Learned soft prefix vectors (M)
+  num_soft_tokens: 20
 
   # LM freezing / LoRA
-  freeze_lm: true                 # Freeze all LM weights initially
-  use_lora: true                  # Apply LoRA to attention projections
+  freeze_lm: true
+  use_lora: true
   lora_r: 16
   lora_alpha: 32
   lora_dropout: 0.1
-  lora_target_modules: null       # null = auto-detect (GPT-2: c_attn, c_proj)
+  lora_target_modules: null
 
-  # Conditioning noise (dropout on IMU tokens during training)
-  z_dropout: 0.2                  # Increased from 0.1 for regularisation
+  # Conditioning noise
+  z_dropout: 0.2
 
-  # Label smoothing (prevents overconfident predictions, matches AR baseline)
+  # Label smoothing
   label_smoothing: 0.1
 
   # Generation
   max_new_tokens: 64
-  num_beams: 1                    # Greedy; increase for beam search
+  num_beams: 1
+  repetition_penalty: 1.2        # NEW: penalise repeated tokens
 
   # Discriminative learning rates
-  lr_connector: 0.0002            # Q-Former LR
-  lr_prompt: 0.0002               # Soft prefix LR
-  lr_lm: 0.00001                  # LoRA LR (should be small)
+  lr_connector: 0.0002
+  lr_prompt: 0.0002
+  lr_lm: 0.00001
 
 # ── Encoder freezing ───────────────────────────────────────
-freeze: false                     # Unfreeze encoder for encoder-decoder alignment
-aug: true                         # Enable augmentation (critical for regularisation)
+freeze: false
+aug: true
 
 # ── Data / paths ───────────────────────────────────────────
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v2
-checkpoint: null
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v3
+checkpoint: null                  # Slurm script sets this for resume
 idx_fold: 0
 
 # ── Runtime ────────────────────────────────────────────────
 device: cuda
 seed: 42
-num_worker: 16
+num_worker: 8                     # Match V100 CPU allocation
 cache: true
 
 # ── Training schedule ─────────────────────────────────────
-epoch: 600
+epoch: 600                        # ↑ from 300: train longer
 epoch_warmup: 30
 freq_eval: 5
 freq_log: 50
@@ -98,9 +96,9 @@ export_val_full: true
 test: false
 
 # ── Batch size & gradient accumulation ─────────────────────
-lr: 0.0001                        # Base LR (used only in non-LM mode)
+lr: 0.0001
 size_batch: 8
-grad_accum_steps: 8               # Effective batch = 8 × 8 = 64 (matches AR baseline)
+grad_accum_steps: 8
 
 # ── Tokenizer (legacy; VLM uses GPT-2 tokenizer internally) ──
 tokenizer:
@@ -125,11 +123,8 @@ concat:
   use_separator: false
   disable_base_aug_in_concat: true
 
-# ── Labels (word-level, same as other word configs) ────────
+# ── Labels (word-level) ───────────────────────────────────
 categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
 
-# ── Labels (sent-level, same as other word configs) ────────
-#categories: ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(",")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "] 
-
-# ── CTC decoder (unused in VLM; kept for compat) ──────────
+# ── CTC decoder (unused in VLM) ───────────────────────────
 ctc_decoder: best_path

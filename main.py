@@ -139,6 +139,7 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             lora_target_modules=vlm_cfg.get("lora_target_modules", None),
             max_new_tokens=int(vlm_cfg.get("max_new_tokens", 64)),
             num_beams=int(vlm_cfg.get("num_beams", 1)),
+            repetition_penalty=float(vlm_cfg.get("repetition_penalty", 1.0)),
             local_files_only=bool(vlm_cfg.get("local_files_only", True)),
             z_dropout=float(vlm_cfg.get("z_dropout", 0.1)),
             label_smoothing=float(vlm_cfg.get("label_smoothing", 0.0)),

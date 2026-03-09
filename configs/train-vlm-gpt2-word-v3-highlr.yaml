@@ -1,0 +1,112 @@
+# =========================
+# VLM v3 ablation: higher learning rates (group-wise)
+# Word dataset (WI), OnHW500
+# =========================
+#
+# Same architecture as train-vlm-gpt2-word-v3.yaml (soft tokens = 20)
+# but with more aggressive LRs to test convergence speed / generalization.
+#
+# NOTE: `lr:` is not used in VLM mode; only `lr_enc` and `vlm.lr_*` matter.
+
+vlm_enabled: true
+
+arch_en: "blconv_b"
+arch_de: "vlm"
+num_channel: 13
+len_seq: 0
+d_cnn: 512
+
+vlm:
+  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2"
+  local_files_only: true
+
+  # Q-Former connector
+  num_queries: 32
+  qformer_layers: 2
+  qformer_nhead: 8
+  qformer_dropout: 0.15
+
+  # Prompt / prefix
+  prompt_text: "Transcribe the handwritten text from IMU sensor signals:"
+  num_soft_tokens: 20
+
+  # LM freezing / LoRA
+  freeze_lm: true
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_target_modules: null
+
+  z_dropout: 0.2
+  label_smoothing: 0.1
+
+  max_new_tokens: 64
+  num_beams: 1
+  repetition_penalty: 1.2
+
+  # ── High-LR ablation (group-wise) ───────────────────────
+  # Push connector/prompt harder; keep LoRA still relatively small.
+  lr_connector: 0.001            # was 0.0002
+  lr_prompt: 0.001               # was 0.0002
+  lr_lm: 0.00005                 # was 0.00001
+
+freeze: false
+aug: true
+
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v3_highlr
+checkpoint: null
+idx_fold: 0
+
+device: cuda
+seed: 42
+num_worker: 8
+cache: true
+
+epoch: 500
+epoch_warmup: 30
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+
+lm_max_label_len: 96
+lm_use_amp: true
+
+# Encoder LR (VLM optimizer group)
+lr_enc: 0.0003                    # was 0.0001
+weight_decay: 0.01
+
+save_best_only: true
+export_val_full: true
+test: false
+
+# These are ignored for optimizer in VLM mode, kept for compat
+lr: 0.0001
+
+size_batch: 8
+grad_accum_steps: 8
+
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+use_gated_attention: false
+gating_type: elementwise
+
+concat:
+  enabled: false
+  items_min: 2
+  items_max: 6
+  max_T: 4096
+  same_writer: true
+  writer_key: "id_writer"
+  p_concat: 0.5
+  use_separator: false
+  disable_base_aug_in_concat: true
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
+
+ctc_decoder: best_path
