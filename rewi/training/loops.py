@@ -183,7 +183,23 @@ def test_lm(
         labels_txt.extend(list(texts))
 
     man.summarize_epoch()
-    
+
+    export_val_full = bool(getattr(man.cfgs, "export_val_full", False))
+    is_test_mode = bool(getattr(man.cfgs, "test", False))
+    do_export = is_test_mode or export_val_full
+
+    if do_export:
+        export_dir = os.path.join(man.cfgs.dir_work, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        epoch_tag = "best" if epoch is None else f"epoch{epoch}"
+        export_path = os.path.join(
+            export_dir,
+            f"val_full_fold{man.cfgs.idx_fold}_{epoch_tag}.json",
+        )
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump({"predictions": preds, "labels": labels_txt}, f, ensure_ascii=False)
+        logger.info("Exported full LM validation predictions to {}", export_path)
+
     if man.check_step(epoch + 1, 'eval'):
         results_eval = evaluate(preds, labels_txt)
         man.update_evaluation(results_eval, preds[:20], labels_txt[:20])

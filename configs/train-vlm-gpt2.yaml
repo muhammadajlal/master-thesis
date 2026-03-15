@@ -66,8 +66,8 @@ freeze: false                     # Unfreeze encoder for encoder-decoder alignme
 aug: true                         # Enable augmentation (critical for regularisation)
 
 # ── Data / paths ───────────────────────────────────────────
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v2
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v2/vlm__wi_word_hw6_meta
 checkpoint: null
 idx_fold: 0
 
@@ -78,8 +78,8 @@ num_worker: 16
 cache: true
 
 # ── Training schedule ─────────────────────────────────────
-epoch: 600
-epoch_warmup: 30
+epoch: 400
+epoch_warmup: 40
 freq_eval: 5
 freq_log: 50
 freq_save: 10
