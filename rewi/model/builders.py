@@ -17,6 +17,8 @@ from .lstm import LSTM
 
 def build_encoder(in_chan: int, arch: str, len_seq: int = 0) -> nn.Module:
     match arch:
+        case 'blconv_l':
+            return BLConv(in_chan, [3, 3, 3, 3], [64, 128,256,512])
         case 'blconv_b':
             return BLConv(in_chan)
         case 'blconv_s':

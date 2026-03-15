@@ -124,6 +124,7 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             ratio_ds=ratio_ds,
             d_cnn=d_cnn,
             lm_name_or_path=lm_name,
+            connector_type=str(vlm_cfg.get("connector_type", "qformer")),
             num_queries=int(vlm_cfg.get("num_queries", 32)),
             qformer_layers=int(vlm_cfg.get("qformer_layers", 4)),
             qformer_nhead=int(vlm_cfg.get("qformer_nhead", 8)),
@@ -132,6 +133,7 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             num_soft_tokens=int(vlm_cfg.get("num_soft_tokens", 20)),
             freeze_encoder=bool(getattr(cfgs, "freeze", False)),
             freeze_lm=bool(vlm_cfg.get("freeze_lm", True)),
+            random_init_lm=bool(vlm_cfg.get("random_init_lm", False)),
             use_lora=bool(vlm_cfg.get("use_lora", False)),
             lora_r=int(vlm_cfg.get("lora_r", 16)),
             lora_alpha=int(vlm_cfg.get("lora_alpha", 32)),
@@ -490,10 +492,10 @@ def _build_vlm_optimizer(cfgs, model, dataloader_train):
     if enc_params:
         param_groups.append({"name": "enc", "params": enc_params, "lr": lr_enc})
 
-    # Q-Former
-    qf_params = [p for p in model.qformer.parameters() if p.requires_grad]
+    # Q-Former / connector
+    qf_params = [p for p in model.connector.parameters() if p.requires_grad]
     if qf_params:
-        param_groups.append({"name": "qformer", "params": qf_params, "lr": lr_connector})
+        param_groups.append({"name": "connector", "params": qf_params, "lr": lr_connector})
 
     # Prompt (soft prefix)
     prompt_params = [p for p in model.prompt_manager.parameters() if p.requires_grad]
@@ -655,6 +657,24 @@ def _migrate_legacy_mha_keys(state_dict: dict) -> dict:
     return new_sd
 
 
+def _migrate_legacy_vlm_connector_keys(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Map older VLM checkpoint prefixes onto the current module names."""
+    if not any(k.startswith("qformer.") for k in state_dict):
+        return state_dict
+
+    remapped = {}
+    migrated = 0
+    for key, value in state_dict.items():
+        if key.startswith("qformer."):
+            remapped[f"connector.{key[len('qformer.'):]}"] = value
+            migrated += 1
+        else:
+            remapped[key] = value
+
+    logger.info("[VLMMigrate] Remapped {} legacy qformer.* keys to connector.*", migrated)
+    return remapped
+
+
 def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_train, epoch_start):
     """
     Load checkpoint and handle resume/freeze/finetune modes.
@@ -670,6 +690,7 @@ def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_tr
 
     # Migrate legacy separate Q/K/V projection keys to nn.MultiheadAttention format
     ckp["model"] = _migrate_legacy_mha_keys(ckp["model"])
+    ckp["model"] = _migrate_legacy_vlm_connector_keys(ckp["model"])
 
     res = model.load_state_dict(ckp["model"], strict=False)
     logger.warning("load_state_dict strict=False | missing={} unexpected={}", res.missing_keys, res.unexpected_keys)

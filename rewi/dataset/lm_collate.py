@@ -57,11 +57,14 @@ def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_lab
 
 
 def vlm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128):
-    """Collate for VLM (decoder-only LM).
+    """Collate for VLM (decoder-only or seq2seq LM).
 
     Similar to ``lm_collate`` but appends EOS to the text labels so the model
     learns to produce an end-of-sequence token, and uses attention-mask-based
     padding detection (required when pad_token == eos_token, as in GPT-2).
+
+    For tokenizers that already append EOS automatically (e.g. T5), the manual
+    EOS append is skipped to avoid double-EOS corruption.
 
     Returns:
         ``(x, len_x, labels, texts)`` where *labels* contains token IDs with
@@ -73,9 +76,19 @@ def vlm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_la
 
     texts = _chars_to_strings(y, len_y, categories, pad_id)
 
-    # Append EOS token so the model learns to stop generating
-    eos_token = hf_tokenizer.eos_token or ""
-    texts_with_eos = [t + eos_token for t in texts]
+    # Check if tokenizer automatically appends EOS (e.g. T5) vs not (GPT-2)
+    _probe = hf_tokenizer.encode("a")
+    tokenizer_adds_eos = (
+        len(_probe) > 0 and _probe[-1] == hf_tokenizer.eos_token_id
+    )
+
+    if tokenizer_adds_eos:
+        # T5-family: tokenizer already appends </s>
+        texts_with_eos = texts
+    else:
+        # GPT-2-family: manually append EOS token
+        eos_token = hf_tokenizer.eos_token or ""
+        texts_with_eos = [t + eos_token for t in texts]
 
     tok = hf_tokenizer(
         texts_with_eos,

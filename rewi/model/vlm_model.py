@@ -1,7 +1,7 @@
 # rewi/model/vlm_model.py
 """
-VLM Model — CNN Encoder → Q-Former → Prompt → Decoder-Only LM
-==============================================================
+VLM Model — CNN Encoder → Q-Former → Prompt → LM
+=================================================
 
 Implements the standard VLM recipe (BLIP-2 / Flamingo / LLaVA style)
 transplanted from vision→text to **IMU→text**:
@@ -9,8 +9,14 @@ transplanted from vision→text to **IMU→text**:
 1. **CNN encoder** turns raw IMU time-series into features ``(B, T, d_enc)``.
 2. **Q-Former** compresses them into ``K`` modality tokens ``(B, K, d_lm)``.
 3. **Fixed prompt + soft prefix** condition the decoder.
-4. **Decoder-only LM** (GPT-2, LLaMA, …) generates the transcript
-   autoregressively with teacher forcing during training.
+4. **LM** generates the transcript autoregressively with teacher forcing
+   during training.
+
+Supported LM backends:
+- **Decoder-only** (GPT-2, LLaMA, …): conditioning is concatenated with text
+  as a single ``inputs_embeds`` sequence.
+- **Encoder-decoder / Seq2Seq** (T5, FlanT5, …): conditioning is passed as
+  ``encoder_outputs`` and text tokens are fed to the decoder.
 
 The model exposes the same ``forward`` / ``generate`` interface as
 ``MultimodalLMModel`` so the existing ``train_one_epoch_lm`` and ``test_lm``
@@ -24,29 +30,41 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from loguru import logger
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+)
+from transformers.modeling_outputs import BaseModelOutput
 
-from rewi.model.qformer import QFormerConnector
+from rewi.model.projectors import build_connector
 from rewi.model.prompt import PromptManager
 
 
 class VLMModel(nn.Module):
-    """IMU Encoder → Q-Former → [soft prefix | prompt | IMU tokens | text] → Decoder-Only LM.
+    """IMU Encoder → Q-Former → [soft prefix | prompt | IMU tokens] → LM.
 
-    Training
-        Teacher-forced AR: CE loss is computed only on transcript positions
-        (prefix / IMU positions are masked with ``-100``).
+    Supports both **decoder-only** (GPT-2, LLaMA) and **encoder-decoder**
+    (T5, FlanT5) language models.
 
-    Inference
-        ``generate()`` produces text conditioned on
-        ``[soft prefix | prompt | IMU tokens]``.
+    Decoder-only mode
+        Sequence layout: ``[prefix | prompt | IMU | text]`` fed as a single
+        ``inputs_embeds`` tensor; loss is masked for non-text positions.
+
+    Encoder-decoder (seq2seq) mode
+        Conditioning ``[prefix | prompt | IMU]`` is passed as
+        ``encoder_outputs``; text tokens are fed to the decoder via
+        ``labels`` (HF shift-right creates ``decoder_input_ids``).
 
     Args:
         encoder:            Pre-built CNN/TCN encoder module.
         ratio_ds:           Temporal down-sampling ratio of the encoder.
         d_cnn:              Encoder output channel dimension.
         lm_name_or_path:    HuggingFace model name or local path for the
-                            decoder-only LM (e.g. ``gpt2``, ``TinyLlama/…``).
+                            LM (e.g. ``gpt2``, ``t5-small``).
+        connector_type:     Connector architecture: ``"qformer"``, ``"linear"``,
+                            ``"mlp"``, or ``"pooling_mlp"``.
         num_queries:        Number of Q-Former output tokens (K).
         qformer_layers:     Depth of the Q-Former cross-attention stack.
         qformer_nhead:      Number of attention heads in the Q-Former.
@@ -55,6 +73,8 @@ class VLMModel(nn.Module):
         num_soft_tokens:    Number of learned soft-prefix vectors (M).
         freeze_encoder:     If ``True``, freeze encoder weights.
         freeze_lm:          If ``True``, freeze all LM weights.
+        random_init_lm:     If ``True``, randomly re-initialize LM weights
+                            (control experiment to test pretrained priors).
         use_lora:           If ``True``, apply LoRA to attention projections.
         lora_r:             LoRA rank.
         lora_alpha:         LoRA alpha scaling.
@@ -71,6 +91,7 @@ class VLMModel(nn.Module):
     _DEFAULT_LORA_TARGETS = {
         "gpt2": ["c_attn", "c_proj"],
         "llama": ["q_proj", "v_proj"],
+        "t5": ["q", "v"],
         "default": ["q_proj", "v_proj"],
     }
 
@@ -81,6 +102,7 @@ class VLMModel(nn.Module):
         d_cnn: int,
         lm_name_or_path: str,
         *,
+        connector_type: str = "qformer",
         num_queries: int = 32,
         qformer_layers: int = 4,
         qformer_nhead: int = 8,
@@ -89,6 +111,7 @@ class VLMModel(nn.Module):
         num_soft_tokens: int = 20,
         freeze_encoder: bool = False,
         freeze_lm: bool = True,
+        random_init_lm: bool = False,
         use_lora: bool = False,
         lora_r: int = 16,
         lora_alpha: int = 32,
@@ -109,6 +132,7 @@ class VLMModel(nn.Module):
         self.repetition_penalty = repetition_penalty
         self.use_lora = use_lora
         self.label_smoothing = label_smoothing
+        self.connector_type = connector_type.lower()
 
         # ── Encoder ─────────────────────────────────────────────
         self.encoder = encoder
@@ -116,7 +140,7 @@ class VLMModel(nn.Module):
             for p in self.encoder.parameters():
                 p.requires_grad = False
 
-        # ── Decoder-only LM ────────────────────────────────────
+        # ── Language Model ──────────────────────────────────────
         self.tokenizer = AutoTokenizer.from_pretrained(
             lm_name_or_path, local_files_only=local_files_only,
         )
@@ -124,9 +148,30 @@ class VLMModel(nn.Module):
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        self.lm = AutoModelForCausalLM.from_pretrained(
+        # Detect encoder-decoder (seq2seq) vs decoder-only
+        lm_config = AutoConfig.from_pretrained(
             lm_name_or_path, local_files_only=local_files_only,
         )
+        self.is_seq2seq: bool = getattr(lm_config, "is_encoder_decoder", False)
+
+        if self.is_seq2seq:
+            logger.info("[VLM] Loading seq2seq LM: {}", lm_name_or_path)
+            if random_init_lm:
+                logger.warning("[VLM] RANDOM INIT: re-initialising seq2seq LM from config (no pretrained weights)")
+                self.lm = AutoModelForSeq2SeqLM.from_config(lm_config)
+            else:
+                self.lm = AutoModelForSeq2SeqLM.from_pretrained(
+                    lm_name_or_path, local_files_only=local_files_only,
+                )
+        else:
+            logger.info("[VLM] Loading causal LM: {}", lm_name_or_path)
+            if random_init_lm:
+                logger.warning("[VLM] RANDOM INIT: re-initialising causal LM from config (no pretrained weights)")
+                self.lm = AutoModelForCausalLM.from_config(lm_config)
+            else:
+                self.lm = AutoModelForCausalLM.from_pretrained(
+                    lm_name_or_path, local_files_only=local_files_only,
+                )
 
         if freeze_lm:
             for p in self.lm.parameters():
@@ -148,7 +193,13 @@ class VLMModel(nn.Module):
                     model_type, self._DEFAULT_LORA_TARGETS["default"]
                 )
 
+            from peft import TaskType
+            task_type = (
+                TaskType.SEQ_2_SEQ_LM if self.is_seq2seq
+                else TaskType.CAUSAL_LM
+            )
             lora_cfg = LoraConfig(
+                task_type=task_type,
                 r=lora_r,
                 lora_alpha=lora_alpha,
                 lora_dropout=lora_dropout,
@@ -160,14 +211,21 @@ class VLMModel(nn.Module):
 
         self.d_lm = int(self.lm.config.hidden_size)
 
-        # ── Q-Former connector ──────────────────────────────────
-        self.qformer = QFormerConnector(
+        # ── Connector (Q-Former / Linear / MLP / Pooling) ───────
+        self.connector = build_connector(
+            connector_type=connector_type,
             d_enc=self.d_cnn,
             d_lm=self.d_lm,
             num_queries=num_queries,
             num_layers=qformer_layers,
             nhead=qformer_nhead,
             dropout=qformer_dropout,
+            pool_tokens=num_queries,
+        )
+        logger.info(
+            "[VLM] Connector: {} | params: {:,}",
+            connector_type,
+            sum(p.numel() for p in self.connector.parameters()),
         )
 
         # ── Prompt manager ──────────────────────────────────────
@@ -244,25 +302,23 @@ class VLMModel(nn.Module):
     ):
         """Training forward pass.
 
-        Sequence layout::
+        **Decoder-only** (GPT-2, LLaMA):
+            Sequence: ``[prefix | prompt | IMU | text]`` fed as inputs_embeds.
+            Labels:   ``[-100 × (M+P+K)] [y₁ … yL EOS]``
 
-            [soft_prefix (M)] [prompt (P)] [imu_tokens (K)] [y₁ … yL EOS]
-
-        Labels::
-
-            [-100] × (M+P+K)  [y₁ y₂ … yL EOS]
-
-        HuggingFace internally shifts logits vs labels so that
-        ``logits[last_imu]`` is trained to predict ``y₁``, etc.
+        **Encoder-decoder / seq2seq** (T5, FlanT5):
+            Conditioning ``[prefix | prompt | IMU]`` → ``encoder_outputs``.
+            Labels ``[y₁ … yL EOS]`` → passed directly to the model
+            (HF handles decoder_input_ids creation via shift-right).
 
         Args:
             x:      ``(B, C, T_raw)`` IMU input.
             len_x:  ``(B,)`` raw input lengths.
-            labels: ``(B, L+1)`` token IDs (text + EOS) with padding = ``-100``.
+            labels: ``(B, L)`` token IDs (text + EOS) with padding = ``-100``.
             texts:  Ground-truth strings (unused in forward, kept for API compat).
 
         Returns:
-            HuggingFace ``CausalLMOutput`` with ``.loss`` and ``.logits``.
+            HuggingFace model output with ``.loss`` and ``.logits``.
         """
         device = x.device
         B = x.size(0)
@@ -270,8 +326,8 @@ class VLMModel(nn.Module):
         # 1) Encode IMU
         enc_states, enc_mask = self._encode(x, len_x)  # (B, T, d_cnn), (B, T)
 
-        # 2) Q-Former compress
-        imu_tokens = self.qformer(enc_states, enc_mask)  # (B, K, d_lm)
+        # 2) Connector: compress / project encoder features
+        imu_tokens = self.connector(enc_states, enc_mask)  # (B, K, d_lm)
         imu_tokens = self.z_drop(imu_tokens)
 
         # 3) Prefix embeddings (soft prefix + fixed text prompt)
@@ -280,9 +336,26 @@ class VLMModel(nn.Module):
             embed_fn, B, device
         )  # (B, M+P, d_lm)
 
+        if self.is_seq2seq:
+            return self._forward_seq2seq(
+                B, device, enc_states, imu_tokens, prefix_emb, labels,
+            )
+        else:
+            return self._forward_causal(
+                B, device, enc_states, imu_tokens, prefix_emb, labels, embed_fn,
+            )
+
+    # ── Forward: decoder-only (causal) ──────────────────────
+
+    def _forward_causal(
+        self,
+        B: int, device: torch.device,
+        enc_states: torch.Tensor, imu_tokens: torch.Tensor,
+        prefix_emb: torch.Tensor, labels: torch.Tensor,
+        embed_fn: nn.Module,
+    ):
+        """Causal LM forward: [prefix | imu | text] → single inputs_embeds."""
         # 4) Text embeddings (teacher forcing)
-        # `labels` already has padding positions set to -100 by the collate.
-        # For embedding, replace -100 with pad_token_id.
         text_ids = labels.clone()
         text_ids[text_ids == -100] = self.tokenizer.pad_token_id
         text_emb = embed_fn(text_ids.to(device))  # (B, L+1, d_lm)
@@ -295,7 +368,6 @@ class VLMModel(nn.Module):
 
         # 6) Attention mask (1=attend, 0=ignore)
         attn_mask = torch.ones(B, N, device=device, dtype=torch.long)
-        # Mask text padding positions
         text_pad_mask = (labels == -100)  # (B, L+1)
         attn_mask[:, prefix_len + imu_len :] = (~text_pad_mask).long().to(device)
 
@@ -309,24 +381,21 @@ class VLMModel(nn.Module):
         if not self._dbg_done:
             self._dbg_done = True
             logger.info(
-                "[VLM dbg] enc={} → qformer={} | prefix={} (soft={}, prompt={}) | "
-                "input_emb={} labels={}",
+                "[VLM dbg] mode=causal | enc={} → qformer={} | prefix={} "
+                "(soft={}, prompt={}) | input_emb={} labels={}",
                 tuple(enc_states.shape), tuple(imu_tokens.shape),
-                prefix_len, self.prompt_manager.num_soft_tokens,
+                prefix_emb.size(1), self.prompt_manager.num_soft_tokens,
                 self.prompt_manager.num_prompt_tokens,
                 tuple(input_emb.shape), tuple(full_labels.shape),
             )
 
         # 8) Forward through LM
         if self.label_smoothing > 0:
-            # Get logits without HF-internal loss (pass labels=None)
             out = self.lm(
                 inputs_embeds=input_emb,
                 attention_mask=attn_mask,
                 labels=None,
             )
-            # Compute CE with label smoothing manually
-            # HF convention: logits[t] predicts labels[t+1]
             shift_logits = out.logits[..., :-1, :].contiguous()
             shift_labels = full_labels[..., 1:].contiguous()
             loss = F.cross_entropy(
@@ -342,7 +411,76 @@ class VLMModel(nn.Module):
                 attention_mask=attn_mask,
                 labels=full_labels,
             )
-        return out  # .loss, .logits
+        return out
+
+    # ── Forward: encoder-decoder (seq2seq) ──────────────────
+
+    def _forward_seq2seq(
+        self,
+        B: int, device: torch.device,
+        enc_states: torch.Tensor, imu_tokens: torch.Tensor,
+        prefix_emb: torch.Tensor, labels: torch.Tensor,
+    ):
+        """Seq2Seq forward: conditioning → encoder_outputs, text → decoder labels.
+
+        The conditioning ``[prefix | imu]`` is wrapped as
+        ``BaseModelOutput`` and fed as ``encoder_outputs``.
+        T5/FlanT5 decoder cross-attends to these embeddings.
+        """
+        # 4) Build conditioning = [prefix | imu]  (B, M+P+K, d_lm)
+        cond_emb = torch.cat([prefix_emb, imu_tokens], dim=1)
+        cond_len = cond_emb.size(1)
+        cond_mask = torch.ones(B, cond_len, device=device, dtype=torch.long)
+        encoder_outputs = BaseModelOutput(last_hidden_state=cond_emb)
+
+        # Labels on device
+        labels_dev = labels.to(device)
+
+        # Debug (first batch only)
+        if not self._dbg_done:
+            self._dbg_done = True
+            logger.info(
+                "[VLM dbg] mode=seq2seq | enc={} → qformer={} | prefix={} "
+                "(soft={}, prompt={}) | cond={} labels={}",
+                tuple(enc_states.shape), tuple(imu_tokens.shape),
+                prefix_emb.size(1), self.prompt_manager.num_soft_tokens,
+                self.prompt_manager.num_prompt_tokens,
+                tuple(cond_emb.shape), tuple(labels_dev.shape),
+            )
+
+        # 5) Forward through seq2seq LM
+        if self.label_smoothing > 0:
+            # Manually shift labels right for decoder_input_ids
+            pad_id = self.tokenizer.pad_token_id
+            dec_start_id = getattr(
+                self.lm.config, "decoder_start_token_id", pad_id,
+            )
+            decoder_input_ids = labels_dev.clone()
+            decoder_input_ids[:, 1:] = labels_dev[:, :-1]
+            decoder_input_ids[:, 0] = dec_start_id
+            decoder_input_ids[decoder_input_ids == -100] = pad_id
+
+            out = self.lm(
+                encoder_outputs=encoder_outputs,
+                attention_mask=cond_mask,
+                decoder_input_ids=decoder_input_ids,
+                labels=None,
+            )
+            logits = out.logits  # (B, L, vocab)
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels_dev.view(-1),
+                ignore_index=-100,
+                label_smoothing=self.label_smoothing,
+            )
+            out.loss = loss
+        else:
+            out = self.lm(
+                encoder_outputs=encoder_outputs,
+                attention_mask=cond_mask,
+                labels=labels_dev,
+            )
+        return out
 
     # ── Generate (inference) ──────────────────────────────────
 
@@ -350,7 +488,10 @@ class VLMModel(nn.Module):
     def generate(self, x: torch.Tensor, len_x: torch.Tensor) -> List[str]:
         """Autoregressive generation from IMU input.
 
-        Conditioning sequence: ``[soft_prefix | prompt | imu_tokens]``.
+        Conditioning: ``[soft_prefix | prompt | imu_tokens]``.
+
+        For decoder-only LMs, conditioning is passed as ``inputs_embeds``.
+        For encoder-decoder LMs, conditioning is wrapped as ``encoder_outputs``.
 
         Args:
             x:     ``(B, C, T_raw)`` IMU input.
@@ -362,9 +503,9 @@ class VLMModel(nn.Module):
         device = x.device
         B = x.size(0)
 
-        # 1) Encode + compress
+        # 1) Encode + project
         enc_states, enc_mask = self._encode(x, len_x)
-        imu_tokens = self.qformer(enc_states, enc_mask)  # (B, K, d_lm)
+        imu_tokens = self.connector(enc_states, enc_mask)  # (B, ?, d_lm)
 
         # 2) Prefix
         embed_fn = self._get_embed_fn()
@@ -375,13 +516,10 @@ class VLMModel(nn.Module):
         # 3) Conditioning: [prefix | imu]
         cond_emb = torch.cat([prefix_emb, imu_tokens], dim=1)  # (B, M+P+K, d_lm)
         cond_len = cond_emb.size(1)
-
         attn_mask = torch.ones(B, cond_len, device=device, dtype=torch.long)
 
         # 4) Generate
-        output_ids = self.lm.generate(
-            inputs_embeds=cond_emb,
-            attention_mask=attn_mask,
+        gen_kwargs = dict(
             max_new_tokens=self.max_new_tokens,
             num_beams=self.num_beams,
             repetition_penalty=self.repetition_penalty,
@@ -390,10 +528,24 @@ class VLMModel(nn.Module):
             do_sample=False,
         )
 
+        if self.is_seq2seq:
+            encoder_outputs = BaseModelOutput(last_hidden_state=cond_emb)
+            output_ids = self.lm.generate(
+                encoder_outputs=encoder_outputs,
+                attention_mask=attn_mask,
+                **gen_kwargs,
+            )
+        else:
+            output_ids = self.lm.generate(
+                inputs_embeds=cond_emb,
+                attention_mask=attn_mask,
+                **gen_kwargs,
+            )
+
         # 5) Decode — skip special tokens
         texts = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
-        # Strip leading prompt text if echoed (safety measure)
+        # Strip leading prompt text if echoed (safety measure, causal LMs only)
         prompt_text = self.prompt_manager.prompt_text
         cleaned: list[str] = []
         for t in texts:

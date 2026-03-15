@@ -1,20 +1,13 @@
-# =========================================================
-# VLM-T5 v1: CNN encoder + T5-small seq2seq LM (Q-Former)
-# Sentence dataset (WI), Stabilo hw6
-# =========================================================
+# ==================================================================
+# Experiment A1: MLP Projector + Pretrained GPT-2
+# ==================================================================
+# Tests: lightweight 2-layer MLP bridge (LLaVA-1.5 style) with
+#        pretrained GPT-2.  ~985K connector params vs ~19.3M Q-Former.
 #
-# Same VLM architecture as GPT-2 variant (Q-Former, soft prefix, LoRA)
-# but with T5-small as the language model (encoder-decoder / seq2seq).
-# Conditioning [prefix | imu tokens] → T5 encoder_outputs,
-# text → T5 decoder (cross-attention).
-#
-#   - T5-small d_model=512 (vs GPT-2 768) — Q-Former auto-adjusts
-#   - T5 tokenizer auto-adds EOS — vlm_collate handles this
-#   - LoRA targets auto-detected: ["q", "v"] for T5
-#   - lm_max_label_len: 48 (T5 tokenizer max for sentences)
-#   - num_worker: 16 (A100 allocation)
+# Hypothesis: If MLP + pretrained GPT-2 ≈ Q-Former + pretrained GPT-2,
+#             then performance comes from LM priors, not connector capacity.
+# ==================================================================
 
-# ── VLM mode flag ──────────────────────────────────────────
 vlm_enabled: true
 
 # ── Encoder ────────────────────────────────────────────────
@@ -26,12 +19,15 @@ d_cnn: 512
 
 # ── VLM configuration ─────────────────────────────────────
 vlm:
-  # Pretrained decoder-only LM
-  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2"
   local_files_only: true
 
-  # Q-Former connector
-  num_queries: 32
+  # ▸ MLP projector (LLaVA-1.5 style: Linear→GELU→Linear→LN)
+  connector_type: mlp
+  random_init_lm: false            # Use pretrained GPT-2
+
+  # Q-Former params (ignored for MLP, kept for config compat)
+  num_queries: 16
   qformer_layers: 2
   qformer_nhead: 8
   qformer_dropout: 0.15
@@ -55,9 +51,8 @@ vlm:
   label_smoothing: 0.1
 
   # Generation
-  max_new_tokens: 48              # Sentence BPE: max=30, p99=21
+  max_new_tokens: 64
   num_beams: 1
-  repetition_penalty: 1.0
 
   # Discriminative learning rates
   lr_connector: 0.0002
@@ -69,8 +64,8 @@ freeze: false
 aug: true
 
 # ── Data / paths ───────────────────────────────────────────
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_t5_sent_v1
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_ablation_A1_mlp_pretrained/vlm__wi_word_hw6_meta
 checkpoint: null
 idx_fold: 0
 
@@ -81,14 +76,14 @@ num_worker: 16
 cache: true
 
 # ── Training schedule ─────────────────────────────────────
-epoch: 500
-epoch_warmup: 30
+epoch: 400
+epoch_warmup: 40
 freq_eval: 5
 freq_log: 50
 freq_save: 10
 
 # ── Label settings ─────────────────────────────────────────
-lm_max_label_len: 48              # Sentence BPE: max=30, buffer for safety
+lm_max_label_len: 96
 lm_use_amp: true
 
 # ── Discriminative LR (encoder) ───────────────────────────
@@ -102,17 +97,17 @@ test: false
 
 # ── Batch size & gradient accumulation ─────────────────────
 lr: 0.0001
-size_batch: 4                     # Reduced for longer sentence sequences
-grad_accum_steps: 16              # Effective batch = 4 × 16 = 64
+size_batch: 8
+grad_accum_steps: 8
 
-# ── Tokenizer (legacy; VLM uses GPT-2 tokenizer internally) ──
+# ── Tokenizer (legacy) ────────────────────────────────────
 tokenizer:
   type: sentencepiece
   model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
   vocab_size: 100
 use_bpe: false
 
-# ── Gating (ignored for VLM) ──────────────────────────────
+# ── Gating (ignored) ──────────────────────────────────────
 use_gated_attention: false
 gating_type: elementwise
 
@@ -128,8 +123,7 @@ concat:
   use_separator: false
   disable_base_aug_in_concat: true
 
-# ── Labels (sentence-level) ───────────────────────────────
-categories: ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(",")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "]
+# ── Labels ─────────────────────────────────────────────────
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
 
-# ── CTC decoder (unused in VLM) ───────────────────────────
 ctc_decoder: best_path

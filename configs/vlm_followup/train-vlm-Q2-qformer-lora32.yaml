@@ -1,0 +1,161 @@
+arch_de: vlm
+arch_en: blconv_b
+aug: true
+cache: true
+categories:
+- ''
+- a
+- b
+- c
+- d
+- e
+- f
+- g
+- h
+- i
+- j
+- k
+- l
+- m
+- n
+- o
+- p
+- q
+- r
+- s
+- t
+- u
+- v
+- w
+- x
+- y
+- z
+- A
+- B
+- C
+- D
+- E
+- F
+- G
+- H
+- I
+- J
+- K
+- L
+- M
+- N
+- O
+- P
+- Q
+- R
+- S
+- T
+- U
+- V
+- W
+- X
+- Y
+- Z
+- "\xE4"
+- "\xF6"
+- "\xFC"
+- "\xC4"
+- "\xD6"
+- "\xDC"
+- "\xDF"
+- '0'
+- '1'
+- '2'
+- '3'
+- '4'
+- '5'
+- '6'
+- '7'
+- '8'
+- '9'
+- .
+- ','
+- (
+- )
+- ''''
+- '?'
+- '!'
+- +
+- '='
+- '-'
+- /
+- ;
+- ':'
+- "\xB7"
+- ' '
+checkpoint: null
+concat:
+  disable_base_aug_in_concat: true
+  enabled: false
+  items_max: 6
+  items_min: 2
+  max_T: 4096
+  p_concat: 0.5
+  same_writer: true
+  use_separator: false
+  writer_key: id_writer
+ctc_decoder: best_path
+d_cnn: 512
+device: cuda
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_followup_Q2_qformer_lora32/vlm__wi_word_hw6_meta
+epoch: 300
+epoch_warmup: 30
+export_val_full: true
+freeze: false
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+gating_type: elementwise
+grad_accum_steps: 8
+idx_fold: 0
+len_seq: 0
+lm_max_label_len: 96
+lm_use_amp: true
+lr: 0.0001
+lr_enc: 0.0001
+num_channel: 13
+num_worker: 16
+save_best_only: true
+seed: 42
+size_batch: 8
+test: false
+tokenizer:
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  type: sentencepiece
+  vocab_size: 100
+use_bpe: false
+use_gated_attention: false
+vlm:
+  freeze_lm: true
+  label_smoothing: 0.1
+  lm_name: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2
+  local_files_only: true
+  lora_alpha: 64
+  lora_dropout: 0.1
+  lora_r: 32
+  lora_target_modules:
+  - c_attn
+  - c_proj
+  - c_fc
+  lr_connector: 0.0002
+  lr_lm: 2.0e-05
+  lr_prompt: 0.0002
+  max_new_tokens: 64
+  num_beams: 1
+  num_queries: 16
+  num_soft_tokens: 20
+  prompt_text: 'Transcribe the handwritten text from IMU sensor signals:'
+  qformer_dropout: 0.15
+  qformer_layers: 2
+  qformer_nhead: 8
+  use_lora: true
+  z_dropout: 0.2
+  connector_type: qformer
+vlm_enabled: true
+weight_decay: 0.01

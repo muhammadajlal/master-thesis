@@ -70,7 +70,7 @@ export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
 # -----------------------------
 # Create per-fold temp config (patch YAML)
 # -----------------------------
-TMPCFG="${SLURM_TMPDIR:-/tmp}/test_${DATASET}_fold${FOLD}.yaml"
+TMPCFG=$(mktemp "${SLURM_TMPDIR:-/tmp}/test_${DATASET:-dataset}_fold${FOLD}_job${SLURM_JOB_ID:-manual}_XXXXXX.yaml")
 cp "$YAML_PATH" "$TMPCFG"
 
 python3 - <<PY
