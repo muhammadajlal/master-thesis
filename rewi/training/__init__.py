@@ -11,9 +11,11 @@ from rewi.training.loops import (
     train_one_epoch,
     train_one_epoch_hybrid,
     train_one_epoch_lm,
+    train_one_epoch_lm_hybrid,
     test,
     test_hybrid,
     test_lm,
+    test_lm_hybrid,
 )
 from rewi.training.utils import (
     build_ar_batch,
@@ -29,9 +31,11 @@ __all__ = [
     "train_one_epoch",
     "train_one_epoch_hybrid",
     "train_one_epoch_lm",
+    "train_one_epoch_lm_hybrid",
     "test",
     "test_hybrid",
     "test_lm",
+    "test_lm_hybrid",
     # Utilities
     "build_ar_batch",
     "count_params",

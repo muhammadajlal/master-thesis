@@ -123,6 +123,7 @@ class VLMModel(nn.Module):
         local_files_only: bool = True,
         z_dropout: float = 0.1,
         label_smoothing: float = 0.0,
+        vocab_ctc: int | None = None,
     ):
         super().__init__()
         self.ratio_ds = int(max(1, ratio_ds))
@@ -132,6 +133,7 @@ class VLMModel(nn.Module):
         self.repetition_penalty = repetition_penalty
         self.use_lora = use_lora
         self.label_smoothing = label_smoothing
+        self.hybrid_mode = vocab_ctc is not None
         self.connector_type = connector_type.lower()
 
         # ── Encoder ─────────────────────────────────────────────
@@ -236,6 +238,12 @@ class VLMModel(nn.Module):
             tokenizer=self.tokenizer,
         )
 
+        # ── Optional CTC auxiliary head on raw encoder features ──
+        self.ctc_head: nn.Module | None = None
+        if vocab_ctc is not None:
+            self.ctc_head = nn.Linear(self.d_cnn, vocab_ctc)
+            logger.info("[VLM] Hybrid mode: CTC head ({} → {})", self.d_cnn, vocab_ctc)
+
         # ── Conditioning dropout ────────────────────────────────
         self.z_drop = nn.Dropout(z_dropout) if z_dropout > 0 else nn.Identity()
 
@@ -337,13 +345,24 @@ class VLMModel(nn.Module):
         )  # (B, M+P, d_lm)
 
         if self.is_seq2seq:
-            return self._forward_seq2seq(
+            lm_out = self._forward_seq2seq(
                 B, device, enc_states, imu_tokens, prefix_emb, labels,
             )
         else:
-            return self._forward_causal(
+            lm_out = self._forward_causal(
                 B, device, enc_states, imu_tokens, prefix_emb, labels, embed_fn,
             )
+
+        if not self.hybrid_mode:
+            return lm_out
+
+        # Hybrid: return dict with CTC logits on raw encoder features
+        T = enc_states.size(1)
+        len_enc = torch.clamp(len_x // self.ratio_ds, min=1, max=T)
+        result = {"lm_out": lm_out, "enc_lengths": len_enc}
+        if self.ctc_head is not None:
+            result["ctc_logits"] = self.ctc_head(enc_states)  # (B, T, vocab_ctc)
+        return result
 
     # ── Forward: decoder-only (causal) ──────────────────────
 

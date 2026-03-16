@@ -52,9 +52,11 @@ from rewi.training import (
     train_one_epoch,
     train_one_epoch_hybrid,
     train_one_epoch_lm,
+    train_one_epoch_lm_hybrid,
     test,
     test_hybrid,
     test_lm,
+    test_lm_hybrid,
     maybe_log_trainability,
     maybe_log_optimizer_coverage,
     set_decoder_frozen,
@@ -145,10 +147,20 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             local_files_only=bool(vlm_cfg.get("local_files_only", True)),
             z_dropout=float(vlm_cfg.get("z_dropout", 0.1)),
             label_smoothing=float(vlm_cfg.get("label_smoothing", 0.0)),
+            vocab_ctc=int(len(cfgs.categories)) if bool(vlm_cfg.get("hybrid_ctc", False)) else None,
         ).to(cfgs.device)
 
         # Attach ratio_ds for dataloader compatibility
         model.ratio_ds = ratio_ds
+
+        # VLM hybrid CTC+LM mode
+        vlm_hybrid_enabled = bool(vlm_cfg.get("hybrid_ctc", False))
+        cfgs.LM_HYBRID = vlm_hybrid_enabled
+        if vlm_hybrid_enabled:
+            cfgs.lm_hybrid = {
+                "enabled": True,
+                "lambda_ctc": float(vlm_cfg.get("hybrid_lambda_ctc", 0.6)),
+            }
 
     elif LM_MODE:
         encoder = build_encoder(cfgs.num_channel, cfgs.arch_en, cfgs.len_seq).to(cfgs.device)
@@ -162,9 +174,20 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             length_penalty=float(getattr(cfgs, "lm_length_penalty", 1.0)),
             min_new_tokens=int(getattr(cfgs, "lm_min_new_tokens", 0)),
             local_files_only=bool(getattr(cfgs, "lm_local_files_only", True)),
+            use_lora=bool(getattr(cfgs, "lm_use_lora", False)),
+            lora_r=int(getattr(cfgs, "lm_lora_r", 16)),
+            lora_alpha=int(getattr(cfgs, "lm_lora_alpha", 32)),
+            lora_dropout=float(getattr(cfgs, "lm_lora_dropout", 0.05)),
+            lora_target_modules=str(getattr(cfgs, "lm_lora_target_modules", r"decoder\..*\.(q|v)")),
+            unfreeze_xattn_k=bool(getattr(cfgs, "lm_unfreeze_xattn_k", False)),
         )
 
         d_cnn = int(getattr(cfgs, "d_cnn", 0))
+
+        # Check for hybrid CTC+LM mode
+        lm_hybrid_cfg = getattr(cfgs, "lm_hybrid", {}) or {}
+        lm_hybrid_enabled = bool(lm_hybrid_cfg.get("enabled", False))
+        vocab_ctc = int(len(cfgs.categories)) if lm_hybrid_enabled else None
 
         model = MultimodalLMModel(
             encoder=encoder,
@@ -173,7 +196,12 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             lm_cfg=lm_cfg,
             proj_dropout=float(getattr(cfgs, "lm_proj_dropout", 0.0)),
             freeze_encoder=bool(getattr(cfgs, "freeze", True)),
+            vocab_ctc=vocab_ctc,
+            num_soft_tokens=int(getattr(cfgs, "lm_num_soft_tokens", 0)),
+            prompt_text=str(getattr(cfgs, "lm_prompt_text", "")),
         ).to(cfgs.device)
+
+        cfgs.LM_HYBRID = lm_hybrid_enabled
     else:
         dual = getattr(cfgs, "dual_head", {}) or {}
         dual_enabled = bool(dual.get("enabled", False))
@@ -264,6 +292,7 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
     )
 
     collate_test = fn_collate
+    _vlm_hybrid = bool(getattr(cfgs, "LM_HYBRID", False)) if VLM_MODE else False
     if VLM_MODE:
         hf_tok = model.tokenizer
         collate_test = lambda batch: vlm_collate(
@@ -273,9 +302,11 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
             categories=cfgs.categories,
             pad_id=cfgs.PAD_ID,
             max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+            hybrid=_vlm_hybrid,
         )
     elif LM_MODE:
         hf_tok = model.lm.tokenizer
+        _lm_hybrid = bool(getattr(cfgs, "LM_HYBRID", False))
         collate_test = lambda batch: lm_collate(
             batch,
             base_collate_fn=fn_collate,
@@ -283,6 +314,7 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
             categories=cfgs.categories,
             pad_id=cfgs.PAD_ID,
             max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+            hybrid=_lm_hybrid,
         )
 
     dataloader_test = DataLoader(
@@ -339,10 +371,12 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
                 categories=cfgs.categories,
                 pad_id=cfgs.PAD_ID,
                 max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+                hybrid=_vlm_hybrid,
             )
         elif LM_MODE:
             base_collate = collate_train
             hf_tok = model.lm.tokenizer
+            _lm_hybrid = bool(getattr(cfgs, "LM_HYBRID", False))
             collate_train = lambda batch: lm_collate(
                 batch,
                 base_collate_fn=base_collate,
@@ -350,6 +384,7 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
                 categories=cfgs.categories,
                 pad_id=cfgs.PAD_ID,
                 max_label_len=int(getattr(cfgs, "lm_max_label_len", 128)),
+                hybrid=_lm_hybrid,
             )
 
         dataloader_train = DataLoader(
@@ -434,12 +469,30 @@ def _build_lm_optimizer(cfgs, model, dataloader_train):
     if proj_params:
         param_groups.append({"name": "proj", "params": proj_params, "lr": lr_proj})
 
-    # LM decoder
+    # CTC head (hybrid LM mode)
+    if getattr(model, "ctc_head", None) is not None:
+        ctc_params = [p for p in model.ctc_head.parameters() if p.requires_grad]
+        if ctc_params:
+            param_groups.append({"name": "ctc_head", "params": ctc_params, "lr": lr_proj})
+
+    # Soft prompt tokens
+    prompt_params = []
+    if getattr(model, "prompt", None) is not None:
+        prompt_params = [p for p in model.prompt.parameters() if p.requires_grad]
+        if prompt_params:
+            param_groups.append({"name": "prompt", "params": prompt_params, "lr": lr_proj})
+
+    # LM decoder (LoRA mode: select by requires_grad; full FT: select by name)
+    _lm_use_lora = bool(getattr(cfgs, "lm_use_lora", False))
     hf = model.lm.lm
     dec_params = []
     for name, p in hf.named_parameters():
-        if name.startswith("decoder.") or name.startswith("lm_head") or name.startswith("shared"):
-            dec_params.append(p)
+        if _lm_use_lora:
+            if p.requires_grad:
+                dec_params.append(p)
+        else:
+            if name.startswith("decoder.") or name.startswith("lm_head") or name.startswith("shared"):
+                dec_params.append(p)
     if dec_params:
         param_groups.append({"name": "lm_dec", "params": dec_params, "lr": lr_lm})
 
@@ -447,11 +500,13 @@ def _build_lm_optimizer(cfgs, model, dataloader_train):
     scaler = GradScaler(enabled=bool(getattr(cfgs, "lm_use_amp", False)))
 
     logger.info(
-        "[OptGroups] enc={} proj={} lm_dec={} | lr_enc={} lr_proj={} lr_lm={}",
+        "[OptGroups] enc={} proj={} prompt={} lm_dec={} | lr_enc={} lr_proj={} lr_lm={} | lora={}",
         sum(p.numel() for p in enc_params),
         sum(p.numel() for p in proj_params),
+        sum(p.numel() for p in prompt_params),
         sum(p.numel() for p in dec_params),
         lr_enc, lr_proj, lr_lm,
+        _lm_use_lora,
     )
 
     if dataloader_train is not None:
@@ -497,6 +552,13 @@ def _build_vlm_optimizer(cfgs, model, dataloader_train):
     if qf_params:
         param_groups.append({"name": "connector", "params": qf_params, "lr": lr_connector})
 
+    # CTC head (hybrid VLM mode)
+    ctc_params = []
+    if getattr(model, "ctc_head", None) is not None:
+        ctc_params = [p for p in model.ctc_head.parameters() if p.requires_grad]
+        if ctc_params:
+            param_groups.append({"name": "ctc_head", "params": ctc_params, "lr": lr_connector})
+
     # Prompt (soft prefix)
     prompt_params = [p for p in model.prompt_manager.parameters() if p.requires_grad]
     if prompt_params:
@@ -514,10 +576,11 @@ def _build_vlm_optimizer(cfgs, model, dataloader_train):
     scaler = GradScaler(enabled=bool(getattr(cfgs, "lm_use_amp", False)))
 
     logger.info(
-        "[VLM OptGroups] enc={} qformer={} prompt={} lm={} | "
+        "[VLM OptGroups] enc={} connector={} ctc_head={} prompt={} lm={} | "
         "lr_enc={} lr_conn={} lr_prompt={} lr_lm={}",
         sum(p.numel() for p in enc_params),
         sum(p.numel() for p in qf_params),
+        sum(p.numel() for p in ctc_params),
         sum(p.numel() for p in prompt_params),
         sum(p.numel() for p in lm_params),
         lr_enc, lr_connector, lr_prompt, lr_lm,
@@ -794,6 +857,15 @@ def run_training_loop(
         lambda_ctc_schedule = dual.get("lambda_ctc_schedule", None)
         loss_balance_mode = str(dual.get("loss_balance", "sum"))
 
+    # LM hybrid (CTC+LM) mode
+    lm_hybrid_enabled = bool(getattr(cfgs, "LM_HYBRID", False))
+    lm_hybrid_fn_ctc = None
+    lm_hybrid_lambda_ctc = 0.0
+    if lm_hybrid_enabled:
+        lm_hybrid_cfg = getattr(cfgs, "lm_hybrid", {}) or {}
+        lm_hybrid_fn_ctc = CTCLoss()
+        lm_hybrid_lambda_ctc = float(lm_hybrid_cfg.get("lambda_ctc", 0.6))
+
     # LM state tracking helpers
     if LM_MODE:
         lm_helpers = _setup_lm_helpers(optimizer, lr_scheduler, model)
@@ -818,7 +890,12 @@ def run_training_loop(
             _maybe_unfreeze_lm(cfgs, model, optimizer, lr_scheduler, e, lm_helpers)
 
         # Train
-        if LM_MODE:
+        if LM_MODE and lm_hybrid_enabled:
+            train_one_epoch_lm_hybrid(
+                dataloader_train, model, lm_hybrid_fn_ctc, lm_hybrid_lambda_ctc,
+                optimizer, scaler, lr_scheduler, manager, e,
+            )
+        elif LM_MODE:
             train_one_epoch_lm(dataloader_train, model, optimizer, scaler, lr_scheduler, manager, e)
         else:
             if dual_enabled:
@@ -841,7 +918,12 @@ def run_training_loop(
                 train_one_epoch(dataloader_train, model, fn_loss, optimizer, scaler, lr_scheduler, manager, e)
 
         # Evaluate
-        if LM_MODE:
+        if LM_MODE and lm_hybrid_enabled:
+            test_lm_hybrid(
+                dataloader_test, model, lm_hybrid_fn_ctc, lm_hybrid_lambda_ctc,
+                manager, ctc_decoder, e,
+            )
+        elif LM_MODE:
             test_lm(dataloader_test, model, manager, e)
         else:
             if dual_enabled:
@@ -873,7 +955,15 @@ def _run_test_epoch(cfgs, model, fn_loss, manager, dataloader_test, ctc_decoder,
     """Run a single test/evaluation epoch."""
     qual_cfg = build_qualitative_config(cfgs)
 
-    if LM_MODE:
+    lm_hybrid_enabled = bool(getattr(cfgs, "LM_HYBRID", False))
+    if LM_MODE and lm_hybrid_enabled:
+        lm_hybrid_cfg = getattr(cfgs, "lm_hybrid", {}) or {}
+        test_lm_hybrid(
+            dataloader_test, model, CTCLoss(),
+            float(lm_hybrid_cfg.get("lambda_ctc", 0.6)),
+            manager, ctc_decoder, 0,
+        )
+    elif LM_MODE:
         test_lm(dataloader_test, model, manager, 0)
     else:
         dual = getattr(cfgs, "dual_head", {}) or {}
