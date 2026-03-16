@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from rewi.model.projection_layer import ProjectionLayer
 from rewi.model.pretrainedLM import PretrainedLMDecoder, LMConfig
+from rewi.model.prompt import PromptManager
 
 
 class MultimodalLMModel(nn.Module):
@@ -19,11 +20,15 @@ class MultimodalLMModel(nn.Module):
         lm_cfg: LMConfig,
         proj_dropout: float = 0.0,
         freeze_encoder: bool = False,
+        vocab_ctc: int | None = None,
+        num_soft_tokens: int = 0,
+        prompt_text: str = "",
     ):
         super().__init__()
         self.encoder = encoder
         self.ratio_ds = int(max(1, ratio_ds))
         self.d_cnn = int(d_cnn)
+        self.hybrid_mode = vocab_ctc is not None
 
         # Respect cfg flag for encoder freezing
         for p in self.encoder.parameters():
@@ -36,6 +41,21 @@ class MultimodalLMModel(nn.Module):
             d_out=self.lm.d_model,
             dropout=proj_dropout,
         )
+
+        # Optional CTC auxiliary head on raw encoder features
+        self.ctc_head: nn.Module | None = None
+        if vocab_ctc is not None:
+            self.ctc_head = nn.Linear(self.d_cnn, vocab_ctc)
+
+        # Task prefix: soft learned tokens + optional fixed text prompt
+        self.prompt: PromptManager | None = None
+        if num_soft_tokens > 0 or prompt_text:
+            self.prompt = PromptManager(
+                d_lm=self.lm.d_model,
+                prompt_text=prompt_text,
+                num_soft_tokens=num_soft_tokens,
+                tokenizer=self.lm.tokenizer,
+            )
 
         # Sanity checks (now work with your ProjectionLayer properties)
         assert self.proj.in_features == self.d_cnn, (
@@ -87,11 +107,13 @@ class MultimodalLMModel(nn.Module):
         rng = torch.arange(max_len, device=device)[None, :]
         return (rng < lengths[:, None]).to(torch.long)
 
-    def _encode(self, x: torch.Tensor, len_x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _encode(self, x: torch.Tensor, len_x: torch.Tensor):
         """
         Returns:
-            enc_states: (B, T, d_model)
-            enc_mask:   (B, T) int mask (1=valid, 0=pad)
+            enc_states: (B, T', d_model) — projected features for LM (T' = P + T if prompt)
+            enc_mask:   (B, T') int mask (1=valid, 0=pad)
+            enc_out:    (B, T, d_cnn)    — raw encoder features (for CTC head, no prefix)
+            len_enc:    (B,)             — encoder output lengths (no prefix)
         """
         enc_out = self._call_encoder(x, len_x)
         enc_out = self._to_BTC(enc_out)  # (B, T, d_cnn)
@@ -107,12 +129,24 @@ class MultimodalLMModel(nn.Module):
         # Project to LM d_model
         enc_states = self.proj(enc_out)  # (B, T, d_model)
 
+        # Prepend task prefix: [soft_prefix | fixed_prompt | projected_features]
+        if self.prompt is not None and self.prompt.total_prefix_len > 0:
+            embed_fn = self.lm.shared_embedding  # T5's input embedding
+            prefix = self.prompt.get_prefix_embeds(embed_fn, B, enc_states.device)
+            enc_states = torch.cat([prefix, enc_states], dim=1)  # (B, P+T, d_model)
+            P = prefix.size(1)
+            prefix_mask = torch.ones(B, P, device=enc_mask.device, dtype=enc_mask.dtype)
+            enc_mask = torch.cat([prefix_mask, enc_mask], dim=1)  # (B, P+T)
+
         if not self._dbg_done:
             self._dbg_done = True
+            prompt_info = f"| prompt: {self.prompt.total_prefix_len} tokens" if self.prompt else ""
             print(
                 "[LMModel dbg] enc_out:", tuple(enc_out.shape),
                 "| proj:", (self.d_cnn, "->", self.lm.d_model),
-                "| ratio_ds:", self.ratio_ds
+                "| ratio_ds:", self.ratio_ds,
+                "| hybrid:", self.hybrid_mode,
+                prompt_info
             )
             print(
                 "[LMModel dbg] len_x min/med/max:",
@@ -122,15 +156,27 @@ class MultimodalLMModel(nn.Module):
                 "[LMModel dbg] len_enc min/med/max:",
                 int(len_enc.min()), int(len_enc.median()), int(len_enc.max())
             )
+            print(
+                "[LMModel dbg] enc_states (after prefix):", tuple(enc_states.shape),
+                "| enc_mask:", tuple(enc_mask.shape)
+            )
 
-        return enc_states, enc_mask
+        return enc_states, enc_mask, enc_out, len_enc
 
     def forward(self, x: torch.Tensor, len_x: torch.Tensor, labels: torch.Tensor):
-        enc_states, enc_mask = self._encode(x, len_x)
-        return self.lm(enc_states, enc_mask, labels)
+        enc_states, enc_mask, enc_out, len_enc = self._encode(x, len_x)
+        lm_out = self.lm(enc_states, enc_mask, labels)
+
+        if not self.hybrid_mode:
+            return lm_out
+
+        result = {"lm_out": lm_out, "enc_lengths": len_enc}
+        if self.ctc_head is not None:
+            result["ctc_logits"] = self.ctc_head(enc_out)  # (B, T, vocab_ctc)
+        return result
 
     @torch.no_grad()
     def generate(self, x: torch.Tensor, len_x: torch.Tensor) -> List[str]:
         # Use the same encode path as training (robust to encoders with/without len_x)
-        enc_states, enc_mask = self._encode(x, len_x)
+        enc_states, enc_mask, _, _ = self._encode(x, len_x)
         return self.lm.generate(enc_states, enc_mask)

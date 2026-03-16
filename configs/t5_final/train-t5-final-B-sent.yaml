@@ -1,0 +1,83 @@
+# =========================
+# T5-small Final Experiment B: blconv_b + Hybrid CTC+LM
+# Dataset: wi_sent_hw6_meta (sentence-level, Stabilo)
+# =========================
+
+arch_de: "t5-small"
+arch_en: "blconv_b"
+d_cnn: 512
+
+# Pretrained LM settings
+lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+lm_local_files_only: true
+lm_train_lm: true
+lm_unfreeze_epoch: 0
+lm_proj_dropout: 0.1
+lm_num_beams: 1
+lm_max_new_tokens: 128
+lm_length_penalty: 1.0
+lm_min_new_tokens: 0
+lm_max_label_len: 256
+lm_use_amp: false
+
+# Hybrid CTC+LM loss
+lm_hybrid:
+  enabled: true
+  lambda_ctc: 0.6
+  arch_ctc: linear
+
+# Encoder
+num_channel: 13
+len_seq: 0
+freeze: false
+aug: false
+ctc_decoder: best_path
+
+# Data / paths
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/t5_final_B_hybrid/t5-small__wi_sent_hw6_meta
+checkpoint: null
+
+# Runtime
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+
+# Training schedule
+epoch: 300
+epoch_warmup: 30
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+save_best_only: true
+export_val_full: true
+test: false
+
+# Optimization
+lr_enc: 0.001
+lr_proj: 0.001
+lr_lm: 0.00001
+lm_lr_unfreeze_mult: 1.0
+weight_decay: 0.01
+lr: 0.0001
+size_batch: 32
+grad_accum_steps: 2
+
+# Tokenizer (legacy)
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+# Gating (ignored in LM mode)
+use_gated_attention: false
+gating_type: elementwise
+
+# Concatenation (disabled)
+concat:
+  enabled: false
+
+# Sentence-level categories
+categories: ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(", ")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "]

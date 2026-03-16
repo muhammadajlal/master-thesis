@@ -205,6 +205,206 @@ def test_lm(
         man.update_evaluation(results_eval, preds[:20], labels_txt[:20])
 
 
+def train_one_epoch_lm_hybrid(
+    dataloader: DataLoader,
+    model: nn.Module,
+    fn_loss_ctc: nn.Module,
+    lambda_ctc: float,
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.cuda.amp.GradScaler,
+    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
+    man: RunManager,
+    epoch: int,
+) -> None:
+    """Train multimodal LM model with hybrid CTC+LM loss for one epoch.
+
+    The model must be a ``MultimodalLMModel`` with ``hybrid_mode=True``.
+    Dataloader must yield ``(x, len_x, labels, texts, y, len_y)``
+    where y/len_y are character-level targets for CTC.
+    """
+    man.initialize_epoch(epoch, len(dataloader), False)
+    model.train()
+
+    use_amp = bool(getattr(man.cfgs, "lm_use_amp", False))
+    amp_dtype = torch.float16
+    accum_steps = int(getattr(man.cfgs, "grad_accum_steps", 1))
+
+    optimizer.zero_grad(set_to_none=True)
+
+    for idx, (x, len_x, labels, _texts, y, len_y) in enumerate(dataloader):
+        x = x.to(man.cfgs.device)
+        len_x = len_x.to(man.cfgs.device)
+        labels = labels.to(man.cfgs.device)
+        y = y.to(man.cfgs.device)
+        len_y = len_y.to(man.cfgs.device)
+
+        if labels.numel() == 0 or (labels != -100).sum().item() == 0:
+            logger.warning(
+                "All labels are -100 (ignored). Skipping batch. epoch={} iter={}",
+                epoch, idx,
+            )
+            continue
+
+        autocast_ctx = (
+            torch.autocast(device_type="cuda", dtype=amp_dtype, enabled=use_amp)
+            if x.is_cuda
+            else contextlib.nullcontext()
+        )
+        with autocast_ctx:
+            out = model(x, len_x, labels=labels)
+            loss_lm = out["lm_out"].loss
+
+            ctc_logits = out["ctc_logits"].float()
+            enc_lengths = out["enc_lengths"]
+            loss_ctc = fn_loss_ctc(
+                ctc_logits.permute((1, 0, 2)),
+                y,
+                enc_lengths,
+                len_y,
+            )
+
+            loss = (loss_lm + lambda_ctc * loss_ctc) / accum_steps
+
+        if not torch.isfinite(loss):
+            logger.warning(
+                "Non-finite loss. epoch={} iter={} loss_lm={} loss_ctc={}",
+                epoch, idx, float(loss_lm.item()), float(loss_ctc.item()),
+            )
+            optimizer.zero_grad(set_to_none=True)
+            continue
+
+        if scaler is not None:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+        is_accum_step = ((idx + 1) % accum_steps == 0) or (idx + 1 == len(dataloader))
+        if is_accum_step:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                if not torch.isfinite(grad_norm):
+                    logger.warning(
+                        "Non-finite grad norm. epoch={} iter={} grad_norm={}",
+                        epoch, idx, grad_norm,
+                    )
+                    optimizer.zero_grad(set_to_none=True)
+                    scaler.update()
+                else:
+                    scaler.step(optimizer)
+                    scaler.update()
+            else:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                if not torch.isfinite(grad_norm):
+                    optimizer.zero_grad(set_to_none=True)
+                else:
+                    optimizer.step()
+
+            optimizer.zero_grad(set_to_none=True)
+            lr_scheduler.step()
+
+        man.update_iteration(
+            idx,
+            float(loss.item() * accum_steps),
+            lr_scheduler.get_last_lr()[0],
+            loss_ar=float(loss_lm.item()),
+            loss_ctc=float(loss_ctc.item()),
+        )
+
+    man.summarize_epoch()
+
+    if not bool(getattr(man.cfgs, "save_best_only", False)) and man.check_step(epoch + 1, 'save'):
+        man.save_checkpoint(model.state_dict(), optimizer.state_dict(), lr_scheduler.state_dict())
+
+
+@torch.no_grad()
+def test_lm_hybrid(
+    dataloader: DataLoader,
+    model: nn.Module,
+    fn_loss_ctc: nn.Module,
+    lambda_ctc: float,
+    man: RunManager,
+    ctc_decoder: BestPath,
+    epoch: int,
+) -> None:
+    """Evaluate multimodal LM model with hybrid CTC+LM loss.
+
+    Reports both LM generation metrics and CTC best-path metrics.
+    """
+    model.eval()
+    man.initialize_epoch(epoch, len(dataloader), True)
+
+    preds_lm, labels_lm = [], []
+    preds_ctc, labels_ctc = [], []
+
+    for idx, (x, len_x, labels_hf, texts, y, len_y) in enumerate(dataloader):
+        x = x.to(man.cfgs.device)
+        len_x = len_x.to(man.cfgs.device)
+        labels_hf = labels_hf.to(man.cfgs.device)
+        y = y.to(man.cfgs.device)
+        len_y = len_y.to(man.cfgs.device)
+
+        out = model(x, len_x, labels=labels_hf)
+        loss_lm = out["lm_out"].loss
+
+        ctc_logits = out["ctc_logits"].float()
+        enc_lengths = out["enc_lengths"]
+        loss_ctc = fn_loss_ctc(
+            ctc_logits.permute((1, 0, 2)),
+            y,
+            enc_lengths,
+            len_y,
+        )
+
+        loss = loss_lm + lambda_ctc * loss_ctc
+        man.update_iteration(
+            idx,
+            float(loss.item()),
+            lr=0.0,
+            loss_ar=float(loss_lm.item()),
+            loss_ctc=float(loss_ctc.item()),
+        )
+
+        # LM generation predictions
+        hyp = model.generate(x, len_x)
+        preds_lm.extend(hyp)
+        labels_lm.extend(list(texts))
+
+        # CTC best-path predictions
+        for logit, Lx, label, Ly in zip(
+            ctc_logits.detach().cpu(),
+            enc_lengths.detach().cpu(),
+            y.detach().cpu(),
+            len_y.detach().cpu(),
+        ):
+            preds_ctc.append(ctc_decoder.decode(logit[: int(Lx)]))
+            labels_ctc.append(ctc_decoder.decode(label[: int(Ly)], True))
+
+    man.summarize_epoch()
+
+    export_val_full = bool(getattr(man.cfgs, "export_val_full", False))
+    is_test_mode = bool(getattr(man.cfgs, "test", False))
+    do_export = is_test_mode or export_val_full
+
+    if do_export:
+        export_dir = os.path.join(man.cfgs.dir_work, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        epoch_tag = "best" if epoch is None else f"epoch{epoch}"
+        export_path = os.path.join(
+            export_dir,
+            f"val_full_fold{man.cfgs.idx_fold}_{epoch_tag}_lm.json",
+        )
+        with open(export_path, "w", encoding="utf-8") as f:
+            json.dump({"predictions": preds_lm, "labels": labels_lm}, f, ensure_ascii=False)
+        logger.info("Exported full LM hybrid validation predictions to {}", export_path)
+
+    if man.check_step(epoch + 1, 'eval'):
+        results_lm = evaluate(preds_lm, labels_lm)
+        results_ctc = evaluate(preds_ctc, labels_ctc)
+        man.update_evaluation(results_lm, preds_lm[:20], labels_lm[:20], key='evaluation', label='LM-generate')
+        man.update_evaluation(results_ctc, preds_ctc[:20], labels_ctc[:20], key='evaluation_ctc', label='CTC-bestpath')
+
+
 def train_one_epoch(
     dataloader: DataLoader,
     model: BaseModel,

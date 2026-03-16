@@ -119,6 +119,50 @@ class PoolingMLPProjector(nn.Module):
         return self.net(x)
 
 
+class ConvPoolProjector(nn.Module):
+    """1D Conv downsampling + linear projection — minimal connector.
+
+    Uses a strided 1D convolution to temporally compress encoder output,
+    then a single linear layer to project to LM dimension. Much lighter
+    than Q-Former or MLP, tests whether the pretrained LM can work with
+    minimal bridging.
+
+    ``Conv1d(d_enc, d_enc, k, stride=s) → GELU → Linear(d_enc, d_lm) → LN``
+
+    Param count:  ``d_enc × k × 1 + d_enc  +  d_enc × d_lm + d_lm  +  2 × d_lm``
+                  e.g.  512, k=5, s=4, d_lm=768:
+                        512×5 + 512 + 512×768 + 768 + 2×768 ≈ **397 K**
+    """
+
+    def __init__(
+        self, d_enc: int, d_lm: int, kernel_size: int = 5, stride: int = 4,
+    ):
+        super().__init__()
+        self.stride = stride
+        # Depthwise-style: groups=1 keeps it simple, low param
+        self.conv = nn.Conv1d(
+            d_enc, d_enc, kernel_size=kernel_size, stride=stride,
+            padding=kernel_size // 2, groups=1,
+        )
+        self.act = nn.GELU()
+        self.proj = nn.Linear(d_enc, d_lm)
+        self.ln = nn.LayerNorm(d_lm)
+
+    def forward(
+        self,
+        enc_states: torch.Tensor,
+        enc_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """``(B, T, d_enc)`` → ``(B, T//stride, d_lm)``."""
+        # (B, T, C) → (B, C, T) for Conv1d
+        x = enc_states.transpose(1, 2)
+        if enc_mask is not None:
+            x = x * enc_mask.unsqueeze(1).float()
+        x = self.act(self.conv(x))  # (B, C, T//s)
+        x = x.transpose(1, 2)  # (B, T//s, C)
+        return self.ln(self.proj(x))
+
+
 def build_connector(
     connector_type: str,
     d_enc: int,
@@ -170,8 +214,10 @@ def build_connector(
     elif ctype in ("pooling_mlp", "pooling"):
         k = pool_tokens if pool_tokens is not None else num_queries
         return PoolingMLPProjector(d_enc, d_lm, num_tokens=k)
+    elif ctype in ("conv_pool", "conv"):
+        return ConvPoolProjector(d_enc, d_lm, kernel_size=5, stride=4)
     else:
         raise ValueError(
             f"Unknown connector_type={connector_type!r}. "
-            f"Choose from: qformer, linear, mlp, pooling_mlp"
+            f"Choose from: qformer, linear, mlp, pooling_mlp, conv_pool"
         )

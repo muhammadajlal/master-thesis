@@ -36,7 +36,7 @@ def _chars_to_strings(y, len_y, categories, pad_id):
     return texts
 
 
-def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128):
+def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128, hybrid=False):
     x, y, len_x, len_y = base_collate_fn(batch)
 
     texts = _chars_to_strings(y, len_y, categories, pad_id)
@@ -53,10 +53,12 @@ def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_lab
     # HF expects -100 for ignore positions
     labels = labels.masked_fill(labels == hf_tokenizer.pad_token_id, -100)
 
+    if hybrid:
+        return x, len_x, labels, texts, y, len_y
     return x, len_x, labels, texts
 
 
-def vlm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128):
+def vlm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128, hybrid=False):
     """Collate for VLM (decoder-only or seq2seq LM).
 
     Similar to ``lm_collate`` but appends EOS to the text labels so the model
@@ -104,4 +106,6 @@ def vlm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_la
     # Use attention mask to determine padding (correct even when pad==eos)
     labels[attn == 0] = -100
 
+    if hybrid:
+        return x, len_x, labels, texts, y, len_y
     return x, len_x, labels, texts
