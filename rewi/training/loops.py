@@ -72,6 +72,12 @@ def train_one_epoch_lm(
     amp_dtype = torch.float16  # V100-friendly
     accum_steps = int(getattr(man.cfgs, "grad_accum_steps", 1))
 
+    # Two-step refinement config
+    vlm_cfg = getattr(man.cfgs, "vlm", {}) or {}
+    refine_lambda = float(vlm_cfg.get("refine_lambda", 0.5))
+    refine_corrupt = float(vlm_cfg.get("refine_corrupt_prob", 0.3))
+    do_refine = getattr(model, "two_step_decode", False)
+
     optimizer.zero_grad(set_to_none=True)
 
     for idx, (x, len_x, labels, _texts) in enumerate(dataloader):
@@ -95,7 +101,25 @@ def train_one_epoch_lm(
         )
         with autocast_ctx:
             out = model(x, len_x, labels=labels)
-            loss = out.loss / accum_steps  # scale loss for accumulation
+            # Handle dict return from VLM with two_step_decode
+            if isinstance(out, dict):
+                loss_lm = out["lm_out"].loss
+                imu_tokens = out["imu_tokens"]
+            else:
+                loss_lm = out.loss
+                imu_tokens = None
+
+            loss = loss_lm
+
+            # Two-step refinement loss
+            if do_refine and imu_tokens is not None:
+                loss_refine = model.forward_refine(
+                    imu_tokens, labels, _texts,
+                    corrupt_prob=refine_corrupt,
+                )
+                loss = loss + refine_lambda * loss_refine
+
+            loss = loss / accum_steps  # scale loss for accumulation
 
         # Skip non-finite losses
         if not torch.isfinite(loss):
@@ -221,6 +245,10 @@ def train_one_epoch_lm_hybrid(
     The model must be a ``MultimodalLMModel`` with ``hybrid_mode=True``.
     Dataloader must yield ``(x, len_x, labels, texts, y, len_y)``
     where y/len_y are character-level targets for CTC.
+
+    If the underlying VLM has ``two_step_decode`` enabled, an additional
+    refinement loss is computed per batch and added to the total loss,
+    weighted by ``vlm.refine_lambda`` (default 0.5).
     """
     man.initialize_epoch(epoch, len(dataloader), False)
     model.train()
@@ -228,6 +256,14 @@ def train_one_epoch_lm_hybrid(
     use_amp = bool(getattr(man.cfgs, "lm_use_amp", False))
     amp_dtype = torch.float16
     accum_steps = int(getattr(man.cfgs, "grad_accum_steps", 1))
+
+    # Two-step refinement config
+    vlm_cfg = getattr(man.cfgs, "vlm", {}) or {}
+    refine_lambda = float(vlm_cfg.get("refine_lambda", 0.5))
+    refine_corrupt = float(vlm_cfg.get("refine_corrupt_prob", 0.3))
+    # Access the inner VLM model (may be wrapped in DualHeadModel)
+    inner_model = getattr(model, "model", model)
+    do_refine = getattr(inner_model, "two_step_decode", False)
 
     optimizer.zero_grad(set_to_none=True)
 
@@ -263,7 +299,19 @@ def train_one_epoch_lm_hybrid(
                 len_y,
             )
 
-            loss = (loss_lm + lambda_ctc * loss_ctc) / accum_steps
+            loss = loss_lm + lambda_ctc * loss_ctc
+
+            # Two-step refinement loss
+            loss_refine = torch.tensor(0.0, device=x.device)
+            if do_refine:
+                imu_tokens = out["imu_tokens"]
+                loss_refine = inner_model.forward_refine(
+                    imu_tokens, labels, _texts,
+                    corrupt_prob=refine_corrupt,
+                )
+                loss = loss + refine_lambda * loss_refine
+
+            loss = loss / accum_steps
 
         if not torch.isfinite(loss):
             logger.warning(
@@ -303,12 +351,18 @@ def train_one_epoch_lm_hybrid(
             optimizer.zero_grad(set_to_none=True)
             lr_scheduler.step()
 
+        iter_extras = dict(
+            loss_ar=float(loss_lm.item()),
+            loss_ctc=float(loss_ctc.item()),
+        )
+        if do_refine:
+            iter_extras["loss_refine"] = float(loss_refine.item())
+
         man.update_iteration(
             idx,
             float(loss.item() * accum_steps),
             lr_scheduler.get_last_lr()[0],
-            loss_ar=float(loss_lm.item()),
-            loss_ctc=float(loss_ctc.item()),
+            **iter_extras,
         )
 
     man.summarize_epoch()

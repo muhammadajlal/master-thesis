@@ -1,0 +1,138 @@
+# ==================================================================
+# Experiment I1: Prompt Augmentation + MLP Connector + GPT-2
+# ==================================================================
+# Tests: Multiple prompt templates sampled randomly during training.
+# Uses MLP connector (minimum viable, 986K params) to isolate the
+# effect of prompt augmentation without heavy connector overhead.
+#
+# Rationale for MLP:
+#   - 20x smaller than Q-Former (986K vs 19.3M connector params)
+#   - H1 showed MLP + CTC is the best VLM result on Stabilo (16.87%)
+#   - Connector should not dominate — prompt effect must be measurable
+#   - Direct apples-to-apples comparison with A1 (same MLP, 1 prompt)
+#
+# Hypothesis: Diverse prompts regularize the LM — forcing it to decode
+#             IMU features regardless of instruction phrasing reduces
+#             prompt-overfitting and improves cross-domain generalization.
+# ==================================================================
+
+vlm_enabled: true
+
+# ── Encoder ────────────────────────────────────────────────
+arch_en: "blconv_b"
+arch_de: "vlm"
+num_channel: 13
+len_seq: 0
+d_cnn: 512
+
+# ── VLM configuration ─────────────────────────────────────
+vlm:
+  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2"
+  local_files_only: true
+
+  # MLP connector (lightweight, 986K params — minimum viable)
+  connector_type: mlp
+  num_queries: 16
+  qformer_layers: 2
+  qformer_nhead: 8
+  qformer_dropout: 0.15
+
+  # Prompt augmentation: list of prompts sampled randomly during training
+  # Prompt at index 0 is used during evaluation (deterministic)
+  prompt_text:
+    - "Transcribe the handwritten text from IMU sensor signals:"
+    - "Read the following handwriting captured by motion sensors:"
+    - "Convert the IMU sensor recording into text:"
+    - "Recognize the handwritten word from the sensor data:"
+    - "Decode the pen motion signal into written text:"
+  num_soft_tokens: 20
+
+  # LM freezing / LoRA
+  freeze_lm: true
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_target_modules: null
+
+  # Conditioning noise
+  z_dropout: 0.2
+  label_smoothing: 0.1
+
+  # Generation
+  max_new_tokens: 64
+  num_beams: 1
+
+  # Discriminative learning rates
+  lr_connector: 0.0002
+  lr_prompt: 0.0002
+  lr_lm: 0.00001
+
+# ── Encoder freezing ───────────────────────────────────────
+freeze: false
+aug: true
+
+# ── Data / paths ───────────────────────────────────────────
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/I1_prompt_aug_mlp/vlm__onhw_wi_word_rh
+checkpoint: null
+idx_fold: 0
+
+# ── Runtime ────────────────────────────────────────────────
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+
+# ── Training schedule (match A1: 400 epochs for fair comparison) ──
+epoch: 300
+epoch_warmup: 30
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+
+# ── Label settings ─────────────────────────────────────────
+lm_max_label_len: 96
+lm_use_amp: true
+
+# ── Discriminative LR (encoder) ───────────────────────────
+lr_enc: 0.0001
+weight_decay: 0.01
+
+# ── Checkpointing ─────────────────────────────────────────
+save_best_only: true
+export_val_full: true
+test: false
+
+# ── Batch size & gradient accumulation ─────────────────────
+lr: 0.0001
+size_batch: 8
+grad_accum_steps: 8
+
+# ── Tokenizer (legacy) ────────────────────────────────────
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+# ── Gating (ignored) ──────────────────────────────────────
+use_gated_attention: false
+gating_type: elementwise
+
+# ── Concatenation (disabled) ──────────────────────────────
+concat:
+  enabled: false
+  items_min: 2
+  items_max: 6
+  max_T: 4096
+  same_writer: true
+  writer_key: "id_writer"
+  p_concat: 0.5
+  use_separator: false
+  disable_base_aug_in_concat: true
+
+# ── Labels ─────────────────────────────────────────────────
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
+
+ctc_decoder: best_path
