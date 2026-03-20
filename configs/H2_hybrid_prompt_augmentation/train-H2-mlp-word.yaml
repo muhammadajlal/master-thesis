@@ -1,0 +1,103 @@
+# ==================================================================
+# H2: Hybrid CTC+LM + Prompt Augmentation — MLP Connector + LoRA GPT-2
+# Dataset: wi_word_hw6_meta (private, word-level)
+# Extends H1 by sampling multiple instruction paraphrases during training
+# while keeping the hybrid CTC+LM objective unchanged.
+# ==================================================================
+
+vlm_enabled: true
+
+arch_en: "blconv_b"
+arch_de: "vlm"
+num_channel: 13
+len_seq: 0
+d_cnn: 512
+
+freeze: false
+checkpoint: null
+aug: true
+
+vlm:
+  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2"
+  local_files_only: true
+
+  connector_type: mlp
+  random_init_lm: false
+
+  num_queries: 16
+  qformer_layers: 2
+  qformer_nhead: 8
+  qformer_dropout: 0.15
+
+  # Prompt augmentation: list of prompts sampled randomly during training
+  # Prompt at index 0 is used during evaluation (deterministic)
+  prompt_text:
+    - "Transcribe the handwritten text from IMU sensor signals:"
+    - "Read the following handwriting captured by motion sensors:"
+    - "Convert the IMU sensor recording into text:"
+    - "Recognize the handwritten word from the sensor data:"
+    - "Decode the pen motion signal into written text:"
+  num_soft_tokens: 20
+
+  freeze_lm: true
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_target_modules: null
+
+  z_dropout: 0.2
+  label_smoothing: 0.1
+  max_new_tokens: 64
+  num_beams: 1
+
+  lr_connector: 0.0002
+  lr_prompt: 0.0002
+  lr_lm: 0.00001
+
+  # Hybrid CTC on raw encoder features
+  hybrid_ctc: true
+  hybrid_lambda_ctc: 0.6
+
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/H2_hybrid_prompt_aug/vlm__wi_word_hw6_meta
+idx_fold: 0
+
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+
+epoch: 400
+epoch_warmup: 40
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+
+lm_max_label_len: 96
+lm_use_amp: true
+
+lr_enc: 0.0001
+weight_decay: 0.01
+lr: 0.0001
+size_batch: 8
+grad_accum_steps: 8
+
+save_best_only: true
+export_val_full: false
+test: false
+
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+use_gated_attention: false
+gating_type: elementwise
+concat:
+  enabled: false
+
+ctc_decoder: best_path
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]

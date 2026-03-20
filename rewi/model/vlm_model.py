@@ -24,6 +24,8 @@ training loops work without modification.
 """
 from __future__ import annotations
 
+import random
+import string
 from typing import List, Optional, Tuple
 
 import torch
@@ -69,7 +71,12 @@ class VLMModel(nn.Module):
         qformer_layers:     Depth of the Q-Former cross-attention stack.
         qformer_nhead:      Number of attention heads in the Q-Former.
         qformer_dropout:    Dropout inside the Q-Former Transformer.
-        prompt_text:        Fixed textual instruction prompt.
+        prompt_text:        Fixed textual instruction prompt (string or list).
+        refine_prompt_text: Optional second-pass prompt template(s) used during
+                            refinement decoding. Templates may include
+                            ``{candidate}`` for the first-pass hypothesis.
+        two_step_decode:    If ``True``, run a second refinement pass during
+                            generation using ``refine_prompt_text``.
         num_soft_tokens:    Number of learned soft-prefix vectors (M).
         freeze_encoder:     If ``True``, freeze encoder weights.
         freeze_lm:          If ``True``, freeze all LM weights.
@@ -107,7 +114,9 @@ class VLMModel(nn.Module):
         qformer_layers: int = 4,
         qformer_nhead: int = 8,
         qformer_dropout: float = 0.1,
-        prompt_text: str = "Transcribe the handwritten text from IMU sensor signals:",
+        prompt_text: str | list[str] = "Transcribe the handwritten text from IMU sensor signals:",
+        refine_prompt_text: str | list[str] | None = None,
+        two_step_decode: bool = False,
         num_soft_tokens: int = 20,
         freeze_encoder: bool = False,
         freeze_lm: bool = True,
@@ -238,6 +247,18 @@ class VLMModel(nn.Module):
             tokenizer=self.tokenizer,
         )
 
+        if refine_prompt_text is None:
+            self.refine_prompt_texts: list[str] = []
+        elif isinstance(refine_prompt_text, str):
+            self.refine_prompt_texts = [refine_prompt_text] if refine_prompt_text else []
+        else:
+            self.refine_prompt_texts = [p for p in refine_prompt_text if p]
+        self.two_step_decode = bool(two_step_decode and self.refine_prompt_texts)
+        if two_step_decode and not self.refine_prompt_texts:
+            logger.warning('[VLM] two_step_decode requested but no refine_prompt_text was provided; falling back to single-pass generation')
+        elif self.two_step_decode:
+            logger.info('[VLM] Two-step refinement enabled: {} prompt template(s)', len(self.refine_prompt_texts))
+
         # ── Optional CTC auxiliary head on raw encoder features ──
         self.ctc_head: nn.Module | None = None
         if vocab_ctc is not None:
@@ -299,6 +320,83 @@ class VLMModel(nn.Module):
             return lm.get_input_embeddings()
         raise AttributeError("Cannot find input embeddings on LM")
 
+    def _build_runtime_prefix_embeds(
+        self,
+        embed_fn: nn.Module,
+        prompt_text: str,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Build ``[soft_prefix | prompt]`` for a runtime-specified prompt."""
+        parts: list[torch.Tensor] = []
+
+        if self.prompt_manager.soft_prefix is not None:
+            parts.append(self.prompt_manager.soft_prefix.to(device))
+
+        if prompt_text:
+            prompt_ids = self.tokenizer.encode(prompt_text, add_special_tokens=False)
+            if prompt_ids:
+                prompt_ids_t = torch.tensor(prompt_ids, dtype=torch.long, device=device).unsqueeze(0)
+                parts.append(embed_fn(prompt_ids_t))
+
+        if parts:
+            return torch.cat(parts, dim=1)
+        return torch.zeros(1, 0, self.d_lm, device=device)
+
+    def _decode_texts(
+        self,
+        output_ids: torch.Tensor,
+        prompt_text: str | list[str] | None = None,
+    ) -> List[str]:
+        texts = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+
+        if prompt_text is None:
+            prompt_texts = [""] * len(texts)
+        elif isinstance(prompt_text, str):
+            prompt_texts = [prompt_text] * len(texts)
+        else:
+            prompt_texts = list(prompt_text)
+            if len(prompt_texts) != len(texts):
+                raise ValueError('Prompt cleanup list must match decoded batch size')
+
+        cleaned: list[str] = []
+        for t, prompt in zip(texts, prompt_texts):
+            if prompt and t.startswith(prompt):
+                t = t[len(prompt):].lstrip()
+            cleaned.append(t)
+        return cleaned
+
+    def _generate_from_condition(
+        self,
+        cond_emb: torch.Tensor,
+        attn_mask: torch.Tensor,
+        *,
+        prompt_text: str | list[str] | None = None,
+    ) -> List[str]:
+        gen_kwargs = dict(
+            max_new_tokens=self.max_new_tokens,
+            num_beams=self.num_beams,
+            repetition_penalty=self.repetition_penalty,
+            eos_token_id=self.tokenizer.eos_token_id,
+            pad_token_id=self.tokenizer.pad_token_id,
+            do_sample=False,
+        )
+
+        if self.is_seq2seq:
+            encoder_outputs = BaseModelOutput(last_hidden_state=cond_emb)
+            output_ids = self.lm.generate(
+                encoder_outputs=encoder_outputs,
+                attention_mask=attn_mask,
+                **gen_kwargs,
+            )
+        else:
+            output_ids = self.lm.generate(
+                inputs_embeds=cond_emb,
+                attention_mask=attn_mask,
+                **gen_kwargs,
+            )
+
+        return self._decode_texts(output_ids, prompt_text=prompt_text)
+
     # ── Forward (training with teacher forcing) ──────────────
 
     def forward(
@@ -354,12 +452,15 @@ class VLMModel(nn.Module):
             )
 
         if not self.hybrid_mode:
+            if self.two_step_decode:
+                # Wrap in dict so training loop can access imu_tokens
+                return {"lm_out": lm_out, "imu_tokens": imu_tokens}
             return lm_out
 
         # Hybrid: return dict with CTC logits on raw encoder features
         T = enc_states.size(1)
         len_enc = torch.clamp(len_x // self.ratio_ds, min=1, max=T)
-        result = {"lm_out": lm_out, "enc_lengths": len_enc}
+        result = {"lm_out": lm_out, "enc_lengths": len_enc, "imu_tokens": imu_tokens}
         if self.ctc_head is not None:
             result["ctc_logits"] = self.ctc_head(enc_states)  # (B, T, vocab_ctc)
         return result
@@ -501,6 +602,160 @@ class VLMModel(nn.Module):
             )
         return out
 
+    # ── Refinement training (two-step) ────────────────────────
+
+    @staticmethod
+    def _corrupt_text(text: str, p: float = 0.3) -> str:
+        """Apply random character-level corruption to simulate first-pass errors.
+
+        With probability *p* per character, one of three mutations is applied:
+        substitution (random letter), deletion, or insertion (random letter).
+        """
+        if not text or p <= 0:
+            return text
+        chars = list(text)
+        result: list[str] = []
+        alphabet = string.ascii_letters + "äöüÄÖÜß"
+        for ch in chars:
+            if random.random() < p:
+                op = random.randint(0, 2)
+                if op == 0:  # substitute
+                    result.append(random.choice(alphabet))
+                elif op == 1:  # delete
+                    pass
+                else:  # insert random char before
+                    result.append(random.choice(alphabet))
+                    result.append(ch)
+            else:
+                result.append(ch)
+        return "".join(result) if result else text
+
+    def forward_refine(
+        self,
+        imu_tokens: torch.Tensor,
+        labels: torch.Tensor,
+        texts: List[str],
+        corrupt_prob: float = 0.3,
+    ):
+        """Second-pass refinement forward for two-step training.
+
+        Reuses pre-computed ``imu_tokens`` (no re-encoding). Builds a
+        refinement prompt per sample by injecting a (possibly corrupted)
+        candidate into ``refine_prompt_text``, then runs a standard
+        causal LM forward to produce a refinement loss.
+
+        ~50% of the time the candidate is the clean GT (model learns to
+        confirm); ~50% it is corrupted (model learns to correct).
+
+        Args:
+            imu_tokens: ``(B, K, d_lm)`` projected IMU tokens.
+            labels:     ``(B, L)`` HF token IDs with -100 padding.
+            texts:      Ground-truth strings for this batch.
+            corrupt_prob: Per-character corruption probability.
+
+        Returns:
+            Scalar refinement loss (same scale as primary LM loss).
+        """
+        if not self.two_step_decode or not self.refine_prompt_texts:
+            return torch.tensor(0.0, device=imu_tokens.device)
+
+        device = imu_tokens.device
+        B = imu_tokens.size(0)
+        embed_fn = self._get_embed_fn()
+        refine_template = self.refine_prompt_texts[0]
+
+        # Build per-sample refinement prompts
+        refine_prompts: list[str] = []
+        for text in texts:
+            if random.random() < 0.5:
+                candidate = self._corrupt_text(text, p=corrupt_prob)
+            else:
+                candidate = text
+            refine_prompts.append(refine_template.format(candidate=candidate))
+
+        # Tokenize all refinement prompts and pad to same length
+        all_prompt_ids = [
+            self.tokenizer.encode(rp, add_special_tokens=False)
+            for rp in refine_prompts
+        ]
+        max_prompt_len = max(len(ids) for ids in all_prompt_ids)
+
+        # Soft prefix (shared, same as primary pass)
+        parts_prefix: list[torch.Tensor] = []
+        if self.prompt_manager.soft_prefix is not None:
+            parts_prefix.append(
+                self.prompt_manager.soft_prefix.to(device).expand(B, -1, -1)
+            )
+        soft_len = parts_prefix[0].size(1) if parts_prefix else 0
+
+        # Build per-sample: [soft_prefix | refine_prompt_emb | imu_tokens | text_emb]
+        # We need to pad refine prompts to the same length for batching
+        padded_prompt_ids = torch.full(
+            (B, max_prompt_len), self.tokenizer.pad_token_id,
+            dtype=torch.long, device=device,
+        )
+        prompt_mask = torch.zeros(B, max_prompt_len, dtype=torch.long, device=device)
+        for i, ids in enumerate(all_prompt_ids):
+            padded_prompt_ids[i, :len(ids)] = torch.tensor(ids, dtype=torch.long, device=device)
+            prompt_mask[i, :len(ids)] = 1
+
+        prompt_emb = embed_fn(padded_prompt_ids)  # (B, max_prompt_len, d_lm)
+
+        # Text embeddings (teacher forcing, same as primary)
+        text_ids = labels.clone()
+        text_ids[text_ids == -100] = self.tokenizer.pad_token_id
+        text_emb = embed_fn(text_ids.to(device))  # (B, L, d_lm)
+
+        # Concatenate: [soft_prefix | refine_prompt | imu_tokens | text]
+        input_parts = []
+        if parts_prefix:
+            input_parts.append(parts_prefix[0])
+        input_parts.extend([prompt_emb, imu_tokens, text_emb])
+        input_emb = torch.cat(input_parts, dim=1)
+
+        prefix_len = soft_len + max_prompt_len
+        imu_len = imu_tokens.size(1)
+        N = input_emb.size(1)
+
+        # Attention mask: attend to soft prefix, valid prompt tokens, imu, valid text
+        attn_mask = torch.ones(B, N, device=device, dtype=torch.long)
+        # Mask padding in refine prompt region
+        attn_mask[:, soft_len : soft_len + max_prompt_len] = prompt_mask
+        # Mask padding in text region
+        text_pad_mask = (labels == -100)
+        attn_mask[:, prefix_len + imu_len :] = (~text_pad_mask).long().to(device)
+
+        # Labels: -100 for prefix+imu, real for text
+        ignore_prefix = torch.full(
+            (B, prefix_len + imu_len), -100, dtype=torch.long, device=device,
+        )
+        full_labels = torch.cat([ignore_prefix, labels.to(device)], dim=1)
+
+        # Forward through LM
+        if self.label_smoothing > 0:
+            out = self.lm(
+                inputs_embeds=input_emb,
+                attention_mask=attn_mask,
+                labels=None,
+            )
+            shift_logits = out.logits[..., :-1, :].contiguous()
+            shift_labels = full_labels[..., 1:].contiguous()
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                ignore_index=-100,
+                label_smoothing=self.label_smoothing,
+            )
+        else:
+            out = self.lm(
+                inputs_embeds=input_emb,
+                attention_mask=attn_mask,
+                labels=full_labels,
+            )
+            loss = out.loss
+
+        return loss
+
     # ── Generate (inference) ──────────────────────────────────
 
     @torch.no_grad()
@@ -509,15 +764,10 @@ class VLMModel(nn.Module):
 
         Conditioning: ``[soft_prefix | prompt | imu_tokens]``.
 
-        For decoder-only LMs, conditioning is passed as ``inputs_embeds``.
-        For encoder-decoder LMs, conditioning is wrapped as ``encoder_outputs``.
-
-        Args:
-            x:     ``(B, C, T_raw)`` IMU input.
-            len_x: ``(B,)`` raw lengths.
-
-        Returns:
-            ``list[str]``: Decoded text predictions (one per sample).
+        If ``two_step_decode`` is enabled, generation runs in two stages:
+        1. Standard transcription with ``prompt_text``.
+        2. Per-sample refinement using ``refine_prompt_text`` templates that
+           can reference the first-pass candidate via ``{candidate}``.
         """
         device = x.device
         B = x.size(0)
@@ -526,50 +776,38 @@ class VLMModel(nn.Module):
         enc_states, enc_mask = self._encode(x, len_x)
         imu_tokens = self.connector(enc_states, enc_mask)  # (B, ?, d_lm)
 
-        # 2) Prefix
+        # 2) First-pass decode with the configured prompt manager
         embed_fn = self._get_embed_fn()
         prefix_emb = self.prompt_manager.get_prefix_embeds(
             embed_fn, B, device
         )  # (B, M+P, d_lm)
-
-        # 3) Conditioning: [prefix | imu]
-        cond_emb = torch.cat([prefix_emb, imu_tokens], dim=1)  # (B, M+P+K, d_lm)
-        cond_len = cond_emb.size(1)
-        attn_mask = torch.ones(B, cond_len, device=device, dtype=torch.long)
-
-        # 4) Generate
-        gen_kwargs = dict(
-            max_new_tokens=self.max_new_tokens,
-            num_beams=self.num_beams,
-            repetition_penalty=self.repetition_penalty,
-            eos_token_id=self.tokenizer.eos_token_id,
-            pad_token_id=self.tokenizer.pad_token_id,
-            do_sample=False,
+        cond_emb = torch.cat([prefix_emb, imu_tokens], dim=1)
+        attn_mask = torch.ones(B, cond_emb.size(1), device=device, dtype=torch.long)
+        first_pass = self._generate_from_condition(
+            cond_emb,
+            attn_mask,
+            prompt_text=self.prompt_manager.prompt_text,
         )
 
-        if self.is_seq2seq:
-            encoder_outputs = BaseModelOutput(last_hidden_state=cond_emb)
-            output_ids = self.lm.generate(
-                encoder_outputs=encoder_outputs,
-                attention_mask=attn_mask,
-                **gen_kwargs,
+        if not self.two_step_decode:
+            return first_pass
+
+        refine_template = self.refine_prompt_texts[0]
+        refined: list[str] = []
+        for i, candidate in enumerate(first_pass):
+            refine_prompt = refine_template.format(candidate=candidate)
+            refine_prefix = self._build_runtime_prefix_embeds(
+                embed_fn,
+                refine_prompt,
+                device,
             )
-        else:
-            output_ids = self.lm.generate(
-                inputs_embeds=cond_emb,
-                attention_mask=attn_mask,
-                **gen_kwargs,
-            )
+            cond_i = torch.cat([refine_prefix, imu_tokens[i : i + 1]], dim=1)
+            mask_i = torch.ones(1, cond_i.size(1), device=device, dtype=torch.long)
+            refined_text = self._generate_from_condition(
+                cond_i,
+                mask_i,
+                prompt_text=refine_prompt,
+            )[0].strip()
+            refined.append(refined_text or candidate)
 
-        # 5) Decode — skip special tokens
-        texts = self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-
-        # Strip leading prompt text if echoed (safety measure, causal LMs only)
-        prompt_text = self.prompt_manager.prompt_text
-        cleaned: list[str] = []
-        for t in texts:
-            if prompt_text and t.startswith(prompt_text):
-                t = t[len(prompt_text) :].lstrip()
-            cleaned.append(t)
-
-        return cleaned
+        return refined

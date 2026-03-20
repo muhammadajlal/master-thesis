@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J F2-enc-transfer
+#SBATCH -J ckpt-transfer
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
 #SBATCH -p v100
