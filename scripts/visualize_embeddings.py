@@ -43,6 +43,7 @@ sys.path.insert(0, str(PROJ))
 
 from rewi.dataset import HRDataset
 from rewi.dataset.lm_collate import vlm_collate
+from rewi.dataset.utils import fn_collate
 from rewi.model import build_encoder
 from rewi.model.vlm_model import VLMModel
 from torch.utils.data import DataLoader
@@ -82,8 +83,8 @@ class EmbeddingCollector:
         self._handles.append(h2)
 
     def _connector_hook(self, module, inp, out):
-        # out: (B, K, d_lm) — IMU tokens
-        self.connector_out.append(out.detach().cpu())
+        # out: (B, K, d_lm) — IMU tokens; mean-pool over K
+        self.connector_out.append(out.detach().cpu().mean(dim=1))  # (B, d_lm)
 
     def _decoder_hook(self, module, inp, out):
         # GPT-2 layer output: tuple of (hidden_states, ...)
@@ -91,7 +92,8 @@ class EmbeddingCollector:
             hidden = out[0]
         else:
             hidden = out
-        self.decoder_out.append(hidden.detach().cpu())
+        # Mean-pool over variable seq_len to get (B, d_lm)
+        self.decoder_out.append(hidden.detach().cpu().mean(dim=1))
 
     def remove(self):
         for h in self._handles:
@@ -155,20 +157,20 @@ def load_vlm_from_checkpoint(config_path: str, ckpt_path: str, device: str = "cp
 
 # ── Data loading ───────────────────────────────────────────
 
-def load_dataset(config_path: str, fold: int = 0, split: str = "test"):
+def load_dataset(config_path: str, fold: int = 0):
     """Load dataset from config."""
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
     dir_dataset = cfg["dir_dataset"]
     categories = cfg["categories"]
+    path_anno = os.path.join(dir_dataset, "val.json")
 
     ds = HRDataset(
-        dir_dataset,
-        fold=fold,
-        split=split,
-        in_chan=cfg["num_channel"],
+        path_anno=path_anno,
         categories=categories,
+        ratio_ds=cfg.get("ratio_ds", 4),
+        idx_fold=fold,
         cache=False,
         aug=False,
     )
@@ -206,10 +208,11 @@ def extract_embeddings(
         if n_collected >= max_samples:
             break
 
-        x = batch["x"].to(device)
-        len_x = batch["len_x"].to(device)
-        lm_labels = batch["lm_labels"].to(device)
-        texts = batch.get("texts", [])
+        # vlm_collate returns (x, len_x, labels, texts)
+        x, len_x, lm_labels, texts = batch[0], batch[1], batch[2], batch[3]
+        x = x.to(device)
+        len_x = len_x.to(device)
+        lm_labels = lm_labels.to(device)
 
         # Forward pass to trigger hooks
         _ = model(x, len_x, lm_labels, texts=texts)
@@ -234,19 +237,15 @@ def extract_embeddings(
 
     collector.remove()
 
-    # Aggregate
-    connector_embs = torch.cat(collector.connector_out, dim=0)[:max_samples]
-    decoder_embs = torch.cat(collector.decoder_out, dim=0)[:max_samples]
-    text_anchors = torch.cat(text_anchor_list, dim=0)[:max_samples]
-
-    # Mean-pool connector and decoder over sequence dim: (N, K, d) → (N, d)
-    connector_pooled = connector_embs.mean(dim=1).numpy()
-    decoder_pooled = decoder_embs.mean(dim=1).numpy()
+    # Aggregate — already mean-pooled to (B, d_lm) per batch
+    connector_pooled = torch.cat(collector.connector_out, dim=0)[:max_samples].numpy()
+    decoder_pooled = torch.cat(collector.decoder_out, dim=0)[:max_samples].numpy()
+    text_anchors = torch.cat(text_anchor_list, dim=0)[:max_samples].numpy()
 
     return {
         "connector": connector_pooled,
         "decoder": decoder_pooled,
-        "text_anchor": text_anchors.numpy(),
+        "text_anchor": text_anchors,
         "labels": labels_all[:max_samples],
     }
 
@@ -462,12 +461,50 @@ def plot_modality_alignment_both_datasets(
 
 # ── Main ───────────────────────────────────────────────────
 
+def _load_and_extract(config_path, ckpt_path, fold, batch_size, device, max_samples, label):
+    """Load model + dataset and extract embeddings. Returns None on failure."""
+    try:
+        logger.info("Loading {} model from {}...", label, ckpt_path)
+        model = load_vlm_from_checkpoint(config_path, ckpt_path, device)
+
+        logger.info("Loading {} dataset (fold {})...", label, fold)
+        ds, _ = load_dataset(config_path, fold=fold)
+
+        with open(config_path) as _f:
+            _cfg = yaml.safe_load(_f)
+        categories = _cfg["categories"]
+        hf_tok = model.tokenizer
+        pad_id = 0  # CTC blank / PAD
+        collate_fn = lambda batch: vlm_collate(
+            batch,
+            base_collate_fn=fn_collate,
+            hf_tokenizer=hf_tok,
+            categories=categories,
+            pad_id=pad_id,
+            max_label_len=int(_cfg.get("lm_max_label_len", 96)),
+        )
+        dl = DataLoader(ds, batch_size=batch_size, shuffle=False, collate_fn=collate_fn, num_workers=4)
+
+        logger.info("Extracting {} embeddings...", label)
+        embs = extract_embeddings(model, dl, device, max_samples)
+
+        # Free GPU memory
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return embs
+    except Exception as e:
+        logger.error("Failed to load/extract {}: {}", label, e)
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Visualize VLM embedding spaces")
-    parser.add_argument("--ckpt_onhw", required=True, help="VLM checkpoint for OnHW dataset")
-    parser.add_argument("--ckpt_hw6", required=True, help="VLM checkpoint for HW6 dataset")
-    parser.add_argument("--config_onhw", required=True, help="Config YAML for OnHW")
-    parser.add_argument("--config_hw6", required=True, help="Config YAML for HW6")
+    parser.add_argument("--ckpt_onhw", default=None, help="VLM checkpoint for OnHW dataset")
+    parser.add_argument("--ckpt_hw6", default=None, help="VLM checkpoint for HW6 dataset")
+    parser.add_argument("--config_onhw", default=None, help="Config YAML for OnHW")
+    parser.add_argument("--config_hw6", default=None, help="Config YAML for HW6")
     parser.add_argument("--out_dir", default="analysis/embedding_viz", help="Output directory")
     parser.add_argument("--method", default="pca", choices=["pca", "umap"], help="Reduction method")
     parser.add_argument("--max_samples", type=int, default=500, help="Max samples per dataset")
@@ -476,97 +513,101 @@ def main():
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
+    has_onhw = args.ckpt_onhw and args.config_onhw
+    has_hw6 = args.ckpt_hw6 and args.config_hw6
+
+    if not has_onhw and not has_hw6:
+        logger.error("Provide at least one of --ckpt_onhw/--config_onhw or --ckpt_hw6/--config_hw6")
+        sys.exit(1)
+
     out_dir = Path(args.out_dir)
-
-    # Load models
-    logger.info("Loading OnHW model...")
-    model_onhw = load_vlm_from_checkpoint(args.config_onhw, args.ckpt_onhw, args.device)
-
-    logger.info("Loading HW6 model...")
-    model_hw6 = load_vlm_from_checkpoint(args.config_hw6, args.ckpt_hw6, args.device)
-
-    # Load datasets
-    logger.info("Loading OnHW dataset (fold {})...", args.fold)
-    ds_onhw, cats_onhw = load_dataset(args.config_onhw, fold=args.fold, split="test")
-
-    logger.info("Loading HW6 dataset (fold {})...", args.fold)
-    ds_hw6, cats_hw6 = load_dataset(args.config_hw6, fold=args.fold, split="test")
-
-    tokenizer = model_onhw.tokenizer
-    collate_fn = lambda batch: vlm_collate(batch, tokenizer, max_label_len=96)
-
-    dl_onhw = DataLoader(ds_onhw, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, num_workers=4)
-    dl_hw6 = DataLoader(ds_hw6, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, num_workers=4)
-
-    # Extract embeddings
-    logger.info("Extracting OnHW embeddings...")
-    embs_onhw = extract_embeddings(model_onhw, dl_onhw, args.device, args.max_samples)
-
-    logger.info("Extracting HW6 embeddings...")
-    embs_hw6 = extract_embeddings(model_hw6, dl_hw6, args.device, args.max_samples)
-
-    # Save raw embeddings
-    np.savez(
-        str(out_dir / f"embeddings_fold{args.fold}.npz"),
-        connector_onhw=embs_onhw["connector"],
-        connector_hw6=embs_hw6["connector"],
-        decoder_onhw=embs_onhw["decoder"],
-        decoder_hw6=embs_hw6["decoder"],
-        text_anchor_onhw=embs_onhw["text_anchor"],
-        text_anchor_hw6=embs_hw6["text_anchor"],
-        labels_onhw=embs_onhw["labels"],
-        labels_hw6=embs_hw6["labels"],
-    )
-    logger.info("Saved raw embeddings to {}", out_dir / f"embeddings_fold{args.fold}.npz")
-
     m = args.method
     f = args.fold
 
-    # ── V1: Connector output — dataset comparison ──────────
-    plot_dataset_comparison(
-        embs_onhw["connector"],
-        embs_hw6["connector"],
-        method=m,
-        title=f"V1: Connector Output ({m.upper()}) — Fold {f}",
-        out_path=str(out_dir / f"V1_connector_{m}_fold{f}.png"),
-    )
+    embs_onhw = None
+    embs_hw6 = None
 
-    # ── V2: Decoder hidden state — dataset comparison ──────
-    plot_dataset_comparison(
-        embs_onhw["decoder"],
-        embs_hw6["decoder"],
-        method=m,
-        title=f"V2: Decoder Last Hidden State ({m.upper()}) — Fold {f}",
-        out_path=str(out_dir / f"V2_decoder_{m}_fold{f}.png"),
-    )
+    if has_onhw:
+        embs_onhw = _load_and_extract(
+            args.config_onhw, args.ckpt_onhw, args.fold,
+            args.batch_size, args.device, args.max_samples, "OnHW",
+        )
+
+    if has_hw6:
+        embs_hw6 = _load_and_extract(
+            args.config_hw6, args.ckpt_hw6, args.fold,
+            args.batch_size, args.device, args.max_samples, "HW6",
+        )
+
+    # Save raw embeddings
+    save_dict = {}
+    if embs_onhw:
+        save_dict.update(
+            connector_onhw=embs_onhw["connector"],
+            decoder_onhw=embs_onhw["decoder"],
+            text_anchor_onhw=embs_onhw["text_anchor"],
+            labels_onhw=embs_onhw["labels"],
+        )
+    if embs_hw6:
+        save_dict.update(
+            connector_hw6=embs_hw6["connector"],
+            decoder_hw6=embs_hw6["decoder"],
+            text_anchor_hw6=embs_hw6["text_anchor"],
+            labels_hw6=embs_hw6["labels"],
+        )
+    if save_dict:
+        os.makedirs(str(out_dir), exist_ok=True)
+        np.savez(str(out_dir / f"embeddings_fold{f}.npz"), **save_dict)
+        logger.info("Saved raw embeddings to {}", out_dir / f"embeddings_fold{f}.npz")
+
+    # ── V1/V2: Dataset comparison (requires both) ──────────
+    if embs_onhw and embs_hw6:
+        plot_dataset_comparison(
+            embs_onhw["connector"],
+            embs_hw6["connector"],
+            method=m,
+            title=f"V1: Connector Output ({m.upper()}) — Fold {f}",
+            out_path=str(out_dir / f"V1_connector_{m}_fold{f}.png"),
+        )
+
+        plot_dataset_comparison(
+            embs_onhw["decoder"],
+            embs_hw6["decoder"],
+            method=m,
+            title=f"V2: Decoder Last Hidden State ({m.upper()}) — Fold {f}",
+            out_path=str(out_dir / f"V2_decoder_{m}_fold{f}.png"),
+        )
 
     # ── V3: Modality alignment — per dataset ───────────────
-    plot_modality_alignment(
-        embs_onhw["connector"],
-        embs_onhw["text_anchor"],
-        method=m,
-        title=f"V3a: Modality Gap — OnHW ({m.upper()}) — Fold {f}",
-        out_path=str(out_dir / f"V3a_modality_onhw_{m}_fold{f}.png"),
-        dataset_label="OnHW",
-    )
+    if embs_onhw:
+        plot_modality_alignment(
+            embs_onhw["connector"],
+            embs_onhw["text_anchor"],
+            method=m,
+            title=f"V3a: Modality Gap — OnHW ({m.upper()}) — Fold {f}",
+            out_path=str(out_dir / f"V3a_modality_onhw_{m}_fold{f}.png"),
+            dataset_label="OnHW",
+        )
 
-    plot_modality_alignment(
-        embs_hw6["connector"],
-        embs_hw6["text_anchor"],
-        method=m,
-        title=f"V3b: Modality Gap — HW6 ({m.upper()}) — Fold {f}",
-        out_path=str(out_dir / f"V3b_modality_hw6_{m}_fold{f}.png"),
-        dataset_label="HW6",
-    )
+    if embs_hw6:
+        plot_modality_alignment(
+            embs_hw6["connector"],
+            embs_hw6["text_anchor"],
+            method=m,
+            title=f"V3b: Modality Gap — HW6 ({m.upper()}) — Fold {f}",
+            out_path=str(out_dir / f"V3b_modality_hw6_{m}_fold{f}.png"),
+            dataset_label="HW6",
+        )
 
     # ── V3c: Modality alignment — both datasets combined ───
-    plot_modality_alignment_both_datasets(
-        embs_onhw["connector"], embs_onhw["text_anchor"],
-        embs_hw6["connector"], embs_hw6["text_anchor"],
-        method=m,
-        title=f"V3c: Modality Gap — Both Datasets ({m.upper()}) — Fold {f}",
-        out_path=str(out_dir / f"V3c_modality_both_{m}_fold{f}.png"),
-    )
+    if embs_onhw and embs_hw6:
+        plot_modality_alignment_both_datasets(
+            embs_onhw["connector"], embs_onhw["text_anchor"],
+            embs_hw6["connector"], embs_hw6["text_anchor"],
+            method=m,
+            title=f"V3c: Modality Gap — Both Datasets ({m.upper()}) — Fold {f}",
+            out_path=str(out_dir / f"V3c_modality_both_{m}_fold{f}.png"),
+        )
 
     logger.info("Done! All plots saved to {}", out_dir)
 
