@@ -463,6 +463,16 @@ class VLMModel(nn.Module):
         result = {"lm_out": lm_out, "enc_lengths": len_enc, "imu_tokens": imu_tokens}
         if self.ctc_head is not None:
             result["ctc_logits"] = self.ctc_head(enc_states)  # (B, T, vocab_ctc)
+
+        # Expose text embeddings for contrastive alignment loss
+        if getattr(self, "_return_text_emb", False):
+            text_ids = labels.clone()
+            text_ids[text_ids == -100] = self.tokenizer.pad_token_id
+            with torch.no_grad():
+                text_emb = embed_fn(text_ids.to(device))  # (B, L, d_lm)
+            result["text_emb"] = text_emb
+            result["labels_mask"] = (labels != -100)  # (B, L) True = real token
+
         return result
 
     # ── Forward: decoder-only (causal) ──────────────────────

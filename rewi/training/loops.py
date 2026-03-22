@@ -265,6 +265,20 @@ def train_one_epoch_lm_hybrid(
     inner_model = getattr(model, "model", model)
     do_refine = getattr(inner_model, "two_step_decode", False)
 
+    # Contrastive alignment loss (BC-style from ECHWR)
+    lambda_contrast = float(vlm_cfg.get("lambda_contrast", 0.0))
+    do_contrast = lambda_contrast > 0
+    contrast_loss_fn = None
+    if do_contrast:
+        from rewi.training.contrastive import InBatchContrastiveLoss
+        init_temp = float(vlm_cfg.get("contrast_temperature", 0.07))
+        contrast_loss_fn = InBatchContrastiveLoss(init_temperature=init_temp).to(man.cfgs.device)
+        # Enable text embedding return from VLM
+        inner_model._return_text_emb = True
+        # Add temperature parameter to optimizer
+        optimizer.add_param_group({"params": contrast_loss_fn.parameters(), "lr": optimizer.defaults["lr"]})
+        logger.info("[Contrastive] Enabled: lambda={}, temp_init={}", lambda_contrast, init_temp)
+
     optimizer.zero_grad(set_to_none=True)
 
     for idx, (x, len_x, labels, _texts, y, len_y) in enumerate(dataloader):
@@ -300,6 +314,17 @@ def train_one_epoch_lm_hybrid(
             )
 
             loss = loss_lm + lambda_ctc * loss_ctc
+
+            # Contrastive alignment loss
+            loss_contrast = torch.tensor(0.0, device=x.device)
+            if do_contrast and contrast_loss_fn is not None:
+                loss_contrast = contrast_loss_fn(
+                    out["imu_tokens"],
+                    out["text_emb"],
+                    labels_mask=out["labels_mask"],
+                    texts=_texts,
+                )
+                loss = loss + lambda_contrast * loss_contrast
 
             # Two-step refinement loss
             loss_refine = torch.tensor(0.0, device=x.device)
@@ -357,6 +382,8 @@ def train_one_epoch_lm_hybrid(
         )
         if do_refine:
             iter_extras["loss_refine"] = float(loss_refine.item())
+        if do_contrast:
+            iter_extras["loss_contrast"] = float(loss_contrast.item())
 
         man.update_iteration(
             idx,
