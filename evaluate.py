@@ -283,11 +283,15 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
         vlm_cfg = cfgs.get('vlm', {}) or {}
         lm_name = str(vlm_cfg.get('lm_name', 'gpt2'))
 
+        categories = cfgs.get('categories', None)
+        vocab_ctc = int(len(categories)) if (categories and bool(vlm_cfg.get('hybrid_ctc', False))) else None
+
         model = VLMModel(
             encoder=encoder,
             ratio_ds=ratio_ds,
             d_cnn=d_cnn,
             lm_name_or_path=lm_name,
+            connector_type=str(vlm_cfg.get('connector_type', 'qformer')),
             num_queries=int(vlm_cfg.get('num_queries', 32)),
             qformer_layers=int(vlm_cfg.get('qformer_layers', 4)),
             qformer_nhead=int(vlm_cfg.get('qformer_nhead', 8)),
@@ -305,9 +309,12 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
             lora_target_modules=vlm_cfg.get('lora_target_modules', None),
             max_new_tokens=int(vlm_cfg.get('max_new_tokens', 64)),
             num_beams=int(vlm_cfg.get('num_beams', 1)),
+            repetition_penalty=float(vlm_cfg.get('repetition_penalty', 1.0)),
             local_files_only=bool(vlm_cfg.get('local_files_only', True)),
             z_dropout=float(vlm_cfg.get('z_dropout', 0.1)),
             label_smoothing=float(vlm_cfg.get('label_smoothing', 0.0)),
+            vocab_ctc=vocab_ctc,
+            categories=categories,
         ).eval()
 
         # Dummy inputs for profiling (word vs sentence length heuristic)

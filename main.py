@@ -150,6 +150,7 @@ def build_model(cfgs: argparse.Namespace, manager: RunManager):
             z_dropout=float(vlm_cfg.get("z_dropout", 0.1)),
             label_smoothing=float(vlm_cfg.get("label_smoothing", 0.0)),
             vocab_ctc=int(len(cfgs.categories)) if bool(vlm_cfg.get("hybrid_ctc", False)) else None,
+            categories=getattr(cfgs, "categories", None),
         ).to(cfgs.device)
 
         # Attach ratio_ds for dataloader compatibility
