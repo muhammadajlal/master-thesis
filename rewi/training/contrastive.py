@@ -25,8 +25,9 @@ class InBatchContrastiveLoss(nn.Module):
 
     def __init__(self, init_temperature: float = 0.07):
         super().__init__()
-        # Learnable log-temperature (τ = exp(log_tau))
-        self.log_tau = nn.Parameter(torch.tensor(init_temperature).log())
+        # Learnable log-scale: τ = 1/temperature (CLIP convention)
+        # init_temperature=0.07 → τ=14.29 → log_tau=2.66
+        self.log_tau = nn.Parameter(torch.tensor(1.0 / init_temperature).log())
 
     @property
     def tau(self) -> float:

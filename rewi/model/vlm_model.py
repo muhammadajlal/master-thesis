@@ -44,6 +44,43 @@ from rewi.model.projectors import build_connector
 from rewi.model.prompt import PromptManager
 
 
+def _build_ctc_to_lm_mapping(
+    vocab_ctc: int,
+    tokenizer,
+    categories: list[str] | None = None,
+) -> torch.Tensor:
+    """Build a mapping from CTC vocabulary indices to LM token IDs.
+
+    CTC vocab: [blank=0, char1=1, char2=2, ...]
+    For each CTC class, find the corresponding LM token ID by encoding
+    the single character. Blank maps to pad/eos token.
+
+    Args:
+        vocab_ctc: Number of CTC vocabulary classes.
+        tokenizer: HuggingFace tokenizer.
+        categories: CTC category list from config (index 0 = blank = "").
+    """
+    ctc_to_lm = torch.zeros(vocab_ctc, dtype=torch.long)
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = tokenizer.eos_token_id or 0
+
+    if categories is None:
+        logger.warning("[CTC→LM] No categories provided, mapping all to pad_id={}", pad_id)
+        ctc_to_lm[:] = pad_id
+        return ctc_to_lm
+
+    for idx in range(min(vocab_ctc, len(categories))):
+        char = categories[idx]
+        if not char:  # blank
+            ctc_to_lm[idx] = pad_id
+        else:
+            ids = tokenizer.encode(char, add_special_tokens=False)
+            ctc_to_lm[idx] = ids[0] if ids else pad_id
+
+    return ctc_to_lm
+
+
 class VLMModel(nn.Module):
     """IMU Encoder → Q-Former → [soft prefix | prompt | IMU tokens] → LM.
 
@@ -133,6 +170,7 @@ class VLMModel(nn.Module):
         z_dropout: float = 0.1,
         label_smoothing: float = 0.0,
         vocab_ctc: int | None = None,
+        categories: list[str] | None = None,
     ):
         super().__init__()
         self.ratio_ds = int(max(1, ratio_ds))
@@ -238,6 +276,14 @@ class VLMModel(nn.Module):
             connector_type,
             sum(p.numel() for p in self.connector.parameters()),
         )
+
+        # ── CTC posterior connector: set up CTC→LM token mapping ──
+        if self.connector_type in ("ctc_posterior", "lego") and vocab_ctc is not None:
+            from rewi.model.projectors import CTCPosteriorProjector
+            if isinstance(self.connector, CTCPosteriorProjector):
+                ctc_to_lm = _build_ctc_to_lm_mapping(vocab_ctc, self.tokenizer, categories)
+                self.connector.set_ctc_to_lm_mapping(ctc_to_lm)
+                logger.info("[VLM] CTC posterior connector: mapped {} CTC classes to LM tokens", vocab_ctc)
 
         # ── Prompt manager ──────────────────────────────────────
         self.prompt_manager = PromptManager(
@@ -433,7 +479,18 @@ class VLMModel(nn.Module):
         enc_states, enc_mask = self._encode(x, len_x)  # (B, T, d_cnn), (B, T)
 
         # 2) Connector: compress / project encoder features
-        imu_tokens = self.connector(enc_states, enc_mask)  # (B, K, d_lm)
+        # For CTC posterior connector, pass CTC logits and LM embeddings
+        if self.connector_type in ("ctc_posterior", "lego") and self.ctc_head is not None:
+            ctc_logits_for_connector = self.ctc_head(enc_states)
+            embed_fn_early = self._get_embed_fn()
+            lm_embed_weight = embed_fn_early.weight  # (V_lm, d_lm)
+            imu_tokens = self.connector(
+                enc_states, enc_mask,
+                ctc_logits=ctc_logits_for_connector,
+                lm_embed_weight=lm_embed_weight,
+            )
+        else:
+            imu_tokens = self.connector(enc_states, enc_mask)  # (B, K, d_lm)
         imu_tokens = self.z_drop(imu_tokens)
 
         # 3) Prefix embeddings (soft prefix + fixed text prompt)
@@ -460,7 +517,8 @@ class VLMModel(nn.Module):
         # Hybrid: return dict with CTC logits on raw encoder features
         T = enc_states.size(1)
         len_enc = torch.clamp(len_x // self.ratio_ds, min=1, max=T)
-        result = {"lm_out": lm_out, "enc_lengths": len_enc, "imu_tokens": imu_tokens}
+        result = {"lm_out": lm_out, "enc_lengths": len_enc, "imu_tokens": imu_tokens,
+                  "enc_states": enc_states}
         if self.ctc_head is not None:
             result["ctc_logits"] = self.ctc_head(enc_states)  # (B, T, vocab_ctc)
 
@@ -784,7 +842,19 @@ class VLMModel(nn.Module):
 
         # 1) Encode + project
         enc_states, enc_mask = self._encode(x, len_x)
-        imu_tokens = self.connector(enc_states, enc_mask)  # (B, ?, d_lm)
+
+        # For CTC posterior connector, pass CTC logits and LM embeddings
+        if self.connector_type in ("ctc_posterior", "lego") and self.ctc_head is not None:
+            ctc_logits_gen = self.ctc_head(enc_states)
+            embed_fn_gen = self._get_embed_fn()
+            lm_embed_weight_gen = embed_fn_gen.weight
+            imu_tokens = self.connector(
+                enc_states, enc_mask,
+                ctc_logits=ctc_logits_gen,
+                lm_embed_weight=lm_embed_weight_gen,
+            )
+        else:
+            imu_tokens = self.connector(enc_states, enc_mask)  # (B, ?, d_lm)
 
         # 2) First-pass decode with the configured prompt manager
         embed_fn = self._get_embed_fn()

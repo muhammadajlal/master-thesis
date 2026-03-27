@@ -279,6 +279,52 @@ def train_one_epoch_lm_hybrid(
         optimizer.add_param_group({"params": contrast_loss_fn.parameters(), "lr": optimizer.defaults["lr"]})
         logger.info("[Contrastive] Enabled: lambda={}, temp_init={}", lambda_contrast, init_temp)
 
+    # K1: CTC Compression + Per-Token MSE Distillation
+    lambda_embed_mse = float(vlm_cfg.get("lambda_embed_mse", 0.0))
+    do_embed_mse = lambda_embed_mse > 0
+    embed_mse_fn = None
+    if do_embed_mse:
+        from rewi.training.auxiliary_losses import CTCCompressMSELoss
+        d_enc = int(getattr(man.cfgs, "d_cnn", 512))
+        d_lm = inner_model.d_lm if hasattr(inner_model, "d_lm") else 768
+        embed_mse_fn = CTCCompressMSELoss(d_enc, d_lm).to(man.cfgs.device)
+        inner_model._return_text_emb = True
+        optimizer.add_param_group({"params": embed_mse_fn.parameters(), "lr": optimizer.defaults["lr"]})
+        logger.info("[K1 Embed MSE] Enabled: lambda={}", lambda_embed_mse)
+
+    # K3: ECHWR Error-Based Contrastive (EC) Loss
+    lambda_ec = float(vlm_cfg.get("lambda_ec", 0.0))
+    do_ec = lambda_ec > 0
+    ec_loss_fn = None
+    ec_char_to_id = None
+    if do_ec:
+        from rewi.training.auxiliary_losses import ECContrastiveLoss
+        categories = getattr(man.cfgs, "categories", [])
+        ec_char_to_id = {c: i for i, c in enumerate(categories)}
+        vocab_size = len(categories)
+        d_lm = inner_model.d_lm if hasattr(inner_model, "d_lm") else 768
+        n_neg = int(vlm_cfg.get("ec_n_negatives", 4))
+        ec_loss_fn = ECContrastiveLoss(
+            vocab_size=vocab_size, d_lm=d_lm, n_negatives=n_neg,
+        ).to(man.cfgs.device)
+        optimizer.add_param_group({"params": ec_loss_fn.parameters(), "lr": optimizer.defaults["lr"]})
+        logger.info("[K3 EC Loss] Enabled: lambda={}, n_neg={}, vocab={}", lambda_ec, n_neg, vocab_size)
+
+    # K4: SEA Token-Level Contrastive Loss
+    lambda_sea = float(vlm_cfg.get("lambda_sea", 0.0))
+    do_sea = lambda_sea > 0
+    sea_loss_fn = None
+    if do_sea:
+        from rewi.training.auxiliary_losses import SEATokenContrastiveLoss
+        sea_loss_fn = SEATokenContrastiveLoss(temperature=0.07).to(man.cfgs.device)
+        inner_model._return_text_emb = True
+        optimizer.add_param_group({"params": sea_loss_fn.parameters(), "lr": optimizer.defaults["lr"]})
+        logger.info("[K4 SEA] Enabled: lambda={}", lambda_sea)
+
+    # Enable text embedding return if any loss needs it
+    if do_embed_mse or do_sea:
+        inner_model._return_text_emb = True
+
     optimizer.zero_grad(set_to_none=True)
 
     for idx, (x, len_x, labels, _texts, y, len_y) in enumerate(dataloader):
@@ -325,6 +371,39 @@ def train_one_epoch_lm_hybrid(
                     texts=_texts,
                 )
                 loss = loss + lambda_contrast * loss_contrast
+
+            # K1: CTC Compression + Per-Token MSE
+            loss_embed_mse = torch.tensor(0.0, device=x.device)
+            if do_embed_mse and embed_mse_fn is not None:
+                loss_embed_mse = embed_mse_fn(
+                    out["enc_states"],
+                    ctc_logits,
+                    out["text_emb"],
+                    out["labels_mask"],
+                )
+                loss = loss + lambda_embed_mse * loss_embed_mse
+
+            # K3: ECHWR EC Loss
+            loss_ec = torch.tensor(0.0, device=x.device)
+            if do_ec and ec_loss_fn is not None:
+                loss_ec = ec_loss_fn(
+                    out["imu_tokens"],
+                    _texts,
+                    ec_char_to_id,
+                )
+                loss = loss + lambda_ec * loss_ec
+
+            # K4: SEA Token-Level Contrastive
+            loss_sea = torch.tensor(0.0, device=x.device)
+            if do_sea and sea_loss_fn is not None:
+                loss_sea = sea_loss_fn(
+                    out["imu_tokens"],
+                    ctc_logits.new_zeros(1),  # enc_states placeholder
+                    ctc_logits,
+                    out["text_emb"],
+                    out["labels_mask"],
+                )
+                loss = loss + lambda_sea * loss_sea
 
             # Two-step refinement loss
             loss_refine = torch.tensor(0.0, device=x.device)
@@ -384,6 +463,12 @@ def train_one_epoch_lm_hybrid(
             iter_extras["loss_refine"] = float(loss_refine.item())
         if do_contrast:
             iter_extras["loss_contrast"] = float(loss_contrast.item())
+        if do_embed_mse:
+            iter_extras["loss_embed_mse"] = float(loss_embed_mse.item())
+        if do_ec:
+            iter_extras["loss_ec"] = float(loss_ec.item())
+        if do_sea:
+            iter_extras["loss_sea"] = float(loss_sea.item())
 
         man.update_iteration(
             idx,
