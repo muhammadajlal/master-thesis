@@ -7,13 +7,13 @@ so that main.py's load_checkpoint() enters the 'freeze' branch (no 'epoch' key).
 Usage:
     # Extract all folds for a given VLM experiment + dataset
     python scripts/extract_vlm_encoder.py \
-        --vlm_dir results/hwr2/vlm_Qformer_gpt2_word_v2/vlm__onhw_wi_word_rh \
+        --vlm_dir results/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_Qformer_gpt2_word_v2/vlm__onhw_wi_word_rh \
         --out_dir work/REWI_work/assets/pretrained_encoders/vlm_qformer_v2_onhw \
         --ckpt_name best_cer.pth
 
     # Extract a single fold
     python scripts/extract_vlm_encoder.py \
-        --vlm_dir results/hwr2/vlm_Qformer_gpt2_word_v2/vlm__onhw_wi_word_rh \
+        --vlm_dir results/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_Qformer_gpt2_word_v2/vlm__onhw_wi_word_rh \
         --out_dir work/REWI_work/assets/pretrained_encoders/vlm_qformer_v2_onhw \
         --fold 0
 """

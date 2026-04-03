@@ -4,7 +4,7 @@
     "description": "MLP + pretrained GPT-2",
     "params": "5.09M",
     "dataset": "onhw",
-    "dir_name": "vlm_ablation_A1_mlp_pretrained",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_A1_mlp_pretrained",
     "folds_complete": 5,
     "mean_cer": 0.07406112429385667,
     "mean_wer": 0.11357323914681898,
@@ -37,7 +37,7 @@
     "description": "MLP + pretrained GPT-2",
     "params": "5.09M",
     "dataset": "hw6",
-    "dir_name": "vlm_ablation_A1_mlp_pretrained",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_A1_mlp_pretrained",
     "folds_complete": 5,
     "mean_cer": 0.27480869558581733,
     "mean_wer": 0.43209488143704633,
@@ -70,7 +70,7 @@
     "description": "MLP + random GPT-2",
     "params": "5.09M",
     "dataset": "onhw",
-    "dir_name": "vlm_ablation_A2_mlp_random",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_A2_mlp_random",
     "folds_complete": 5,
     "mean_cer": 0.0756880922978809,
     "mean_wer": 0.11956228143370613,
@@ -103,7 +103,7 @@
     "description": "MLP + random GPT-2",
     "params": "5.09M",
     "dataset": "hw6",
-    "dir_name": "vlm_ablation_A2_mlp_random",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_A2_mlp_random",
     "folds_complete": 5,
     "mean_cer": 0.5653066244452652,
     "mean_wer": 0.7979477765281661,
@@ -136,7 +136,7 @@
     "description": "Linear + pretrained GPT-2",
     "params": "4.50M",
     "dataset": "onhw",
-    "dir_name": "vlm_ablation_A3_linear_pretrained",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_A3_linear_pretrained",
     "folds_complete": 5,
     "mean_cer": 0.07751256036938711,
     "mean_wer": 0.11825788326068895,
@@ -169,7 +169,7 @@
     "description": "Linear + pretrained GPT-2",
     "params": "4.50M",
     "dataset": "hw6",
-    "dir_name": "vlm_ablation_A3_linear_pretrained",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_A3_linear_pretrained",
     "folds_complete": 5,
     "mean_cer": 0.38211151456188297,
     "mean_wer": 0.5486240071683558,
@@ -202,7 +202,7 @@
     "description": "PoolingMLP + pretrained GPT-2",
     "params": "5.09M",
     "dataset": "onhw",
-    "dir_name": "vlm_ablation_B1_pooling_pretrained",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_B1_pooling_pretrained",
     "folds_complete": 5,
     "mean_cer": 0.07543130299263759,
     "mean_wer": 0.11458467697628014,
@@ -235,7 +235,7 @@
     "description": "PoolingMLP + pretrained GPT-2",
     "params": "5.09M",
     "dataset": "hw6",
-    "dir_name": "vlm_ablation_B1_pooling_pretrained",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_B1_pooling_pretrained",
     "folds_complete": 5,
     "mean_cer": 0.24430919558301784,
     "mean_wer": 0.394622378219205,
@@ -268,33 +268,12 @@
     "description": "PoolingMLP + LoRA r=32",
     "params": "8.18M",
     "dataset": "hw6",
-    "dir_name": "vlm_followup_B2_pooling_lora32",
-    "folds_complete": 5,
-    "mean_cer": 0.29391507836870445,
-    "mean_wer": 0.40296654166740453,
-    "per_fold": {
-      "0": {
-        "cer": 0.27406425754735275,
-        "wer": 0.37959442332065907
-      },
-      "1": {
-        "cer": 0.299956369982548,
-        "wer": 0.41243502598960413
-      },
-      "2": {
-        "cer": 0.30327949738495447,
-        "wer": 0.4184064763527908
-      },
-      "3": {
-        "cer": 0.2907690808070962,
-        "wer": 0.3941151202749141
-      },
-      "4": {
-        "cer": 0.30150618612157076,
-        "wer": 0.41028166239905456
-      }
-    },
-    "status": "done"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_followup_B2_pooling_lora32",
+    "folds_complete": 0,
+    "mean_cer": null,
+    "mean_wer": null,
+    "per_fold": {},
+    "status": "pending"
   },
   {
     "exp_id": "Baseline-AR",
@@ -433,148 +412,349 @@
     "description": "Mini QFormer (2L)",
     "params": "13.96M",
     "dataset": "hw6",
-    "dir_name": "vlm_followup_C1_mini_qformer",
-    "folds_complete": 5,
-    "mean_cer": 0.25055597302792704,
-    "mean_wer": 0.3657599741443611,
-    "per_fold": {
-      "0": {
-        "cer": 0.20036847889327042,
-        "wer": 0.2965779467680608
-      },
-      "1": {
-        "cer": 0.2714722014460234,
-        "wer": 0.3936425429828069
-      },
-      "2": {
-        "cer": 0.2434788329331272,
-        "wer": 0.36152535151256926
-      },
-      "3": {
-        "cer": 0.27094908535594764,
-        "wer": 0.3945446735395189
-      },
-      "4": {
-        "cer": 0.2665112665112665,
-        "wer": 0.3825093559188497
-      }
-    },
-    "status": "done"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_followup_C1_mini_qformer",
+    "folds_complete": 0,
+    "mean_cer": null,
+    "mean_wer": null,
+    "per_fold": {},
+    "status": "pending"
   },
   {
     "exp_id": "F1-Frozen",
     "description": "Frozen enc + MLP + LoRA GPT-2",
     "params": "~2.6M",
     "dataset": "onhw",
-    "dir_name": "F1_frozen_enc_mlp",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/F1_frozen_enc_mlp",
+    "folds_complete": 5,
+    "mean_cer": 0.09003956905556025,
+    "mean_wer": 0.14226730069874732,
+    "per_fold": {
+      "0": {
+        "cer": 0.18152855213491706,
+        "wer": 0.25547996976568405
+      },
+      "1": {
+        "cer": 0.04467526866261726,
+        "wer": 0.09354207436399217
+      },
+      "2": {
+        "cer": 0.16827929386675092,
+        "wer": 0.2284676212865997
+      },
+      "3": {
+        "cer": 0.024098977945131793,
+        "wer": 0.05780121070103495
+      },
+      "4": {
+        "cer": 0.03161575266838425,
+        "wer": 0.07604562737642585
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "F1-Frozen-hw6",
     "description": "Frozen enc + MLP + LoRA GPT-2",
     "params": "~2.6M",
     "dataset": "hw6",
-    "dir_name": "F1_frozen_enc_mlp",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/F1_frozen_enc_mlp",
+    "folds_complete": 5,
+    "mean_cer": 0.3059641082491952,
+    "mean_wer": 0.5319605681438919,
+    "per_fold": {
+      "0": {
+        "cer": 0.2839550067877691,
+        "wer": 0.5082382762991128
+      },
+      "1": {
+        "cer": 0.3059087509349289,
+        "wer": 0.5351859256297481
+      },
+      "2": {
+        "cer": 0.2943653169303641,
+        "wer": 0.5193864507882403
+      },
+      "3": {
+        "cer": 0.34814959222796243,
+        "wer": 0.5710910652920962
+      },
+      "4": {
+        "cer": 0.2974418743649513,
+        "wer": 0.525901122710262
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "F2-EncAR",
     "description": "VLM enc -> AR decoder (frozen)",
     "params": "~2.4M",
     "dataset": "onhw",
-    "dir_name": "F2_vlm_enc_ar",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/F2_vlm_enc_ar",
+    "folds_complete": 5,
+    "mean_cer": 0.07296348983991545,
+    "mean_wer": 0.1116004602680283,
+    "per_fold": {
+      "0": {
+        "cer": 0.1527166949475361,
+        "wer": 0.20993953136810278
+      },
+      "1": {
+        "cer": 0.033245875714337056,
+        "wer": 0.07064579256360078
+      },
+      "2": {
+        "cer": 0.14122664981635796,
+        "wer": 0.1814490275699936
+      },
+      "3": {
+        "cer": 0.016281154742693205,
+        "wer": 0.043936731107205626
+      },
+      "4": {
+        "cer": 0.021347073978652927,
+        "wer": 0.05203121873123874
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "F2-EncAR-hw6",
     "description": "VLM enc -> AR decoder (frozen)",
     "params": "~2.4M",
     "dataset": "hw6",
-    "dir_name": "F2_vlm_enc_ar",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/F2_vlm_enc_ar",
+    "folds_complete": 5,
+    "mean_cer": 0.18766746569140666,
+    "mean_wer": 0.2848069012278049,
+    "per_fold": {
+      "0": {
+        "cer": 0.1746072790742776,
+        "wer": 0.26510350654837345
+      },
+      "1": {
+        "cer": 0.18003615058588882,
+        "wer": 0.29088364654138343
+      },
+      "2": {
+        "cer": 0.17446794513338376,
+        "wer": 0.2801448657861099
+      },
+      "3": {
+        "cer": 0.21360106573090296,
+        "wer": 0.2963917525773196
+      },
+      "4": {
+        "cer": 0.19562488793258023,
+        "wer": 0.2915107346858381
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "G1a-Lin",
     "description": "Linear connector (minimal)",
     "params": "4.50M",
     "dataset": "onhw",
-    "dir_name": "G1a_linear",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/G1a_linear",
+    "folds_complete": 5,
+    "mean_cer": 0.07981701265259125,
+    "mean_wer": 0.12252760983950906,
+    "per_fold": {
+      "0": {
+        "cer": 0.1603005852408491,
+        "wer": 0.22770219198790628
+      },
+      "1": {
+        "cer": 0.04097329547496675,
+        "wer": 0.08180039138943249
+      },
+      "2": {
+        "cer": 0.15481221120808814,
+        "wer": 0.19640948920709553
+      },
+      "3": {
+        "cer": 0.019185942262865338,
+        "wer": 0.045889474711970316
+      },
+      "4": {
+        "cer": 0.02381302907618697,
+        "wer": 0.060836501901140684
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "G1a-Lin-hw6",
     "description": "Linear connector (minimal)",
     "params": "4.50M",
     "dataset": "hw6",
-    "dir_name": "G1a_linear",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/G1a_linear",
+    "folds_complete": 5,
+    "mean_cer": 0.5007649043094718,
+    "mean_wer": 0.6704104823809258,
+    "per_fold": {
+      "0": {
+        "cer": 0.48296593186372744,
+        "wer": 0.65694972539079
+      },
+      "1": {
+        "cer": 0.4543443031662927,
+        "wer": 0.6445421831267493
+      },
+      "2": {
+        "cer": 0.545935988947732,
+        "wer": 0.7053685556028974
+      },
+      "3": {
+        "cer": 0.47061117067940345,
+        "wer": 0.6426116838487973
+      },
+      "4": {
+        "cer": 0.5499671268902038,
+        "wer": 0.702580263935395
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "G1b-Conv",
     "description": "ConvPool connector (minimal)",
     "params": "4.50M",
     "dataset": "onhw",
-    "dir_name": "G1b_conv_pool",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/G1b_conv_pool",
+    "folds_complete": 5,
+    "mean_cer": 0.08604432267135043,
+    "mean_wer": 0.12837396328372827,
+    "per_fold": {
+      "0": {
+        "cer": 0.17269799494407315,
+        "wer": 0.231859410430839
+      },
+      "1": {
+        "cer": 0.04643640153829565,
+        "wer": 0.08806262230919765
+      },
+      "2": {
+        "cer": 0.1634611587220094,
+        "wer": 0.2092327420388972
+      },
+      "3": {
+        "cer": 0.019580419580419582,
+        "wer": 0.04647529779339973
+      },
+      "4": {
+        "cer": 0.02804563857195436,
+        "wer": 0.06623974384630779
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "G1b-Conv-hw6",
     "description": "ConvPool connector (minimal)",
     "params": "4.50M",
     "dataset": "hw6",
-    "dir_name": "G1b_conv_pool",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/G1b_conv_pool",
+    "folds_complete": 5,
+    "mean_cer": 0.3703269578697753,
+    "mean_wer": 0.5830697050204297,
+    "per_fold": {
+      "0": {
+        "cer": 0.35519425948671535,
+        "wer": 0.5722433460076045
+      },
+      "1": {
+        "cer": 0.3723198703565196,
+        "wer": 0.588764494202319
+      },
+      "2": {
+        "cer": 0.38745436005394557,
+        "wer": 0.6031103536429484
+      },
+      "3": {
+        "cer": 0.36585762095070995,
+        "wer": 0.5695876288659794
+      },
+      "4": {
+        "cer": 0.3708086785009862,
+        "wer": 0.5816427023832972
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "H1-Hybrid",
     "description": "Hybrid CTC+LM (MLP)",
     "params": "~5.1M",
     "dataset": "onhw",
-    "dir_name": "H1_hybrid_mlp",
-    "folds_complete": 0,
-    "mean_cer": null,
-    "mean_wer": null,
-    "per_fold": {},
-    "status": "pending"
+    "dir_name": "Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp",
+    "folds_complete": 5,
+    "mean_cer": 0.0739954045134591,
+    "mean_wer": 0.11685252440843327,
+    "per_fold": {
+      "0": {
+        "cer": 0.15275132458357862,
+        "wer": 0.2214663643235072
+      },
+      "1": {
+        "cer": 0.030011141861050212,
+        "wer": 0.06908023483365949
+      },
+      "2": {
+        "cer": 0.15208720034753762,
+        "wer": 0.20111134857875615
+      },
+      "3": {
+        "cer": 0.016209431594046978,
+        "wer": 0.04237453622339387
+      },
+      "4": {
+        "cer": 0.018917924181082076,
+        "wer": 0.05023013808284971
+      }
+    },
+    "status": "done"
   },
   {
     "exp_id": "H1-Hybrid-hw6",
     "description": "Hybrid CTC+LM (MLP)",
     "params": "~5.1M",
     "dataset": "hw6",
-    "dir_name": "H1_hybrid_mlp",
+    "dir_name": "Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp",
+    "folds_complete": 5,
+    "mean_cer": 0.16872686533199405,
+    "mean_wer": 0.3313577410058969,
+    "per_fold": {
+      "0": {
+        "cer": 0.15055918288189282,
+        "wer": 0.3126320236586396
+      },
+      "1": {
+        "cer": 0.18726626776364996,
+        "wer": 0.35145941623350657
+      },
+      "2": {
+        "cer": 0.17529028650373343,
+        "wer": 0.34064763527907965
+      },
+      "3": {
+        "cer": 0.16268642167852618,
+        "wer": 0.31937285223367695
+      },
+      "4": {
+        "cer": 0.16783216783216784,
+        "wer": 0.3326767776245814
+      }
+    },
+    "status": "done"
+  },
+  {
+    "exp_id": "Q2-QF32-hw6",
+    "description": "QFormer + LoRA r=32",
+    "params": "23.4M",
+    "dataset": "hw6",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_followup_Q2_qformer_lora32",
     "folds_complete": 0,
     "mean_cer": null,
     "mean_wer": null,
@@ -582,44 +762,11 @@
     "status": "pending"
   },
   {
-    "exp_id": "Q2-QF32-hw6",
-    "description": "QFormer + LoRA r=32",
-    "params": "23.4M",
-    "dataset": "hw6",
-    "dir_name": "vlm_followup_Q2_qformer_lora32",
-    "folds_complete": 5,
-    "mean_cer": 0.32438022736476924,
-    "mean_wer": 0.42354779512370566,
-    "per_fold": {
-      "0": {
-        "cer": 0.30412437778783374,
-        "wer": 0.3929024081115336
-      },
-      "1": {
-        "cer": 0.3268511593118923,
-        "wer": 0.43262694922031186
-      },
-      "2": {
-        "cer": 0.3295286339265156,
-        "wer": 0.43523647209203237
-      },
-      "3": {
-        "cer": 0.3298567111804269,
-        "wer": 0.42482817869415807
-      },
-      "4": {
-        "cer": 0.3315402546171777,
-        "wer": 0.4321449675004924
-      }
-    },
-    "status": "done"
-  },
-  {
     "exp_id": "QF-v2",
     "description": "QFormer + GPT-2",
     "params": "23.4M",
     "dataset": "onhw",
-    "dir_name": "vlm_Qformer_gpt2_word_v2",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_Qformer_gpt2_word_v2",
     "folds_complete": 5,
     "mean_cer": 0.06644907186871477,
     "mean_wer": 0.10519669113616356,
@@ -652,7 +799,7 @@
     "description": "QFormer + GPT-2",
     "params": "23.4M",
     "dataset": "hw6",
-    "dir_name": "vlm_Qformer_gpt2_word_v2",
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_Qformer_gpt2_word_v2",
     "folds_complete": 5,
     "mean_cer": 0.21012905882737667,
     "mean_wer": 0.3199635842326153,
@@ -685,65 +832,23 @@
     "description": "QFormer v3",
     "params": "23.4M",
     "dataset": "onhw",
-    "dir_name": "vlm_gpt2_word_v3",
-    "folds_complete": 5,
-    "mean_cer": 0.06702307099946711,
-    "mean_wer": 0.10698516904831408,
-    "per_fold": {
-      "0": {
-        "cer": 0.13810298853759048,
-        "wer": 0.1993575207860922
-      },
-      "1": {
-        "cer": 0.02296661035833663,
-        "wer": 0.055968688845401175
-      },
-      "2": {
-        "cer": 0.14197701512578492,
-        "wer": 0.18914297926907458
-      },
-      "3": {
-        "cer": 0.013555675094136632,
-        "wer": 0.0402265182581527
-      },
-      "4": {
-        "cer": 0.018513065881486934,
-        "wer": 0.05023013808284971
-      }
-    },
-    "status": "done"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_gpt2_word_v3",
+    "folds_complete": 0,
+    "mean_cer": null,
+    "mean_wer": null,
+    "per_fold": {},
+    "status": "pending"
   },
   {
     "exp_id": "QF-v3-s10",
     "description": "QFormer v3 (10 soft)",
     "params": "23.4M",
     "dataset": "onhw",
-    "dir_name": "vlm_gpt2_word_v3_soft10",
-    "folds_complete": 5,
-    "mean_cer": 0.06753131257093856,
-    "mean_wer": 0.10651916588799286,
-    "per_fold": {
-      "0": {
-        "cer": 0.14385150812064965,
-        "wer": 0.20313681027966743
-      },
-      "1": {
-        "cer": 0.023218200769147827,
-        "wer": 0.05557729941291585
-      },
-      "2": {
-        "cer": 0.13838316022274003,
-        "wer": 0.1816627484505236
-      },
-      "3": {
-        "cer": 0.0140218755603371,
-        "wer": 0.04178871314196446
-      },
-      "4": {
-        "cer": 0.01818181818181818,
-        "wer": 0.05043025815489294
-      }
-    },
-    "status": "done"
+    "dir_name": "Ablations-MMLM/GPT-2/AR-only/vlm_gpt2_word_v3_soft10",
+    "folds_complete": 0,
+    "mean_cer": null,
+    "mean_wer": null,
+    "per_fold": {},
+    "status": "pending"
   }
 ]

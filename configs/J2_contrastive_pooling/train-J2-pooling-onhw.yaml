@@ -59,7 +59,7 @@ vlm:
   contrast_temperature: 0.07
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/J2_contrastive_pooling/vlm__onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/Hybrid-Contrastive/J2_contrastive_pooling/vlm__onhw_wi_word_rh
 idx_fold: 0
 
 device: cuda

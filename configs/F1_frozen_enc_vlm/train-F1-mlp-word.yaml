@@ -62,7 +62,7 @@ vlm:
 
 # ── Data / paths ───────────────────────────────────────────
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/F1_frozen_enc_mlp/vlm__wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/F1_frozen_enc_mlp/vlm__wi_word_hw6_meta
 idx_fold: 0
 aug: true
 

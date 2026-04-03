@@ -57,7 +57,7 @@ vlm:
   lambda_embed_mse: 0.5
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/K1_ctc_mse/vlm__onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/Hybrid/K1_ctc_mse/vlm__onhw_wi_word_rh
 idx_fold: 0
 
 device: cuda

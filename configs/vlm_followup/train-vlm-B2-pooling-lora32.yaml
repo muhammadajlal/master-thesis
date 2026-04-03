@@ -34,7 +34,7 @@ vlm:
 freeze: false
 aug: true
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_followup_B2_pooling_lora32/vlm__wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_followup_B2_pooling_lora32/vlm__wi_word_hw6_meta
 checkpoint: null
 idx_fold: 0
 device: cuda

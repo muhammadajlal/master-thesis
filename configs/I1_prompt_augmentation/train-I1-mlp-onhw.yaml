@@ -74,7 +74,7 @@ aug: true
 
 # ── Data / paths ───────────────────────────────────────────
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/I1_prompt_aug_mlp/vlm__onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/Hybrid/I1_prompt_aug_mlp/vlm__onhw_wi_word_rh
 checkpoint: null
 idx_fold: 0
 
