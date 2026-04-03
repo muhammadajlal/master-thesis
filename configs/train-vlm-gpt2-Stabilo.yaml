@@ -67,7 +67,7 @@ aug: true                         # Enable augmentation (critical for regularisa
 
 # ── Data / paths ───────────────────────────────────────────
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v2
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_gpt2_word_v2
 checkpoint: null
 idx_fold: 0
 

@@ -55,7 +55,7 @@ freeze: false
 aug: true
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_gpt2_word_v3_highlr
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_gpt2_word_v3_highlr
 checkpoint: null
 idx_fold: 0
 

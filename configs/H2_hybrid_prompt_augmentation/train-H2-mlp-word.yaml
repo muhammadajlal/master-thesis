@@ -60,7 +60,7 @@ vlm:
   hybrid_lambda_ctc: 0.6
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/H2_hybrid_prompt_aug/vlm__wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/Hybrid/H2_hybrid_prompt_aug/vlm__wi_word_hw6_meta
 idx_fold: 0
 
 device: cuda

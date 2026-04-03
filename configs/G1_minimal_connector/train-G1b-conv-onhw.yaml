@@ -49,7 +49,7 @@ vlm:
   lr_lm: 0.00001
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/G1b_conv_pool/vlm__onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/G1b_conv_pool/vlm__onhw_wi_word_rh
 idx_fold: 0
 
 device: cuda

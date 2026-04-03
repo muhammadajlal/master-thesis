@@ -265,39 +265,43 @@ def train_one_epoch_lm_hybrid(
     inner_model = getattr(model, "model", model)
     do_refine = getattr(inner_model, "two_step_decode", False)
 
+    # ── Auxiliary losses (initialize once, reuse across epochs) ──
+    # We store loss modules on inner_model to avoid re-creating them every epoch.
+    _aux_initialized = getattr(inner_model, "_aux_losses_initialized", False)
+
     # Contrastive alignment loss (BC-style from ECHWR)
     lambda_contrast = float(vlm_cfg.get("lambda_contrast", 0.0))
     do_contrast = lambda_contrast > 0
-    contrast_loss_fn = None
-    if do_contrast:
+    contrast_loss_fn = getattr(inner_model, "_contrast_loss_fn", None)
+    if do_contrast and not _aux_initialized:
         from rewi.training.contrastive import InBatchContrastiveLoss
         init_temp = float(vlm_cfg.get("contrast_temperature", 0.07))
         contrast_loss_fn = InBatchContrastiveLoss(init_temperature=init_temp).to(man.cfgs.device)
-        # Enable text embedding return from VLM
         inner_model._return_text_emb = True
-        # Add temperature parameter to optimizer
+        inner_model._contrast_loss_fn = contrast_loss_fn
         optimizer.add_param_group({"params": contrast_loss_fn.parameters(), "lr": optimizer.defaults["lr"]})
         logger.info("[Contrastive] Enabled: lambda={}, temp_init={}", lambda_contrast, init_temp)
 
     # K1: CTC Compression + Per-Token MSE Distillation
     lambda_embed_mse = float(vlm_cfg.get("lambda_embed_mse", 0.0))
     do_embed_mse = lambda_embed_mse > 0
-    embed_mse_fn = None
-    if do_embed_mse:
+    embed_mse_fn = getattr(inner_model, "_embed_mse_fn", None)
+    if do_embed_mse and not _aux_initialized:
         from rewi.training.auxiliary_losses import CTCCompressMSELoss
         d_enc = int(getattr(man.cfgs, "d_cnn", 512))
         d_lm = inner_model.d_lm if hasattr(inner_model, "d_lm") else 768
         embed_mse_fn = CTCCompressMSELoss(d_enc, d_lm).to(man.cfgs.device)
         inner_model._return_text_emb = True
+        inner_model._embed_mse_fn = embed_mse_fn
         optimizer.add_param_group({"params": embed_mse_fn.parameters(), "lr": optimizer.defaults["lr"]})
         logger.info("[K1 Embed MSE] Enabled: lambda={}", lambda_embed_mse)
 
     # K3: ECHWR Error-Based Contrastive (EC) Loss
     lambda_ec = float(vlm_cfg.get("lambda_ec", 0.0))
     do_ec = lambda_ec > 0
-    ec_loss_fn = None
-    ec_char_to_id = None
-    if do_ec:
+    ec_loss_fn = getattr(inner_model, "_ec_loss_fn", None)
+    ec_char_to_id = getattr(inner_model, "_ec_char_to_id", None)
+    if do_ec and not _aux_initialized:
         from rewi.training.auxiliary_losses import ECContrastiveLoss
         categories = getattr(man.cfgs, "categories", [])
         ec_char_to_id = {c: i for i, c in enumerate(categories)}
@@ -307,23 +311,30 @@ def train_one_epoch_lm_hybrid(
         ec_loss_fn = ECContrastiveLoss(
             vocab_size=vocab_size, d_lm=d_lm, n_negatives=n_neg,
         ).to(man.cfgs.device)
+        inner_model._ec_loss_fn = ec_loss_fn
+        inner_model._ec_char_to_id = ec_char_to_id
         optimizer.add_param_group({"params": ec_loss_fn.parameters(), "lr": optimizer.defaults["lr"]})
         logger.info("[K3 EC Loss] Enabled: lambda={}, n_neg={}, vocab={}", lambda_ec, n_neg, vocab_size)
 
     # K4: SEA Token-Level Contrastive Loss
     lambda_sea = float(vlm_cfg.get("lambda_sea", 0.0))
     do_sea = lambda_sea > 0
-    sea_loss_fn = None
-    if do_sea:
+    sea_loss_fn = getattr(inner_model, "_sea_loss_fn", None)
+    if do_sea and not _aux_initialized:
         from rewi.training.auxiliary_losses import SEATokenContrastiveLoss
         sea_loss_fn = SEATokenContrastiveLoss(temperature=0.07).to(man.cfgs.device)
         inner_model._return_text_emb = True
+        inner_model._sea_loss_fn = sea_loss_fn
         optimizer.add_param_group({"params": sea_loss_fn.parameters(), "lr": optimizer.defaults["lr"]})
         logger.info("[K4 SEA] Enabled: lambda={}", lambda_sea)
 
     # Enable text embedding return if any loss needs it
     if do_embed_mse or do_sea:
         inner_model._return_text_emb = True
+
+    # Mark as initialized so we don't re-add param groups next epoch
+    if not _aux_initialized:
+        inner_model._aux_losses_initialized = True
 
     optimizer.zero_grad(set_to_none=True)
 

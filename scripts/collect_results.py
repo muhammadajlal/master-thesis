@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 RESULTS_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "results" / "hwr2"
+GPT2_AR_ROOT = "Ablations-MMLM/GPT-2/AR-only"
+GPT2_HYBRID_ROOT = "Ablations-MMLM/GPT-2/Hybrid"
 
 # (result_dir_name, dataset_suffix, description, trainable_params)
 EXPERIMENTS = {
@@ -27,34 +29,34 @@ EXPERIMENTS = {
     "Baseline-AR":         ("Baseline-AR",                        "ar_transformer_s__onhw_wi_word_rh",   "AR Transformer",                      "4.82M"),
     "Baseline-AR-hw6":     ("Baseline-AR",                        "ar_transformer_s__wi_word_hw6_meta",  "AR Transformer",                      "4.82M"),
     # GPT-2 VLM ablations
-    "A1-MLP":              ("vlm_ablation_A1_mlp_pretrained",     "vlm__onhw_wi_word_rh",                "MLP + pretrained GPT-2",              "5.09M"),
-    "A1-MLP-hw6":          ("vlm_ablation_A1_mlp_pretrained",     "vlm__wi_word_hw6_meta",               "MLP + pretrained GPT-2",              "5.09M"),
-    "A2-MLP-rand":         ("vlm_ablation_A2_mlp_random",         "vlm__onhw_wi_word_rh",                "MLP + random GPT-2",                  "5.09M"),
-    "A2-MLP-rand-hw6":     ("vlm_ablation_A2_mlp_random",         "vlm__wi_word_hw6_meta",               "MLP + random GPT-2",                  "5.09M"),
-    "A3-Linear":           ("vlm_ablation_A3_linear_pretrained",   "vlm__onhw_wi_word_rh",               "Linear + pretrained GPT-2",           "4.50M"),
-    "A3-Linear-hw6":       ("vlm_ablation_A3_linear_pretrained",   "vlm__wi_word_hw6_meta",              "Linear + pretrained GPT-2",           "4.50M"),
-    "B1-Pool":             ("vlm_ablation_B1_pooling_pretrained",  "vlm__onhw_wi_word_rh",               "PoolingMLP + pretrained GPT-2",       "5.09M"),
-    "B1-Pool-hw6":         ("vlm_ablation_B1_pooling_pretrained",  "vlm__wi_word_hw6_meta",              "PoolingMLP + pretrained GPT-2",       "5.09M"),
+    "A1-MLP":              (f"{GPT2_AR_ROOT}/vlm_ablation_A1_mlp_pretrained",     "vlm__onhw_wi_word_rh",                "MLP + pretrained GPT-2",              "5.09M"),
+    "A1-MLP-hw6":          (f"{GPT2_AR_ROOT}/vlm_ablation_A1_mlp_pretrained",     "vlm__wi_word_hw6_meta",               "MLP + pretrained GPT-2",              "5.09M"),
+    "A2-MLP-rand":         (f"{GPT2_AR_ROOT}/vlm_ablation_A2_mlp_random",         "vlm__onhw_wi_word_rh",                "MLP + random GPT-2",                  "5.09M"),
+    "A2-MLP-rand-hw6":     (f"{GPT2_AR_ROOT}/vlm_ablation_A2_mlp_random",         "vlm__wi_word_hw6_meta",               "MLP + random GPT-2",                  "5.09M"),
+    "A3-Linear":           (f"{GPT2_AR_ROOT}/vlm_ablation_A3_linear_pretrained",   "vlm__onhw_wi_word_rh",               "Linear + pretrained GPT-2",           "4.50M"),
+    "A3-Linear-hw6":       (f"{GPT2_AR_ROOT}/vlm_ablation_A3_linear_pretrained",   "vlm__wi_word_hw6_meta",              "Linear + pretrained GPT-2",           "4.50M"),
+    "B1-Pool":             (f"{GPT2_AR_ROOT}/vlm_ablation_B1_pooling_pretrained",  "vlm__onhw_wi_word_rh",               "PoolingMLP + pretrained GPT-2",       "5.09M"),
+    "B1-Pool-hw6":         (f"{GPT2_AR_ROOT}/vlm_ablation_B1_pooling_pretrained",  "vlm__wi_word_hw6_meta",              "PoolingMLP + pretrained GPT-2",       "5.09M"),
     # QFormer
-    "QF-v2":               ("vlm_Qformer_gpt2_word_v2",           "vlm__onhw_wi_word_rh",               "QFormer + GPT-2",                     "23.4M"),
-    "QF-v2-hw6":           ("vlm_Qformer_gpt2_word_v2",           "vlm__wi_word_hw6_meta",              "QFormer + GPT-2",                     "23.4M"),
-    "QF-v3":               ("vlm_gpt2_word_v3",                    "vlm__onhw_wi_word_rh",               "QFormer v3",                          "23.4M"),
-    "QF-v3-s10":           ("vlm_gpt2_word_v3_soft10",            "vlm__onhw_wi_word_rh",               "QFormer v3 (10 soft)",                "23.4M"),
+    "QF-v2":               (f"{GPT2_AR_ROOT}/vlm_Qformer_gpt2_word_v2",           "vlm__onhw_wi_word_rh",               "QFormer + GPT-2",                     "23.4M"),
+    "QF-v2-hw6":           (f"{GPT2_AR_ROOT}/vlm_Qformer_gpt2_word_v2",           "vlm__wi_word_hw6_meta",              "QFormer + GPT-2",                     "23.4M"),
+    "QF-v3":               (f"{GPT2_AR_ROOT}/vlm_gpt2_word_v3",                    "vlm__onhw_wi_word_rh",               "QFormer v3",                          "23.4M"),
+    "QF-v3-s10":           (f"{GPT2_AR_ROOT}/vlm_gpt2_word_v3_soft10",            "vlm__onhw_wi_word_rh",               "QFormer v3 (10 soft)",                "23.4M"),
     # Follow-ups
-    "B2-Pool32-hw6":       ("vlm_followup_B2_pooling_lora32",     "vlm__wi_word_hw6_meta",              "PoolingMLP + LoRA r=32",              "8.18M"),
-    "C1-MiniQF-hw6":       ("vlm_followup_C1_mini_qformer",       "vlm__wi_word_hw6_meta",              "Mini QFormer (2L)",                   "13.96M"),
-    "Q2-QF32-hw6":         ("vlm_followup_Q2_qformer_lora32",     "vlm__wi_word_hw6_meta",              "QFormer + LoRA r=32",                 "23.4M"),
+    "B2-Pool32-hw6":       (f"{GPT2_AR_ROOT}/vlm_followup_B2_pooling_lora32",     "vlm__wi_word_hw6_meta",              "PoolingMLP + LoRA r=32",              "8.18M"),
+    "C1-MiniQF-hw6":       (f"{GPT2_AR_ROOT}/vlm_followup_C1_mini_qformer",       "vlm__wi_word_hw6_meta",              "Mini QFormer (2L)",                   "13.96M"),
+    "Q2-QF32-hw6":         (f"{GPT2_AR_ROOT}/vlm_followup_Q2_qformer_lora32",     "vlm__wi_word_hw6_meta",              "QFormer + LoRA r=32",                 "23.4M"),
     # New experiments
-    "F1-Frozen":           ("F1_frozen_enc_mlp",                   "vlm__onhw_wi_word_rh",               "Frozen enc + MLP + LoRA GPT-2",       "~2.6M"),
-    "F1-Frozen-hw6":       ("F1_frozen_enc_mlp",                   "vlm__wi_word_hw6_meta",              "Frozen enc + MLP + LoRA GPT-2",       "~2.6M"),
-    "F2-EncAR":            ("F2_vlm_enc_ar",                       "ar_transformer_s__onhw_wi_word_rh",  "VLM enc -> AR decoder (frozen)",      "~2.4M"),
-    "F2-EncAR-hw6":        ("F2_vlm_enc_ar",                       "ar_transformer_s__wi_word_hw6_meta", "VLM enc -> AR decoder (frozen)",      "~2.4M"),
-    "G1a-Lin":             ("G1a_linear",                          "vlm__onhw_wi_word_rh",               "Linear connector (minimal)",          "4.50M"),
-    "G1a-Lin-hw6":         ("G1a_linear",                          "vlm__wi_word_hw6_meta",              "Linear connector (minimal)",          "4.50M"),
-    "G1b-Conv":            ("G1b_conv_pool",                       "vlm__onhw_wi_word_rh",               "ConvPool connector (minimal)",        "4.50M"),
-    "G1b-Conv-hw6":        ("G1b_conv_pool",                       "vlm__wi_word_hw6_meta",              "ConvPool connector (minimal)",        "4.50M"),
-    "H1-Hybrid":           ("H1_hybrid_mlp",                       "vlm__onhw_wi_word_rh",               "Hybrid CTC+LM (MLP)",                "~5.1M"),
-    "H1-Hybrid-hw6":       ("H1_hybrid_mlp",                       "vlm__wi_word_hw6_meta",              "Hybrid CTC+LM (MLP)",                "~5.1M"),
+    "F1-Frozen":           (f"{GPT2_AR_ROOT}/F1_frozen_enc_mlp",                   "vlm__onhw_wi_word_rh",               "Frozen enc + MLP + LoRA GPT-2",       "~2.6M"),
+    "F1-Frozen-hw6":       (f"{GPT2_AR_ROOT}/F1_frozen_enc_mlp",                   "vlm__wi_word_hw6_meta",              "Frozen enc + MLP + LoRA GPT-2",       "~2.6M"),
+    "F2-EncAR":            (f"{GPT2_AR_ROOT}/F2_vlm_enc_ar",                       "ar_transformer_s__onhw_wi_word_rh",  "VLM enc -> AR decoder (frozen)",      "~2.4M"),
+    "F2-EncAR-hw6":        (f"{GPT2_AR_ROOT}/F2_vlm_enc_ar",                       "ar_transformer_s__wi_word_hw6_meta", "VLM enc -> AR decoder (frozen)",      "~2.4M"),
+    "G1a-Lin":             (f"{GPT2_AR_ROOT}/G1a_linear",                          "vlm__onhw_wi_word_rh",               "Linear connector (minimal)",          "4.50M"),
+    "G1a-Lin-hw6":         (f"{GPT2_AR_ROOT}/G1a_linear",                          "vlm__wi_word_hw6_meta",              "Linear connector (minimal)",          "4.50M"),
+    "G1b-Conv":            (f"{GPT2_AR_ROOT}/G1b_conv_pool",                       "vlm__onhw_wi_word_rh",               "ConvPool connector (minimal)",        "4.50M"),
+    "G1b-Conv-hw6":        (f"{GPT2_AR_ROOT}/G1b_conv_pool",                       "vlm__wi_word_hw6_meta",              "ConvPool connector (minimal)",        "4.50M"),
+    "H1-Hybrid":           (f"{GPT2_HYBRID_ROOT}/H1_hybrid_mlp",                       "vlm__onhw_wi_word_rh",               "Hybrid CTC+LM (MLP)",                "~5.1M"),
+    "H1-Hybrid-hw6":       (f"{GPT2_HYBRID_ROOT}/H1_hybrid_mlp",                       "vlm__wi_word_hw6_meta",              "Hybrid CTC+LM (MLP)",                "~5.1M"),
 }
 
 

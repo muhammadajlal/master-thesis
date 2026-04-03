@@ -103,7 +103,7 @@ ctc_decoder: best_path
 d_cnn: 512
 device: cuda
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/vlm_followup_Q2_qformer_lora32/vlm__wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_followup_Q2_qformer_lora32/vlm__wi_word_hw6_meta
 epoch: 300
 epoch_warmup: 30
 export_val_full: true
