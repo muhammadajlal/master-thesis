@@ -1,19 +1,22 @@
 #!/bin/bash
-#SBATCH -J K4-sea-word
+#SBATCH -J O1-H1-sent
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
 #SBATCH -p v100
 #SBATCH --gres=gpu:v100:1
 #SBATCH --cpus-per-task=8
-#SBATCH -t 24:00:00
+#SBATCH -t 04:00:00
 #SBATCH --array=0-4
 
 set -euo pipefail
 set -x
 
 # ---- Configuration ----
-TRAIN_YAML="K4_sea_contrastive/train-K4-sea-word.yaml"
-DATASET="wi_word_hw6_meta"
+TRAIN_YAML="O1_sentence_eval/test-O1-H1-sent.yaml"
+DATASET="wi_sent_hw6_meta"
+
+# H1 word-level best checkpoints (best_cer.pth per fold)
+H1_BASE="/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__wi_word_hw6_meta"
 
 WORK=/home/woody/iwso/iwso214h
 PROJ=$WORK/imu-hwr/work/REWI_work
@@ -33,29 +36,20 @@ if [[ ! -f "$YAML_PATH" ]]; then
   exit 1
 fi
 
-# Extract dir_work from YAML
-DIR_WORK=$($PY_BIN -c "
-import yaml, sys
-with open(sys.argv[1]) as f: cfg = yaml.safe_load(f)
-print(cfg.get('dir_work', ''))
-" "$YAML_PATH")
-
 FOLD=${SLURM_ARRAY_TASK_ID}
-OUTDIR="${DIR_WORK}/fold_${FOLD}"
+
+# Find best checkpoint for this fold
+CKPT="${H1_BASE}/fold_${FOLD}/${FOLD}/checkpoints/best_cer.pth"
+if [[ ! -f "$CKPT" ]]; then
+  echo "ERROR: Checkpoint not found: $CKPT"
+  exit 1
+fi
+
+OUTDIR="$WORK/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/Hybrid/O1_sent_eval_H1/vlm__${DATASET}/fold_${FOLD}"
 mkdir -p "$OUTDIR"
 
-TMPCFG="${SLURM_TMPDIR:-/tmp}/train_${DATASET}_fold${FOLD}.yaml"
+TMPCFG="${SLURM_TMPDIR:-/tmp}/test_${DATASET}_fold${FOLD}.yaml"
 cp "$YAML_PATH" "$TMPCFG"
-
-# ---- Auto-resume: check for last.pth ----
-CKPT_PATH="${OUTDIR}/${FOLD}/checkpoints/last.pth"
-if [[ -f "$CKPT_PATH" ]]; then
-  echo "RESUME: Found checkpoint at $CKPT_PATH"
-  RESUME_CKPT="$CKPT_PATH"
-else
-  echo "FRESH START: No checkpoint found at $CKPT_PATH"
-  RESUME_CKPT=""
-fi
 
 # Patch config
 $PY_BIN - <<PY
@@ -68,13 +62,8 @@ with open(cfg_path, "r") as f:
 cfg["idx_fold"]    = int("$FOLD")
 cfg["dir_work"]    = "$OUTDIR"
 cfg["dir_dataset"] = "$DATA"
-
-# Auto-resume
-resume_ckpt = "$RESUME_CKPT"
-if resume_ckpt:
-    cfg["checkpoint"] = resume_ckpt
-else:
-    cfg["checkpoint"] = None
+cfg["checkpoint"]  = "$CKPT"
+cfg["test"]        = True
 
 with open(cfg_path, "w") as f:
     yaml.safe_dump(cfg, f, sort_keys=False)
@@ -83,14 +72,14 @@ PY
 
 export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
 
-echo "========== RUN INFO =========="
+echo "========== O1 EVAL INFO =========="
 echo "Fold:                $FOLD"
 echo "Dataset:             $DATASET"
+echo "H1 checkpoint:       $CKPT"
 echo "Config YAML:         $TRAIN_YAML"
 echo "Patched config:      $TMPCFG"
 echo "Work dir (out):      $OUTDIR"
-echo "Resume checkpoint:   ${RESUME_CKPT:-NONE}"
-echo "=============================="
+echo "==================================="
 
 cd "$PROJ"
 which $PY_BIN
@@ -116,5 +105,5 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 echo "HF mode: OFFLINE"
 
-echo "Running fold ${FOLD} with config: $TMPCFG"
+echo "Running sentence-level eval fold ${FOLD} with config: $TMPCFG"
 $PY_BIN main.py -c "$TMPCFG"

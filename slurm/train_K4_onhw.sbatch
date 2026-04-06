@@ -33,30 +33,15 @@ if [[ ! -f "$YAML_PATH" ]]; then
   exit 1
 fi
 
-# Extract arch_de and dir_work from YAML
-read -r ARCH_DE BASE_DIR_WORK <<< $(
-$PY_BIN - "$YAML_PATH" <<'PY'
+# Extract dir_work from YAML
+DIR_WORK=$($PY_BIN -c "
 import yaml, sys
-with open(sys.argv[1], "r") as f:
-    cfg = yaml.safe_load(f)
-arch_de = cfg.get("arch_de", "unknown")
-dir_work = cfg.get("dir_work", "")
-if dir_work:
-    parts = dir_work.split("/")
-    try:
-        idx = parts.index("hwr2")
-        base_name = parts[idx + 1] if idx + 1 < len(parts) else "train_run"
-    except (ValueError, IndexError):
-        base_name = "train_run"
-else:
-    base_name = "train_run"
-print(arch_de, base_name)
-PY
-)
+with open(sys.argv[1]) as f: cfg = yaml.safe_load(f)
+print(cfg.get('dir_work', ''))
+" "$YAML_PATH")
 
-BASE_OUT=$WORK/imu-hwr/results/hwr2/${BASE_DIR_WORK}/${ARCH_DE}__${DATASET}
 FOLD=${SLURM_ARRAY_TASK_ID}
-OUTDIR="${BASE_OUT}/fold_${FOLD}"
+OUTDIR="${DIR_WORK}/fold_${FOLD}"
 mkdir -p "$OUTDIR"
 
 TMPCFG="${SLURM_TMPDIR:-/tmp}/train_${DATASET}_fold${FOLD}.yaml"

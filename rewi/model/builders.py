@@ -3,7 +3,7 @@ import torch.nn as nn
 #from .ablation import AblaDec, AblaEnc
 from .ARDecoder import ARDecoder
 from .conv import BLConv
-#from .conformer_en import ConformerEncoder
+from .conformer_en import ConformerEncoder
 from .lstm import LSTM
 #from .others.convnext import ConvNeXt
 #from .others.mlp_mixer import MLPMixer

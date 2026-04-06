@@ -17,3 +17,8 @@ For the Qualitative analsysis we need to run the python main.py -c configs/test.
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/id_ed25519   
 ssh-add -t 8h ~/.ssh/id_ed25519
+
+
+cd /home/woody/iwso/iwso214h/imu-hwr/thesis
+git commit -m "Phase 6 results, table fixes, citations, cross-refs"
+git push origin master
