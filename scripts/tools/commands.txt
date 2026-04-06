@@ -20,5 +20,5 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 
 
 cd /home/woody/iwso/iwso214h/imu-hwr/thesis
-git commit -m "Phase 6 results, table fixes, citations, cross-refs"
+git commit -m "add quantitaive analysis"
 git push origin master
