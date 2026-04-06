@@ -69,7 +69,8 @@ def train_one_epoch_lm(
     model.train()
 
     use_amp = bool(getattr(man.cfgs, "lm_use_amp", False))
-    amp_dtype = torch.float16  # V100-friendly
+    _amp_str = str(getattr(man.cfgs, "lm_amp_dtype", "float16")).lower()
+    amp_dtype = torch.bfloat16 if "bf" in _amp_str else torch.float16
     accum_steps = int(getattr(man.cfgs, "grad_accum_steps", 1))
 
     # Two-step refinement config
@@ -254,7 +255,8 @@ def train_one_epoch_lm_hybrid(
     model.train()
 
     use_amp = bool(getattr(man.cfgs, "lm_use_amp", False))
-    amp_dtype = torch.float16
+    _amp_str = str(getattr(man.cfgs, "lm_amp_dtype", "float16")).lower()
+    amp_dtype = torch.bfloat16 if "bf" in _amp_str else torch.float16
     accum_steps = int(getattr(man.cfgs, "grad_accum_steps", 1))
 
     # Two-step refinement config

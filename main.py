@@ -527,6 +527,114 @@ def _build_lm_optimizer(cfgs, model, dataloader_train):
     return optimizer, scaler, lr_scheduler
 
 
+def _initialize_vlm_auxiliary_losses(cfgs, model, optimizer=None):
+    """Attach VLM auxiliary-loss modules before checkpoint loading.
+
+    Some VLM experiments create trainable auxiliary modules lazily inside the
+    training loop. On resume, their parameters are already present in the
+    checkpoint model/optimizer state, so we need to instantiate them before
+    loading the checkpoint to keep parameter groups aligned.
+    """
+    vlm_cfg = getattr(cfgs, "vlm", {}) or {}
+    inner_model = getattr(model, "model", model)
+    device = getattr(cfgs, "device", "cpu")
+
+    counts = {
+        "contrast": 0,
+        "embed_mse": 0,
+        "ec": 0,
+        "sea": 0,
+    }
+
+    def _params(module):
+        return [p for p in module.parameters() if p.requires_grad]
+
+    def _maybe_add_group(params):
+        if optimizer is None or not params:
+            return
+        opt_ids = {
+            id(p)
+            for group in optimizer.param_groups
+            for p in group.get("params", [])
+        }
+        if any(id(p) not in opt_ids for p in params):
+            optimizer.add_param_group({"params": params, "lr": optimizer.defaults["lr"]})
+
+    aux_enabled = False
+
+    lambda_contrast = float(vlm_cfg.get("lambda_contrast", 0.0))
+    if lambda_contrast > 0:
+        aux_enabled = True
+        contrast_loss_fn = getattr(inner_model, "_contrast_loss_fn", None)
+        if contrast_loss_fn is None:
+            from rewi.training.contrastive import InBatchContrastiveLoss
+
+            init_temp = float(vlm_cfg.get("contrast_temperature", 0.07))
+            contrast_loss_fn = InBatchContrastiveLoss(init_temperature=init_temp).to(device)
+            inner_model._contrast_loss_fn = contrast_loss_fn
+        inner_model._return_text_emb = True
+        contrast_params = _params(contrast_loss_fn)
+        counts["contrast"] = sum(p.numel() for p in contrast_params)
+        _maybe_add_group(contrast_params)
+
+    lambda_embed_mse = float(vlm_cfg.get("lambda_embed_mse", 0.0))
+    if lambda_embed_mse > 0:
+        aux_enabled = True
+        embed_mse_fn = getattr(inner_model, "_embed_mse_fn", None)
+        if embed_mse_fn is None:
+            from rewi.training.auxiliary_losses import CTCCompressMSELoss
+
+            d_enc = int(getattr(cfgs, "d_cnn", 512))
+            d_lm = inner_model.d_lm if hasattr(inner_model, "d_lm") else 768
+            embed_mse_fn = CTCCompressMSELoss(d_enc, d_lm).to(device)
+            inner_model._embed_mse_fn = embed_mse_fn
+        inner_model._return_text_emb = True
+        embed_mse_params = _params(embed_mse_fn)
+        counts["embed_mse"] = sum(p.numel() for p in embed_mse_params)
+        _maybe_add_group(embed_mse_params)
+
+    lambda_ec = float(vlm_cfg.get("lambda_ec", 0.0))
+    if lambda_ec > 0:
+        aux_enabled = True
+        ec_loss_fn = getattr(inner_model, "_ec_loss_fn", None)
+        if ec_loss_fn is None:
+            from rewi.training.auxiliary_losses import ECContrastiveLoss
+
+            categories = getattr(cfgs, "categories", [])
+            vocab_size = len(categories)
+            d_lm = inner_model.d_lm if hasattr(inner_model, "d_lm") else 768
+            n_neg = int(vlm_cfg.get("ec_n_negatives", 4))
+            ec_loss_fn = ECContrastiveLoss(
+                vocab_size=vocab_size,
+                d_lm=d_lm,
+                n_negatives=n_neg,
+            ).to(device)
+            inner_model._ec_loss_fn = ec_loss_fn
+            inner_model._ec_char_to_id = {c: i for i, c in enumerate(categories)}
+        ec_params = _params(ec_loss_fn)
+        counts["ec"] = sum(p.numel() for p in ec_params)
+        _maybe_add_group(ec_params)
+
+    lambda_sea = float(vlm_cfg.get("lambda_sea", 0.0))
+    if lambda_sea > 0:
+        aux_enabled = True
+        sea_loss_fn = getattr(inner_model, "_sea_loss_fn", None)
+        if sea_loss_fn is None:
+            from rewi.training.auxiliary_losses import SEATokenContrastiveLoss
+
+            sea_loss_fn = SEATokenContrastiveLoss(temperature=0.07).to(device)
+            inner_model._sea_loss_fn = sea_loss_fn
+        inner_model._return_text_emb = True
+        sea_params = _params(sea_loss_fn)
+        counts["sea"] = sum(p.numel() for p in sea_params)
+        _maybe_add_group(sea_params)
+
+    if aux_enabled:
+        inner_model._aux_losses_initialized = True
+
+    return counts
+
+
 def _build_vlm_optimizer(cfgs, model, dataloader_train):
     """Build discriminative LR optimizer for VLM mode.
 
@@ -576,16 +684,22 @@ def _build_vlm_optimizer(cfgs, model, dataloader_train):
         raise ValueError("No trainable parameters — check freeze/LoRA settings")
 
     optimizer = torch.optim.AdamW(param_groups, weight_decay=wd)
+    aux_counts = _initialize_vlm_auxiliary_losses(cfgs, model, optimizer=optimizer)
     scaler = GradScaler(enabled=bool(getattr(cfgs, "lm_use_amp", False)))
 
     logger.info(
-        "[VLM OptGroups] enc={} connector={} ctc_head={} prompt={} lm={} | "
+        "[VLM OptGroups] enc={} connector={} ctc_head={} prompt={} lm={} "
+        "contrast={} embed_mse={} ec={} sea={} | "
         "lr_enc={} lr_conn={} lr_prompt={} lr_lm={}",
         sum(p.numel() for p in enc_params),
         sum(p.numel() for p in qf_params),
         sum(p.numel() for p in ctc_params),
         sum(p.numel() for p in prompt_params),
         sum(p.numel() for p in lm_params),
+        aux_counts["contrast"],
+        aux_counts["embed_mse"],
+        aux_counts["ec"],
+        aux_counts["sea"],
         lr_enc, lr_connector, lr_prompt, lr_lm,
     )
 
@@ -764,9 +878,16 @@ def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_tr
     if not cfgs.test:
         if 'epoch' in ckp.keys():  # Resume
             epoch_start = ckp['epoch'] + 1
-            optimizer.load_state_dict(ckp['optimizer'])
-            lr_scheduler.load_state_dict(ckp['lr_scheduler'])
-            logger.info("[Resume] epoch_start={} | checkpoint={}", epoch_start, cfgs.checkpoint)
+            try:
+                optimizer.load_state_dict(ckp['optimizer'])
+                lr_scheduler.load_state_dict(ckp['lr_scheduler'])
+                logger.info("[Resume] epoch_start={} | checkpoint={}", epoch_start, cfgs.checkpoint)
+            except (ValueError, KeyError) as e:
+                logger.warning(
+                    "[Resume] optimizer/scheduler load failed ({}); "
+                    "warm-restarting from epoch {} with fresh optimizer",
+                    e, epoch_start,
+                )
             maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="after_resume")
             
         elif cfgs.freeze:  # Freeze encoder

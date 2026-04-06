@@ -241,6 +241,13 @@ class VLMModel(nn.Module):
                 lora_target_modules = self._DEFAULT_LORA_TARGETS.get(
                     model_type, self._DEFAULT_LORA_TARGETS["default"]
                 )
+                # For seq2seq models the LM's own encoder is bypassed
+                # (we feed encoder_outputs from our CNN), so restrict
+                # LoRA to decoder modules only to avoid dead params.
+                # PEFT uses re.fullmatch for a single regex string.
+                if self.is_seq2seq:
+                    alternatives = "|".join(lora_target_modules)
+                    lora_target_modules = f"decoder\\..*\\.({alternatives})"
 
             from peft import TaskType
             task_type = (

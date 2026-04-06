@@ -1,9 +1,9 @@
 #!/bin/bash
-#SBATCH -J K4-sea-word
+#SBATCH -J M1-byt5-onhw
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
-#SBATCH -p v100
-#SBATCH --gres=gpu:v100:1
+#SBATCH -p a100
+#SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=8
 #SBATCH -t 24:00:00
 #SBATCH --array=0-4
@@ -12,8 +12,8 @@ set -euo pipefail
 set -x
 
 # ---- Configuration ----
-TRAIN_YAML="K4_sea_contrastive/train-K4-sea-word.yaml"
-DATASET="wi_word_hw6_meta"
+TRAIN_YAML="M1_byt5_hybrid_mlp/train-M1-byt5-onhw.yaml"
+DATASET="onhw_wi_word_rh"
 
 WORK=/home/woody/iwso/iwso214h
 PROJ=$WORK/imu-hwr/work/REWI_work

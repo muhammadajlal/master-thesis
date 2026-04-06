@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J K4-sea-word
+#SBATCH -J N1-conf-word
 #SBATCH -o logs/slurm/%x_%A_%a.out
 #SBATCH -e logs/slurm/%x_%A_%a.err
 #SBATCH -p v100
@@ -12,7 +12,7 @@ set -euo pipefail
 set -x
 
 # ---- Configuration ----
-TRAIN_YAML="K4_sea_contrastive/train-K4-sea-word.yaml"
+TRAIN_YAML="N1_conformer_hybrid_mlp/train-N1-conformer-word.yaml"
 DATASET="wi_word_hw6_meta"
 
 WORK=/home/woody/iwso/iwso214h
