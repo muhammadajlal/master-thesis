@@ -872,7 +872,18 @@ def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_tr
     ckp["model"] = _migrate_legacy_mha_keys(ckp["model"])
     ckp["model"] = _migrate_legacy_vlm_connector_keys(ckp["model"])
 
-    res = model.load_state_dict(ckp["model"], strict=False)
+    # Filter out keys with shape mismatches (e.g. CTC head when categories change)
+    model_sd = model.state_dict()
+    filtered_sd = {}
+    shape_skipped = []
+    for k, v in ckp["model"].items():
+        if k in model_sd and model_sd[k].shape != v.shape:
+            shape_skipped.append(k)
+        else:
+            filtered_sd[k] = v
+    if shape_skipped:
+        logger.warning("load_state_dict: skipped shape-mismatched keys: {}", shape_skipped)
+    res = model.load_state_dict(filtered_sd, strict=False)
     logger.warning("load_state_dict strict=False | missing={} unexpected={}", res.missing_keys, res.unexpected_keys)
 
     if not cfgs.test:

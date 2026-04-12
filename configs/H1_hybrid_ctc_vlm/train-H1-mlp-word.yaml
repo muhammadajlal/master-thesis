@@ -62,7 +62,7 @@ seed: 42
 num_worker: 16
 cache: true
 
-epoch: 400
+epoch: 300
 epoch_warmup: 40
 freq_eval: 5
 freq_log: 50
