@@ -22,3 +22,35 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 cd /home/woody/iwso/iwso214h/imu-hwr/thesis
 git commit -m "add quantitaive analysis"
 git push origin master
+
+
+-> SFTP Download Plan (~200G top-level bundle)
+
+# Replace <user>, <host>, and <local_target_dir> on your local machine.
+# Suggested top-level bundle (verified current names/sizes):
+#   results/hwr2/Baseline-AR-ElementwiseGating      26G
+#   results/hwr2/Baseline-AR-HeadwiseGating         48G
+#   results/hwr2/Baseline-AR-Ungated                 2G
+#   results/hwr2/Baseline-REWI                      35G
+#   results/hwr2/Baseline-Transformer-CTC            2G
+#   results/hwr2/M1_byt5_hybrid_mlp                 60G
+#   results/hwr2/N1_conformer_hybrid_mlp            27G
+# Total: ~200G
+# Optional add-on if you want classical hybrid too:
+#   results/hwr2/Baseline-Hybrid                     6G  -> bundle becomes ~206G
+
+mkdir -p <local_target_dir>/results/hwr2
+sftp <user>@<host>
+sftp> lcd <local_target_dir>/results/hwr2
+sftp> get -r /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating
+sftp> get -r /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-HeadwiseGating
+sftp> get -r /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-Ungated
+sftp> get -r /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-REWI
+sftp> get -r /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-Transformer-CTC
+sftp> get -r /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/M1_byt5_hybrid_mlp
+sftp> get -r /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/N1_conformer_hybrid_mlp
+sftp> bye
+
+# Faster alternative if you have lftp locally:
+# lftp -u <user> sftp://<host> -e "lcd <local_target_dir>/results/hwr2; mirror -c --parallel=4 /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating Baseline-AR-ElementwiseGating; mirror -c --parallel=4 /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-HeadwiseGating Baseline-AR-HeadwiseGating; mirror -c --parallel=4 /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-Ungated Baseline-AR-Ungated; mirror -c --parallel=4 /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-REWI Baseline-REWI; mirror -c --parallel=4 /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-Transformer-CTC Baseline-Transformer-CTC; mirror -c --parallel=4 /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/M1_byt5_hybrid_mlp M1_byt5_hybrid_mlp; mirror -c --parallel=4 /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/N1_conformer_hybrid_mlp N1_conformer_hybrid_mlp; bye"
+

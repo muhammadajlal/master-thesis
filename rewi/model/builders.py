@@ -12,7 +12,7 @@ from .lstm import LSTM
 #from .others.vit import ViT
 #from .previous.cldnn import CLDNNDec, CLDNNEnc
 #from .previous.ott import OttBiLSTM, OttCNN
-#from .transformer import Transformer
+from .transformer import Transformer
 
 
 def build_encoder(in_chan: int, arch: str, len_seq: int = 0) -> nn.Module:
