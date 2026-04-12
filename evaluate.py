@@ -30,11 +30,9 @@ def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
     '''
     cer, wer = {}, {}
 
-    # ✅ CHANGED: make the glob recursive so it works for nested fold_X/0..4/ layouts
-    pattern = 'test_*.json' if cfgs['test'] else 'train_*.json'        # <-- ADDED (pulled out for clarity)
-    paths_result = glob(
-        os.path.join(cfgs['dir_work'], '**', pattern), recursive=True   # <-- CHANGED '**' + recursive=True
-    )
+    # Max epoch cap (inclusive): restrict "best" search to the trained regime.
+    # Resumes and accidental overshoot past cfgs['epoch'] must not leak in.
+    max_epoch_inclusive = int(cfgs.get('epoch', 300)) - 1
 
     def _infer_primary_head_from_cfg(cfg: dict) -> str:
         dual = cfg.get("dual_head", {}) or {}
@@ -87,27 +85,80 @@ def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
             return str(min(int_keys))
         return "0"
 
-    if paths_result:
+    primary = _infer_primary_head_from_cfg(cfgs)
+    eval_key = 'evaluation_ctc' if primary == 'ctc' else 'evaluation'
+
+    def _merge_fold_epoch_evals(fold_dir: str):
+        """Merge all train_*.json in fold_dir, return dict ep->(cer,wer)
+        for epochs <= max_epoch_inclusive. Newer files win on duplicate eps."""
+        merged = {}
+        files = sorted(
+            glob(os.path.join(fold_dir, 'train_*.json')),
+            key=lambda p: os.path.getmtime(p),
+        )
+        for fp in files:
+            try:
+                with open(fp, 'r') as f:
+                    d = json.load(f)
+            except Exception:
+                continue
+            for k, v in d.items():
+                if not (isinstance(k, str) and k.isdigit()):
+                    continue
+                ep = int(k)
+                if ep > max_epoch_inclusive:
+                    continue
+                if not isinstance(v, dict):
+                    continue
+                ev = v.get(eval_key) or v.get('evaluation')
+                if not isinstance(ev, dict):
+                    continue
+                c = ev.get('character_error_rate')
+                w = ev.get('word_error_rate')
+                if c is None or w is None:
+                    continue
+                merged[ep] = (float(c), float(w))
+        return merged
+
+    if cfgs['test']:
+        # Test mode keeps legacy per-file behavior (test_*.json have a single
+        # synthetic epoch key).
+        paths_result = glob(
+            os.path.join(cfgs['dir_work'], '**', 'test_*.json'),
+            recursive=True,
+        )
         for i, path_result in enumerate(sorted(paths_result)):
             with open(path_result, 'r') as f:
                 result_fd = json.load(f)
-
-            primary = _infer_primary_head_from_cfg(cfgs)
-            eval_key = 'evaluation_ctc' if primary == 'ctc' else 'evaluation'
-            best_key = 'best' if eval_key == 'evaluation' else f'best_{eval_key}'
-
-            if cfgs['test']:
-                ep = _pick_test_epoch_key(result_fd)
-                # In hybrid test mode, both eval keys are present.
-                result_best = result_fd.get(ep, {}).get(eval_key, result_fd.get(ep, {}).get('evaluation'))
-            else:
-                best_dict = result_fd.get(best_key, result_fd.get('best', {}))
-                epoch_best = best_dict['character_error_rate'][0]
-                result_best = result_fd[str(epoch_best)][eval_key]
-
+            ep = _pick_test_epoch_key(result_fd)
+            result_best = result_fd.get(ep, {}).get(
+                eval_key, result_fd.get(ep, {}).get('evaluation')
+            )
             cer[str(i)] = result_best['character_error_rate']
             wer[str(i)] = result_best['word_error_rate']
+    else:
+        # Training mode: discover fold directories (each fold is a dir
+        # containing one or more train_*.json files from resubmits/resumes).
+        fold_dirs = sorted(
+            {
+                os.path.dirname(p)
+                for p in glob(
+                    os.path.join(cfgs['dir_work'], '**', 'train_*.json'),
+                    recursive=True,
+                )
+            }
+        )
+        for i, fold_dir in enumerate(fold_dirs):
+            merged = _merge_fold_epoch_evals(fold_dir)
+            if not merged:
+                print(f"[WARN] no evaluation <= epoch {max_epoch_inclusive} in {fold_dir}")
+                continue
+            best_ep = min(merged, key=lambda e: merged[e][0])
+            c, w = merged[best_ep]
+            cer[str(i)] = c
+            wer[str(i)] = w
 
+    if cer:
         results['cer'] = {
             'raw': cer,
             'mean': np.mean(list(cer.values())).item(),
