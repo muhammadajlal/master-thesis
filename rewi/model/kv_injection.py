@@ -250,3 +250,69 @@ class KVInjectionWrapper(nn.Module):
         output = (views * gates).sum(dim=2)  # (B, K, d_lm)
 
         return output
+
+
+class KVInjectionSlim(nn.Module):
+    """Param-matched KV multi-view: fewer views with a bottleneck hidden dim.
+
+    Uses num_views=2 with Linear(d_enc→d_hidden)→GELU→Linear(d_hidden→d_lm)→LN
+    per view, matching the MLP connector param budget (~986K).
+
+    Args:
+        d_enc:      Encoder output dimension.
+        d_lm:       LM hidden dimension.
+        num_tokens: Number of output tokens (K).
+        num_views:  Number of parallel view projections.
+        d_hidden:   Bottleneck hidden dimension per view.
+    """
+
+    def __init__(
+        self,
+        d_enc: int,
+        d_lm: int,
+        num_tokens: int = 16,
+        num_views: int = 2,
+        d_hidden: int = 384,
+    ):
+        super().__init__()
+        self.d_enc = d_enc
+        self.d_lm = d_lm
+        self.num_tokens = num_tokens
+        self.num_views = num_views
+
+        self.pool = nn.AdaptiveAvgPool1d(num_tokens)
+
+        self.view_projs = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(d_enc, d_hidden),
+                nn.GELU(),
+                nn.Linear(d_hidden, d_lm),
+                nn.LayerNorm(d_lm),
+            )
+            for _ in range(num_views)
+        ])
+
+        self.gate = nn.Sequential(
+            nn.Linear(d_enc, num_views),
+            nn.Softmax(dim=-1),
+        )
+
+        n_params = sum(p.numel() for p in self.parameters())
+        logger.info("[KV Multi-View Slim] views={}, d_hidden={}, tokens={}, params={:,}",
+                     num_views, d_hidden, num_tokens, n_params)
+
+    def forward(
+        self,
+        enc_states: torch.Tensor,
+        enc_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        x = enc_states.transpose(1, 2)
+        if enc_mask is not None:
+            x = x * enc_mask.unsqueeze(1).float()
+        x = self.pool(x).transpose(1, 2)  # (B, K, d_enc)
+
+        views = torch.stack([proj(x) for proj in self.view_projs], dim=2)
+        gates = self.gate(x).unsqueeze(-1)
+        output = (views * gates).sum(dim=2)
+
+        return output
