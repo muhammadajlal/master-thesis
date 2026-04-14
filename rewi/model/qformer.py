@@ -107,3 +107,93 @@ class QFormerConnector(nn.Module):
         )  # (B, K, d_lm)
 
         return self.out_ln(out)
+
+
+class MiniQFormerConnector(nn.Module):
+    """Param-matched Q-Former: operates in a smaller internal dimension.
+
+    Uses d_inner < d_lm for the cross-attention Transformer, with linear
+    projections at input (d_enc → d_inner) and output (d_inner → d_lm).
+    This keeps the cross-attention mechanism while matching MLP param budget.
+
+    Args:
+        d_enc:        Encoder output dimension.
+        d_lm:         LM hidden dimension (final output dimension).
+        d_inner:      Internal Transformer dimension (controls param count).
+        num_queries:  Number of output modality tokens (K).
+        num_layers:   Depth of the cross-attention Transformer.
+        nhead:        Number of attention heads (must divide d_inner).
+        dim_ff:       Feed-forward hidden size (default: 4 * d_inner).
+        dropout:      Dropout rate inside Transformer layers.
+    """
+
+    def __init__(
+        self,
+        d_enc: int,
+        d_lm: int,
+        d_inner: int = 152,
+        num_queries: int = 16,
+        num_layers: int = 2,
+        nhead: int = 4,
+        dim_ff: int | None = None,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.d_enc = d_enc
+        self.d_lm = d_lm
+        self.d_inner = d_inner
+        self.num_queries = num_queries
+
+        # Project encoder features to internal dimension
+        self.proj_in = nn.Linear(d_enc, d_inner)
+        self.proj_in_ln = nn.LayerNorm(d_inner)
+
+        # Learned query vectors in internal dimension
+        self.queries = nn.Parameter(torch.randn(1, num_queries, d_inner) * 0.02)
+
+        # Transformer decoder in internal dimension
+        if dim_ff is None:
+            dim_ff = d_inner * 4
+        layer = nn.TransformerDecoderLayer(
+            d_model=d_inner,
+            nhead=nhead,
+            dim_feedforward=dim_ff,
+            dropout=dropout,
+            batch_first=True,
+            norm_first=True,
+        )
+        self.transformer = nn.TransformerDecoder(layer, num_layers)
+
+        # Project back to LM dimension
+        self.proj_out = nn.Linear(d_inner, d_lm)
+        self.out_ln = nn.LayerNorm(d_lm)
+
+    def forward(
+        self,
+        enc_states: torch.Tensor,
+        enc_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            enc_states: (B, T, d_enc) encoder features.
+            enc_mask:   (B, T) with 1 = valid, 0 = pad.
+
+        Returns:
+            (B, K, d_lm) compressed modality tokens.
+        """
+        B = enc_states.size(0)
+
+        memory = self.proj_in_ln(self.proj_in(enc_states))  # (B, T, d_inner)
+        queries = self.queries.expand(B, -1, -1)  # (B, K, d_inner)
+
+        memory_key_padding_mask = None
+        if enc_mask is not None:
+            memory_key_padding_mask = (enc_mask == 0)
+
+        out = self.transformer(
+            tgt=queries,
+            memory=memory,
+            memory_key_padding_mask=memory_key_padding_mask,
+        )  # (B, K, d_inner)
+
+        return self.out_ln(self.proj_out(out))

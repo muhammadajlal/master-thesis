@@ -335,8 +335,24 @@ def build_connector(
         k = pool_tokens if pool_tokens is not None else num_queries
         from rewi.model.kv_injection import KVInjectionWrapper
         return KVInjectionWrapper(d_enc, d_lm, num_tokens=k, num_views=4)
+    elif ctype in ("kv_slim", "kv_multiview_slim"):
+        k = pool_tokens if pool_tokens is not None else num_queries
+        from rewi.model.kv_injection import KVInjectionSlim
+        return KVInjectionSlim(d_enc, d_lm, num_tokens=k, num_views=2, d_hidden=384)
+    elif ctype in ("mini_qformer", "qformer_mini"):
+        from rewi.model.qformer import MiniQFormerConnector
+        return MiniQFormerConnector(
+            d_enc=d_enc,
+            d_lm=d_lm,
+            d_inner=152,
+            num_queries=num_queries,
+            num_layers=num_layers,
+            nhead=4,
+            dropout=dropout,
+        )
     else:
         raise ValueError(
             f"Unknown connector_type={connector_type!r}. "
-            f"Choose from: qformer, linear, mlp, pooling_mlp, conv_pool, ctc_posterior, kv_multiview"
+            f"Choose from: qformer, mini_qformer, linear, mlp, pooling_mlp, "
+            f"conv_pool, ctc_posterior, kv_multiview, kv_slim"
         )
