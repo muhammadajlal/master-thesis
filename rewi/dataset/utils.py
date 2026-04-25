@@ -12,8 +12,16 @@ def fn_collate(batch: list[tuple[torch.Tensor]]) -> tuple[torch.Tensor]:
         tuple[torch.Tensor]: Aligned batch data of sequences and labels.
     '''
     seqs, labels, lens_sig, lens_label = [], [], [], []
+    raw_texts = []
+    has_raw = False
 
-    for x, y in batch:
+    for item in batch:
+        if len(item) == 3:
+            x, y, raw = item
+            raw_texts.append(raw)
+            has_raw = True
+        else:
+            x, y = item
         seqs.append(x)
         labels.append(y)
         lens_sig.append(len(x))
@@ -24,4 +32,6 @@ def fn_collate(batch: list[tuple[torch.Tensor]]) -> tuple[torch.Tensor]:
     lens_sig = torch.tensor(lens_sig)
     lens_label = torch.tensor(lens_label)
 
+    if has_raw:
+        return seqs, labels, lens_sig, lens_label, raw_texts
     return seqs, labels, lens_sig, lens_label
