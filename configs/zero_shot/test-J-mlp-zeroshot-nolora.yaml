@@ -1,0 +1,115 @@
+# ==================================================================
+# Zero-Shot Evaluation: J-series MLP connector
+# Evaluate a J{1,2}_contrastive_mlp checkpoint on OnHW equations
+# (digits + {+, -, =, :, ·}) — character classes never seen in training.
+# sbatch patches: dir_dataset, dir_work, checkpoint, idx_fold.
+# ==================================================================
+
+vlm_enabled: true
+
+arch_en: "blconv_b"
+arch_de: "vlm"
+num_channel: 13
+len_seq: 0
+d_cnn: 512
+
+freeze: false
+aug: false
+checkpoint: null
+
+vlm:
+  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2"
+  local_files_only: true
+
+  connector_type: mlp
+  random_init_lm: false
+
+  num_queries: 16
+  qformer_layers: 2
+  qformer_nhead: 8
+  qformer_dropout: 0.15
+
+  prompt_text: "Transcribe the handwritten text from IMU sensor signals:"
+  num_soft_tokens: 20
+
+  freeze_lm: true
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_target_modules: null
+
+  z_dropout: 0.2
+  label_smoothing: 0.1
+
+  # Beam search for ZSL decoding
+  max_new_tokens: 64
+  num_beams: 4
+  repetition_penalty: 1.0
+
+  lr_connector: 0.0002
+  lr_prompt: 0.0002
+  lr_lm: 0.00001
+
+  hybrid_ctc: true
+  hybrid_lambda_ctc: 0.6
+
+  lambda_contrast: 1.0
+  contrast_temperature: 0.07
+
+# Placeholders — overwritten by slurm/test_J_zeroshot.sbatch
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_equations_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/ZeroShot/PLACEHOLDER
+idx_fold: 0
+
+device: cuda
+seed: 42
+num_worker: 8
+cache: true
+
+epoch: 1
+epoch_warmup: 0
+freq_eval: 1
+freq_log: 50
+freq_save: 10
+
+lm_max_label_len: 96
+lm_use_amp: true
+
+lr_enc: 0.0001
+weight_decay: 0.01
+lr: 0.0001
+size_batch: 8
+grad_accum_steps: 1
+
+save_best_only: true
+export_val_full: true
+test: true
+
+# Zero-shot target has character classes outside the training `categories`
+# (digits, +, -, =, :, ·). Map unknown chars to blank so the CTC-side label
+# tensor builds without error, AND flow the RAW label string through the
+# collator so AR (GPT-2) CER/WER is computed against the true target text.
+ignore_unknown_chars: true
+return_raw_label: true
+
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+use_gated_attention: false
+gating_type: elementwise
+concat:
+  enabled: false
+
+ctc_decoder: best_path
+
+# Must match training vocabulary so CTC head + char tokenizer load cleanly.
+# CTC head cannot emit digits/operators — its metric on equations is INVALID.
+# Only AR (GPT-2 BPE) CER/WER are valid ZSL results.
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
+
+# Ablation: zero LoRA B matrices after checkpoint load (restore base GPT-2)
+disable_lora_at_test: true

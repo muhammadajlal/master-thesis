@@ -51,6 +51,16 @@ mkdir -p "$OUTDIR"
 TMPCFG="${SLURM_TMPDIR:-/tmp}/train_fold${FOLD}.yaml"
 cp "$YAML_PATH" "$TMPCFG"
 
+# ---- Auto-resume: check for last.pth ----
+CKPT_PATH="${OUTDIR}/${FOLD}/checkpoints/last.pth"
+if [[ -f "$CKPT_PATH" ]]; then
+  echo "RESUME: Found checkpoint at $CKPT_PATH"
+  RESUME_CKPT="$CKPT_PATH"
+else
+  echo "FRESH START: No checkpoint found at $CKPT_PATH"
+  RESUME_CKPT=""
+fi
+
 $PY_BIN -c "
 import yaml
 with open('$TMPCFG') as f:
@@ -58,6 +68,7 @@ with open('$TMPCFG') as f:
 cfg['idx_fold'] = $FOLD
 cfg['dir_work'] = '$OUTDIR'
 cfg['dir_dataset'] = '$DATA'
+cfg['checkpoint'] = '$RESUME_CKPT' if '$RESUME_CKPT' else None
 with open('$TMPCFG', 'w') as f:
     yaml.safe_dump(cfg, f, sort_keys=False)
 print('Patched config:', '$TMPCFG')
@@ -76,6 +87,7 @@ echo "Fold:       $FOLD"
 echo "Config:     $TRAIN_YAML"
 echo "Dataset:    $DATASET"
 echo "Output:     $OUTDIR"
+echo "Resume:     ${RESUME_CKPT:-NONE}"
 echo "=============================="
 
 nvidia-smi -L

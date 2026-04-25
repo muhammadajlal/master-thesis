@@ -37,9 +37,12 @@ def _chars_to_strings(y, len_y, categories, pad_id):
 
 
 def lm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_label_len=128, hybrid=False):
-    x, y, len_x, len_y = base_collate_fn(batch)
-
-    texts = _chars_to_strings(y, len_y, categories, pad_id)
+    base = base_collate_fn(batch)
+    if len(base) == 5:
+        x, y, len_x, len_y, texts = base
+    else:
+        x, y, len_x, len_y = base
+        texts = _chars_to_strings(y, len_y, categories, pad_id)
 
     tok = hf_tokenizer(
         texts,
@@ -74,9 +77,12 @@ def vlm_collate(batch, base_collate_fn, hf_tokenizer, categories, pad_id, max_la
     """
     import torch
 
-    x, y, len_x, len_y = base_collate_fn(batch)
-
-    texts = _chars_to_strings(y, len_y, categories, pad_id)
+    base = base_collate_fn(batch)
+    if len(base) == 5:
+        x, y, len_x, len_y, texts = base
+    else:
+        x, y, len_x, len_y = base
+        texts = _chars_to_strings(y, len_y, categories, pad_id)
 
     # Check if tokenizer automatically appends EOS (e.g. T5) vs not (GPT-2)
     _probe = hf_tokenizer.encode("a")

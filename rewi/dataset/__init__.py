@@ -100,6 +100,7 @@ class HRDataset(Dataset):
                 dtype=np.float32,
             )
             label = anno['label']
+        raw_label_str = label if isinstance(label, str) else None
 
         # label pre-processing: single-character tokenization
         #label = [self.categories.index(char) for char in label]  # ctc encode
@@ -112,13 +113,21 @@ class HRDataset(Dataset):
             ids = self.tokenizer.encode(label)                 # list[int], no BOS/EOS here
             label = torch.tensor(ids, dtype=torch.int32)
         else:
-            label = [self.categories.index(c) for c in label]
+            if getattr(self, 'ignore_unknown_chars', False):
+                label = [
+                    self.categories.index(c) if c in self.categories else 0
+                    for c in label
+                ]
+            else:
+                label = [self.categories.index(c) for c in label]
             label = torch.tensor(label, dtype=torch.int32)
 
 
         # sequence pre-processing
         seq = self._process(seq, len(label))
 
+        if getattr(self, 'return_raw_label', False) and raw_label_str is not None:
+            return seq, label, raw_label_str
         return seq, label
 
     def _process(self, seq: np.ndarray, len_label: int) -> torch.Tensor:

@@ -293,6 +293,8 @@ def build_dataloaders(cfgs: argparse.Namespace, model, tok, LM_MODE: bool):
         cfgs.len_seq,
         cache=cfgs.cache,
     )
+    dataset_test.ignore_unknown_chars = bool(getattr(cfgs, 'ignore_unknown_chars', False))
+    dataset_test.return_raw_label = bool(getattr(cfgs, 'return_raw_label', False))
 
     collate_test = fn_collate
     _vlm_hybrid = bool(getattr(cfgs, "LM_HYBRID", False)) if VLM_MODE else False
@@ -885,6 +887,15 @@ def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_tr
         logger.warning("load_state_dict: skipped shape-mismatched keys: {}", shape_skipped)
     res = model.load_state_dict(filtered_sd, strict=False)
     logger.warning("load_state_dict strict=False | missing={} unexpected={}", res.missing_keys, res.unexpected_keys)
+
+    if bool(getattr(cfgs, 'disable_lora_at_test', False)):
+        zeroed = 0
+        with torch.no_grad():
+            for n, p in model.named_parameters():
+                if 'lora_B' in n:
+                    p.zero_()
+                    zeroed += 1
+        logger.warning("[disable_lora_at_test] zeroed {} lora_B tensors — LoRA deltas now 0, base LM restored", zeroed)
 
     if not cfgs.test:
         if 'epoch' in ckp.keys():  # Resume
