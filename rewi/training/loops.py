@@ -637,6 +637,59 @@ def train_one_epoch(
         from ..loss import CTCLoss
         fn_loss_ctc = CTCLoss(blank=0, reduction="mean")
 
+    # Scheduled sampling (Bengio 2015 / Mihaylova-Martins 2019, two-pass for transformers).
+    # Replaces each non-BOS decoder input token with the model's own previous-step
+    # argmax with probability p_eff, removing teacher forcing on those positions.
+    ss_cfg = getattr(man.cfgs, "scheduled_sampling", {}) or {}
+    ss_enabled = bool(ss_cfg.get("enabled", False))
+    ss_p_start = float(ss_cfg.get("p_start", 0.0))
+    ss_p_end = float(ss_cfg.get("p_end", 1.0))
+    ss_ramp_epochs = int(ss_cfg.get("ramp_epochs", max(1, int(getattr(man.cfgs, "epoch", 300)) // 2)))
+    if ss_enabled and (ds_enabled or (dec_ctc_enabled and dec_ctc_lambda > 0.0)):
+        raise ValueError(
+            "scheduled_sampling is incompatible with deep_supervision or decoder_side_ctc. "
+            "Disable those to run no-teacher-forcing experiments."
+        )
+    if ss_enabled:
+        if ss_ramp_epochs <= 0:
+            ss_p_eff = ss_p_end
+        else:
+            t = min(1.0, max(0.0, float(epoch) / float(ss_ramp_epochs)))
+            ss_p_eff = ss_p_start + t * (ss_p_end - ss_p_start)
+        man.log(
+            f"[ScheduledSampling] epoch={epoch} | p_eff={ss_p_eff:.4f} "
+            f"(p_start={ss_p_start} p_end={ss_p_end} ramp_epochs={ss_ramp_epochs})"
+        )
+    else:
+        ss_p_eff = 0.0
+
+    # Input token corruption (Bowman 2016 / Iyyer 2015 word-dropout style):
+    # keep teacher forcing on the loss side, but replace each non-special decoder
+    # input token with a uniformly random non-special token with probability p_replace.
+    # This forces the decoder to not blindly copy/trust previous-step inputs.
+    ic_cfg = getattr(man.cfgs, "input_corruption", {}) or {}
+    ic_enabled = bool(ic_cfg.get("enabled", False))
+    ic_p = float(ic_cfg.get("p_replace", 0.0))
+    if ic_enabled and ss_enabled:
+        raise ValueError(
+            "input_corruption and scheduled_sampling cannot both be enabled — "
+            "they are alternative no-TF strategies."
+        )
+    # Replacement vocabulary: indices [1, min(PAD,BOS,EOS)) — real characters only,
+    # excluding CTC blank at 0 and the three specials.
+    ic_lo = 1
+    ic_hi = min(PAD_ID, BOS_ID, EOS_ID)
+    if ic_enabled and ic_p > 0.0 and ic_hi <= ic_lo:
+        raise ValueError(
+            f"input_corruption: cannot determine a valid replacement vocab range "
+            f"(lo={ic_lo}, hi={ic_hi}). Check tokenizer special token IDs."
+        )
+    if ic_enabled and ic_p > 0.0:
+        man.log(
+            f"[InputCorruption] epoch={epoch} | p_replace={ic_p:.4f} "
+            f"(replacement_vocab=[{ic_lo}, {ic_hi}))"
+        )
+
     # AMP controllable via config (default true for backward compat)
     use_amp = bool(getattr(man.cfgs, "use_amp", True)) and torch.cuda.is_available()
 
@@ -647,6 +700,32 @@ def train_one_epoch(
         with torch.autocast('cuda', torch.float16, enabled=use_amp):
             if isinstance(fn_loss, nn.CrossEntropyLoss):  # AR mode
                 y_inp, y_tgt = build_ar_batch(y, len_y, PAD_ID, BOS_ID, EOS_ID, device=man.cfgs.device)
+
+                # Scheduled sampling: replace decoder input tokens with the model's own
+                # previous-step argmax with probability p_eff (positions t>=1 only).
+                if ss_p_eff > 0.0:
+                    with torch.no_grad():
+                        prev_logits = model(x, in_lengths=len_x, y_inp=y_inp)
+                        if isinstance(prev_logits, dict):
+                            prev_logits = prev_logits["logits"]
+                        preds = prev_logits.argmax(dim=-1)  # (B, N)
+                    # shift: pred at position t-1 becomes the candidate input at position t
+                    shifted = torch.full_like(y_inp, PAD_ID)
+                    shifted[:, 1:] = preds[:, :-1]
+                    sample_mask = torch.rand_like(y_inp, dtype=torch.float) < ss_p_eff
+                    sample_mask[:, 0] = False  # never replace BOS
+                    y_inp = torch.where(sample_mask, shifted, y_inp)
+
+                # Input corruption: randomly replace a fraction of non-special input
+                # tokens with random characters so the decoder cannot fully trust GT.
+                if ic_enabled and ic_p > 0.0:
+                    real_mask = (y_inp != PAD_ID) & (y_inp != BOS_ID) & (y_inp != EOS_ID)
+                    rand_mask = (torch.rand_like(y_inp, dtype=torch.float) < ic_p) & real_mask
+                    rand_tokens = torch.randint(
+                        ic_lo, ic_hi, y_inp.shape,
+                        device=y_inp.device, dtype=y_inp.dtype,
+                    )
+                    y_inp = torch.where(rand_mask, rand_tokens, y_inp)
 
                 # Determine what extra outputs we need
                 need_dec_ctc = dec_ctc_enabled and dec_ctc_lambda > 0.0 and fn_loss_ctc is not None

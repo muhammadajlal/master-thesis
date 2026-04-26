@@ -47,6 +47,10 @@ EXPERIMENTS = [
     ("K3_ec_loss",              "K3 (EC loss)",         "regularization"),
     ("K4_sea_contrastive",      "K4 (SEA token)",       "local_alignment"),
     ("K5_kv_multiview",         "K5 (KV inject)",       "architectural"),
+    ("L1_mini_qformer",         "L1 (mini Q-Former)",   "architectural"),
+    ("L2_kv_slim",              "L2 (KV slim)",         "architectural"),
+    ("M1_byt5_hybrid_mlp",      "M1 (ByT5 dec)",        "architectural"),
+    ("N1_conformer_hybrid_mlp", "N1 (Conformer enc)",   "architectural"),
 ]
 
 CATEGORY_COLORS = {
