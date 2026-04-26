@@ -94,7 +94,7 @@ if [[ "${USE_BPE,,}" == "true" || "${USE_BPE}" == "1" ]]; then
   fi
 fi
 
-TMPCFG="${SLURM_TMPDIR:-/tmp}/train_${DATASET}_fold${FOLD}.yaml"
+TMPCFG="${SLURM_TMPDIR:-/tmp}/train_${DATASET}_fold${FOLD}_${SLURM_JOB_ID}.yaml"
 cp "$YAML_PATH" "$TMPCFG"
 
 $PY_BIN - <<PY
