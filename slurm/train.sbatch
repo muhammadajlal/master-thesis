@@ -44,35 +44,41 @@ if [[ ! -f "$YAML_PATH" ]]; then
   exit 1
 fi
 
-# Extract arch_de and dir_work from YAML
-read -r ARCH_DE BASE_DIR_WORK <<< $(
+# Extract arch_de, base segment under hwr2/, and the full leaf path under hwr2/<base>/
+# from the YAML. Including the leaf preserves any per-experiment suffix (e.g. __p0p05)
+# so concurrent sweep variants do not collide on the same fold directory.
+read -r ARCH_DE BASE_DIR_WORK LEAF_NAME <<< $(
 $PY_BIN - "$YAML_PATH" <<'PY'
-import yaml, os, sys
+import yaml, sys
 with open(sys.argv[1], "r") as f:
     cfg = yaml.safe_load(f)
 arch_de = cfg.get("arch_de", "unknown")
 dir_work = cfg.get("dir_work", "")
-# Extract base output name from dir_work if present
-# e.g., /path/to/results/hwr2/multimodal_t5_small/... -> multimodal_t5_small
+base_name = "train_run"
+leaf_name = ""
 if dir_work:
-    parts = dir_work.split("/")
-    # Find 'hwr2' and take next part
+    parts = [p for p in dir_work.split("/") if p]
     try:
         idx = parts.index("hwr2")
         base_name = parts[idx + 1] if idx + 1 < len(parts) else "train_run"
+        leaf_name = "/".join(parts[idx + 2:])  # everything after hwr2/<base>/
     except (ValueError, IndexError):
-        base_name = "train_run"
-else:
-    base_name = "train_run"
-print(arch_de, base_name)
+        pass
+# Fallback when YAML dir_work has no leaf segment
+if not leaf_name:
+    leaf_name = f"{arch_de}____no_dataset"  # placeholder; overridden by DATASET below
+print(arch_de, base_name, leaf_name)
 PY
 )
 
-# Results folder: encode whether tokenizer is used or not + arch_de from YAML
+# Results folder. The BPE branch keeps its legacy convention; the standard branch
+# now uses the YAML leaf name (preserving any per-experiment suffix). If the YAML
+# leaf is the historical "<arch>__<dataset>" form it stays compatible; if it carries
+# a suffix like "<arch>__<dataset>__p0p20" the suffix is preserved end-to-end.
 if [[ "${USE_BPE,,}" == "true" || "${USE_BPE}" == "1" ]]; then
   BASE_OUT=$WORK/imu-hwr/results/hwr2/blconv_${ARCH_DE}_tokenizer_${BPE_SIZE}/${ARCH_DE}__${DATASET}
 else
-  BASE_OUT=$WORK/imu-hwr/results/hwr2/${BASE_DIR_WORK}/${ARCH_DE}__${DATASET}
+  BASE_OUT=$WORK/imu-hwr/results/hwr2/${BASE_DIR_WORK}/${LEAF_NAME}
 fi
 
 FOLD=${SLURM_ARRAY_TASK_ID}
