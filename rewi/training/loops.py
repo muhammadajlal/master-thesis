@@ -40,6 +40,91 @@ except ImportError:
     HAS_PANDAS = False
 
 
+def _build_bigram_lookup(
+    dataloader: DataLoader,
+    vocab_size: int,
+    spec_ids: tuple,
+    *,
+    device,
+    smoothing: float = 1.0,
+) -> torch.Tensor:
+    """Build P(Y | X) where (X, Y) are adjacent characters in the training labels.
+
+    For each ordered character pair (X, Y) such that Y immediately follows X in
+    any training label, increment counts[X, Y]. Apply add-`smoothing` Laplace
+    smoothing then row-normalize so each row sums to 1. Special tokens
+    (PAD, BOS, EOS) and CTC-blank index 0 are excluded from both X and Y so
+    that corruption never selects or is conditioned on them.
+
+    Returns
+    -------
+    Tensor of shape (vocab_size, vocab_size) on `device`.
+    """
+    counts = torch.full((vocab_size, vocab_size), float(smoothing), dtype=torch.float, device=device)
+    spec = set(int(s) for s in spec_ids)
+    # Mass set to 0 for special-token destinations so they cannot be sampled.
+    spec_idx = torch.tensor(sorted(spec), dtype=torch.long, device=device)
+    for batch in dataloader:
+        # Training batches are (x, y, len_x, len_y).
+        y = batch[1]
+        len_y = batch[3]
+        if y.dim() == 2:
+            for b in range(y.size(0)):
+                L = int(len_y[b])
+                seq = y[b, :L].tolist()
+                for i in range(len(seq) - 1):
+                    a, c = int(seq[i]), int(seq[i + 1])
+                    if a in spec or c in spec:
+                        continue
+                    counts[a, c] += 1.0
+        else:
+            offset = 0
+            for b in range(int(len_y.numel())):
+                L = int(len_y[b])
+                seq = y[offset:offset + L].tolist()
+                offset += L
+                for i in range(len(seq) - 1):
+                    a, c = int(seq[i]), int(seq[i + 1])
+                    if a in spec or c in spec:
+                        continue
+                    counts[a, c] += 1.0
+    counts[:, spec_idx] = 0.0
+    counts = counts / counts.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+    return counts
+
+
+def _load_confusion_lookup(
+    path_template: str,
+    *,
+    fold: int,
+    vocab_size: int,
+    spec_ids: tuple,
+    device,
+    smoothing: float = 1.0,
+) -> torch.Tensor:
+    """Load a per-fold confusion matrix saved as a `.npy` file.
+
+    Path may contain `{fold}` which is substituted with the current fold index.
+    The file is expected to hold a (vocab_size, vocab_size) integer-or-float
+    matrix where row X column Y is the count of "true X mispredicted as Y".
+    The matrix is Laplace-smoothed and row-normalized; mass on special tokens
+    (PAD, BOS, EOS, CTC-blank 0) is zeroed before normalisation.
+    """
+    import numpy as np
+    path = path_template.format(fold=fold)
+    raw = np.load(path)
+    if raw.shape != (vocab_size, vocab_size):
+        raise ValueError(
+            f"confusion matrix at {path} has shape {raw.shape}, "
+            f"expected ({vocab_size}, {vocab_size})"
+        )
+    counts = torch.tensor(raw, dtype=torch.float, device=device) + float(smoothing)
+    spec_idx = torch.tensor(sorted({int(s) for s in spec_ids}), dtype=torch.long, device=device)
+    counts[:, spec_idx] = 0.0
+    counts = counts / counts.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+    return counts
+
+
 def train_one_epoch_lm(
     dataloader: DataLoader,
     model: nn.Module,
@@ -664,12 +749,24 @@ def train_one_epoch(
         ss_p_eff = 0.0
 
     # Input token corruption (Bowman 2016 / Iyyer 2015 word-dropout style):
-    # keep teacher forcing on the loss side, but replace each non-special decoder
-    # input token with a uniformly random non-special token with probability p_replace.
-    # This forces the decoder to not blindly copy/trust previous-step inputs.
+    # keep teacher forcing on the loss side, but corrupt the decoder input via
+    # one of several configurable mechanisms. Five modes:
+    #   uniform        — replacement drawn uniformly over real characters
+    #   bigram_right   — replacement drawn from P(Y | X) where X is the original
+    #                    char and Y is its training-corpus successor
+    #   bigram_left    — same table as bigram_right but indexed by the LEFT
+    #                    context (label[t-1]) so the corrupted local bigram
+    #                    stays inside the language's distribution
+    #   self_confusion — replacement drawn from P(Y | X) where the matrix is the
+    #                    baseline AR's character-level confusion matrix on the
+    #                    training set (per-fold, free-running greedy decode)
+    #   adjacent_swap  — instead of a substitution, swap (y_inp[t], y_inp[t+1])
+    #                    with probability p_replace; captures transposition-style
+    #                    errors common in handwriting
     ic_cfg = getattr(man.cfgs, "input_corruption", {}) or {}
     ic_enabled = bool(ic_cfg.get("enabled", False))
     ic_p = float(ic_cfg.get("p_replace", 0.0))
+    ic_mode = str(ic_cfg.get("mode", "uniform")).lower()
     if ic_enabled and ss_enabled:
         raise ValueError(
             "input_corruption and scheduled_sampling cannot both be enabled — "
@@ -684,9 +781,53 @@ def train_one_epoch(
             f"input_corruption: cannot determine a valid replacement vocab range "
             f"(lo={ic_lo}, hi={ic_hi}). Check tokenizer special token IDs."
         )
+
+    # Build / load the lookup table for substitution-with-distribution modes
+    # (bigram_right, bigram_left, self_confusion). Cached on the manager so we
+    # do not rebuild every epoch. uniform and adjacent_swap need no table.
+    ic_lookup = None
+    _SUB_MODES = ("bigram_right", "bigram_left", "self_confusion")
+    if ic_enabled and ic_p > 0.0 and ic_mode in _SUB_MODES:
+        # bigram_left and bigram_right share the SAME training-corpus bigram
+        # table; only the lookup-key differs at sample time.
+        cache_key = "bigram_table" if ic_mode in ("bigram_right", "bigram_left") else ic_mode
+        cache_attr = f"_ic_lookup_{cache_key}"
+        if hasattr(man, cache_attr):
+            ic_lookup = getattr(man, cache_attr)
+        else:
+            vocab_size = int(model.num_cls) if hasattr(model, "num_cls") else int(getattr(man.cfgs, "num_cls", 0))
+            if vocab_size <= 0:
+                raise RuntimeError("input_corruption: cannot infer vocab_size from model")
+            ic_smoothing = float(ic_cfg.get("smoothing", 1.0))
+            spec_ids = (PAD_ID, BOS_ID, EOS_ID, 0)  # also exclude CTC-blank index 0
+            if ic_mode in ("bigram_right", "bigram_left"):
+                ic_lookup = _build_bigram_lookup(
+                    dataloader, vocab_size, spec_ids,
+                    device=man.cfgs.device, smoothing=ic_smoothing,
+                )
+            elif ic_mode == "self_confusion":
+                conf_path_template = ic_cfg.get("confusion_path", None)
+                if conf_path_template is None:
+                    raise ValueError(
+                        "input_corruption mode=self_confusion requires "
+                        "input_corruption.confusion_path (with {fold} placeholder)"
+                    )
+                ic_lookup = _load_confusion_lookup(
+                    conf_path_template, fold=int(getattr(man.cfgs, "idx_fold", 0)),
+                    vocab_size=vocab_size, spec_ids=spec_ids,
+                    device=man.cfgs.device, smoothing=ic_smoothing,
+                )
+            setattr(man, cache_attr, ic_lookup)
+    elif ic_enabled and ic_p > 0.0 and ic_mode not in ("uniform", "adjacent_swap") + _SUB_MODES:
+        raise ValueError(
+            f"input_corruption.mode must be one of "
+            f"{{uniform, bigram_right, bigram_left, self_confusion, adjacent_swap}}, "
+            f"got: {ic_mode}"
+        )
+
     if ic_enabled and ic_p > 0.0:
         man.log(
-            f"[InputCorruption] epoch={epoch} | p_replace={ic_p:.4f} "
+            f"[InputCorruption] epoch={epoch} | mode={ic_mode} | p_replace={ic_p:.4f} "
             f"(replacement_vocab=[{ic_lo}, {ic_hi}))"
         )
 
@@ -716,16 +857,59 @@ def train_one_epoch(
                     sample_mask[:, 0] = False  # never replace BOS
                     y_inp = torch.where(sample_mask, shifted, y_inp)
 
-                # Input corruption: randomly replace a fraction of non-special input
-                # tokens with random characters so the decoder cannot fully trust GT.
+                # Input corruption: corrupt a fraction of non-special input tokens.
+                # The CE loss is still computed against the unmodified y_tgt. The
+                # corruption mechanism is selected by ic_mode.
+                # NOTE: never name a local `idx` here — that would shadow the
+                # outer enumerate(dataloader) counter and break man.update_iteration.
                 if ic_enabled and ic_p > 0.0:
                     real_mask = (y_inp != PAD_ID) & (y_inp != BOS_ID) & (y_inp != EOS_ID)
-                    rand_mask = (torch.rand_like(y_inp, dtype=torch.float) < ic_p) & real_mask
-                    rand_tokens = torch.randint(
-                        ic_lo, ic_hi, y_inp.shape,
-                        device=y_inp.device, dtype=y_inp.dtype,
-                    )
-                    y_inp = torch.where(rand_mask, rand_tokens, y_inp)
+
+                    if ic_mode == "adjacent_swap":
+                        # With prob p_replace, swap (y_inp[t], y_inp[t+1]).
+                        # Skip positions where t or t+1 is special. Conflicts
+                        # (consecutive Trues) are tolerated; at p=0.15 they are
+                        # rare (<2% of positions) and produce slightly more
+                        # chaotic local noise rather than incorrect behaviour.
+                        real_next = real_mask.roll(-1, dims=-1)
+                        real_next[:, -1] = False
+                        swap_cand = (
+                            (torch.rand_like(y_inp, dtype=torch.float) < ic_p)
+                            & real_mask & real_next
+                        )
+                        # Position t gets old[t+1] when swap_cand[t] is True;
+                        # position t gets old[t-1] when swap_cand[t-1] is True.
+                        y_next = y_inp.roll(-1, dims=-1)
+                        y_prev = y_inp.roll(1, dims=-1)
+                        swap_back = swap_cand.roll(1, dims=-1)
+                        swap_back[:, 0] = False
+                        new_y = torch.where(swap_cand, y_next, y_inp)
+                        new_y = torch.where(swap_back, y_prev, new_y)
+                        y_inp = new_y
+                    else:
+                        # Substitution-based modes: pick positions to replace,
+                        # then draw a replacement from the configured distribution.
+                        rand_mask = (torch.rand_like(y_inp, dtype=torch.float) < ic_p) & real_mask
+                        if ic_mode == "uniform":
+                            rand_tokens = torch.randint(
+                                ic_lo, ic_hi, y_inp.shape,
+                                device=y_inp.device, dtype=y_inp.dtype,
+                            )
+                        else:
+                            # Build the per-position lookup key:
+                            #   bigram_right / self_confusion: key = original char  (label[t])
+                            #   bigram_left:                   key = left-context   (label[t-1])
+                            if ic_mode == "bigram_left":
+                                key = torch.roll(y_inp, shifts=1, dims=-1)
+                                key[:, 0] = BOS_ID  # sentinel for position 0
+                            else:
+                                key = y_inp
+                            lookup_idx = key.clamp(min=0, max=ic_lookup.size(0) - 1)
+                            rows = ic_lookup[lookup_idx]                      # (B, N, V)
+                            flat = rows.reshape(-1, rows.size(-1))            # (B*N, V)
+                            sampled = torch.multinomial(flat, 1).reshape_as(y_inp)
+                            rand_tokens = sampled.to(dtype=y_inp.dtype)
+                        y_inp = torch.where(rand_mask, rand_tokens, y_inp)
 
                 # Determine what extra outputs we need
                 need_dec_ctc = dec_ctc_enabled and dec_ctc_lambda > 0.0 and fn_loss_ctc is not None
