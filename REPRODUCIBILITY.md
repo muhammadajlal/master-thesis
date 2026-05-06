@@ -1,67 +1,9 @@
 # Reproducibility / Replication Guide
 
-## 📁 Repo Structure
+This document is the **replication recipe** for the thesis tables: how to obtain the public data, set up an offline-friendly environment, and re-run the experiments end-to-end.
 
-```
-work/REWI_work/
-├── main.py                 # Main training/evaluation entry point
-├── evaluate.py             # Cross-validation aggregation
-├── pretrain_decoder.py     # Text-only decoder pretraining
-│
-├── configs/                # YAML configuration files
-│   ├── train.yaml          # Base training config
-│   ├── test.yaml           # Evaluation config
-│   └── ...
-│
-├── rewi/                   # Core library
-│   ├── model/              # Neural network architectures
-│   │   ├── __init__.py     # BaseModel, build_encoder
-│   │   ├── conv.py         # CNN encoders (ConvNeXt, etc.)
-│   │   ├── transformer.py  # Transformer decoder
-│   │   ├── ARDecoder.py    # Autoregressive decoder
-│   │   └── multimodal_lm_model.py  # HuggingFace LM integration
-│   │
-│   ├── dataset/            # Data loading
-│   │   ├── __init__.py     # HRDataset
-│   │   ├── utils.py        # Collate functions
-│   │   └── lm_collate.py   # LM-specific collation
-│   │
-│   ├── training/           # Training loops and utilities
-│   │   ├── __init__.py
-│   │   ├── loops.py        # train_one_epoch, test functions
-│   │   └── utils.py        # Freeze/unfreeze, optimizer helpers
-│   │
-│   ├── analysis/           # Qualitative & quantitative analysis
-│   │   ├── __init__.py
-│   │   ├── attention.py    # Cross-attention visualization
-│   │   ├── gradcam.py      # Grad-CAM 1D for encoder
-│   │   ├── selection.py    # Sample selection by quantiles
-│   │   └── metrics.py      # Levenshtein distance, CER
-│   │
-│   ├── tokenizer/          # Text tokenization
-│   │   ├── __init__.py
-│   │   ├── base.py         # BaseTokenizer interface
-│   │   ├── bpe.py          # SentencePiece BPE tokenizer
-│   │   ├── char.py         # Character-level tokenizer
-│   │   └── utils.py        # Text normalization
-│   │
-│   ├── evaluate.py         # Evaluation metrics (CER, WER)
-│   ├── visualize.py        # Result visualization
-│   ├── manager.py          # RunManager for logging/checkpointing
-│   ├── loss.py             # CTC loss wrapper
-│   └── ctc_decoder.py      # CTC best-path decoder
-│
-├── analysis/               # Analysis scripts and outputs
-│   ├── scripts/            # Quantitative analysis scripts
-│   └── notebooks/          # Jupyter notebooks
-│
-├── scripts/                # Utility scripts
-│   └── tools/              # Plotting, preprocessing tools
-│
-└── slurm/                  # Cluster job scripts
-```
+For the project description, repo layout, and general usage of `main.py` / `evaluate.py`, see [README.md](README.md).
 
-This repository contains the full training and evaluation code used in our experiments.
 The most replication-friendly way to reproduce results is to run the **exact YAML configs** from the repository root and generate `results.json` via `evaluate.py`.
 
 ## Data availability
