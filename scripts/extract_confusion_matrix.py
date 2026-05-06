@@ -46,10 +46,15 @@ from rewi.utils import seed_everything
 WORD_CATS = ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
 SENT_CATS = ["", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "ä", "ö", "ü", "Ä", "Ö", "Ü", "ß", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "(", ")", "'", "?", "!", "+", "=", "-", "/", ";", ":", "·", " "]
 
+EQUATION_CATS = ["", "+", "-", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ":", "=", "·"]
+
 DATASET_CONFIG = {
-    "onhw_wi_word_rh":  {"categories": WORD_CATS},
-    "wi_word_hw6_meta": {"categories": WORD_CATS},
-    "wi_sent_hw6_meta": {"categories": SENT_CATS},
+    "onhw_wi_word_rh":           {"categories": WORD_CATS},
+    "onhw_wd_word_rh":           {"categories": WORD_CATS},
+    "wi_word_hw6_meta":          {"categories": WORD_CATS},
+    "wi_sent_hw6_meta":          {"categories": SENT_CATS},
+    "onhw_equations_wi_word_rh": {"categories": EQUATION_CATS},
+    "onhw_equations_wd_word_rh": {"categories": EQUATION_CATS},
 }
 
 # Source checkpoint for confusion-matrix extraction. We use the AR-Elementwise
@@ -59,6 +64,22 @@ DATASET_CONFIG = {
 # q_proj/k_proj/v_proj/out_proj instead of nn.MultiheadAttention's combined
 # in_proj_weight); a one-shot state_dict translator below repackages those
 # weights into the format the current GatedMultiheadAttention wrapper expects.
+def _ckpt_template_for(dataset: str) -> str:
+    """Pick the right baseline-checkpoint root per dataset.
+    WD-split datasets and equation datasets use the freshly-trained AR-Elementwise
+    runs (current code path, no state_dict translation needed); the original WI
+    Stabilo / OnHW baselines are in the legacy layout (translator handles them).
+    """
+    if dataset == "onhw_wd_word_rh":
+        return "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating-WD/ar_transformer_s__{dataset}/fold_{fold}/{fold}/checkpoints/best_cer.pth"
+    if dataset.startswith("onhw_equations_wi"):
+        return "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating-Equations-WI/ar_transformer_s__{dataset}/fold_{fold}/{fold}/checkpoints/best_cer.pth"
+    if dataset.startswith("onhw_equations_wd"):
+        return "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating-Equations-WD/ar_transformer_s__{dataset}/fold_{fold}/{fold}/checkpoints/best_cer.pth"
+    # Default: the WI Stabilo / OnHW baselines (legacy state_dict layout).
+    return "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating/ar_transformer_s__{dataset}/fold_{fold}/{fold}/checkpoints/best_cer.pth"
+
+
 CKPT_TEMPLATE = "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating/ar_transformer_s__{dataset}/fold_{fold}/{fold}/checkpoints/best_cer.pth"
 
 
@@ -159,7 +180,7 @@ def build_confusion_matrix_for_fold(dataset: str, fold: int, device: str = "cuda
         gating_type="elementwise",
         pad_id=PAD_ID,
     ).to(device)
-    ckpt_path = CKPT_TEMPLATE.format(dataset=dataset, fold=fold)
+    ckpt_path = _ckpt_template_for(dataset).format(dataset=dataset, fold=fold)
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     raw_sd = ckpt["model"]
     # Detect the older attention layout by presence of `q_proj.weight` keys.
