@@ -187,3 +187,17 @@ cython_debug/
 *.code-workspace
 /temp*
 .DS_Store
+
+# Local agent / assistant configuration (do not push)
+CLAUDE.md
+.claude/
+.claude.json
+
+# Stray TeX build artifacts (from running pdflatex outside the publications subtree)
+texput.log
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
