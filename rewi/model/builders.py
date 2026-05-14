@@ -69,6 +69,13 @@ def build_decoder(
             return AblaDec(dim_in, num_cls)
 
         # CTC per-timestep Transformers
+        case 'transformer_xs':
+            # Param-matched parallel to ar_transformer_xs (REWI's CTC budget).
+            # Mirrors the AR shrink: half the depth of `transformer_s`, slightly
+            # narrower FFN to land on the same total budget.
+            return Transformer(size_in=dim_in, num_cls=num_cls,
+                               d_model=256, nhead=4, num_layers=2, dim_ff=896,
+                               p_drop=0.1, apply_softmax=False)
         case 'transformer_s':
             return Transformer(size_in=dim_in, num_cls=num_cls,
                                d_model=256, nhead=4, num_layers=4, dim_ff=1024,
@@ -87,6 +94,12 @@ def build_decoder(
                                p_drop=0.2, apply_softmax=False)
 
         # AR Transformer decoders (cross-attention)
+        case 'ar_transformer_xs':
+            # Param-matched to REWI's CTC baseline (~4.64M total with blconv_b enc).
+            # Half the depth of `s` and slightly narrower FFN to land on budget.
+            return ARDecoder(vocab_size=num_cls, d_model=256, nhead=4, layers=2,
+                             dim_ff=896, pdrop=0.1, use_gated_attention=use_gated_attention,
+                             gating_type=gating_type)
         case 'ar_transformer_s':
             return ARDecoder(vocab_size=num_cls, d_model=256, nhead=4, layers=4,
                              dim_ff=1024, pdrop=0.1, use_gated_attention=use_gated_attention,

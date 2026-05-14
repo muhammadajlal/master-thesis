@@ -84,7 +84,7 @@ def setup_tokenizer(cfgs: argparse.Namespace):
         vocab_dec: Vocabulary size for decoder.
         PAD_ID, BOS_ID, EOS_ID: Special token IDs.
     """
-    AR_MODE = cfgs.arch_de in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
+    AR_MODE = cfgs.arch_de in {"ar_transformer_xs", "ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
     
     tok = None
     if getattr(cfgs, 'use_bpe', False):
@@ -1346,7 +1346,7 @@ def main(cfgs: argparse.Namespace) -> None:
         cfgs: Configuration namespace from YAML file.
     """
     # Determine training regime
-    AR_MODE = cfgs.arch_de in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
+    AR_MODE = cfgs.arch_de in {"ar_transformer_xs", "ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
     LM_MODE = cfgs.arch_de in {"byt5_small", "t5-small"}
     VLM_MODE = bool(getattr(cfgs, "vlm_enabled", False))
 

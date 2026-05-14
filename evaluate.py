@@ -5,8 +5,13 @@ from glob import glob
 
 import numpy as np
 import torch
+import torch.nn as nn
 import yaml
-from thop import profile
+from torch.utils.flop_counter import FlopCounterMode
+# Legacy counter retained for fallback; see _LEGACY_get_macs_params() at the
+# bottom of this file. To switch back, replace the call in main() and uncomment
+# the line below.
+# from thop import profile
 
 from rewi.model import BaseModel, DualHeadModel, build_encoder
 from rewi.model.multimodal_lm_model import MultimodalLMModel
@@ -15,6 +20,36 @@ from rewi.model.vlm_model import VLMModel
 from rewi.tokenizer import BPETokenizer
 
 import time
+
+
+class InferWrapper(nn.Module):
+    """Routes the input through the model's inference path.
+
+    For AR-style decoders we call ``model.generate(x, len_max=...)`` so the
+    FLOP counter sees the full ``len_max``-step decoding trajectory rather
+    than a single forward pass. For non-AR decoders (CTC) we just call
+    ``model(x)``. For VLM/LM wrappers we use their own ``generate(x, len_x)``
+    method. For DualHeadModel we drive the AR head via its inner
+    ``BaseModel.generate``.
+    """
+
+    def __init__(self, base_model: nn.Module, mode: str, *, len_max: int = 32) -> None:
+        super().__init__()
+        self.model = base_model
+        self.mode = mode  # one of: "ar", "ctc", "dual", "vlm", "lm"
+        self.len_max = int(len_max)
+
+    def forward(self, x: torch.Tensor, len_x: torch.Tensor | None = None) -> torch.Tensor:
+        if self.mode in ("ar", "dual"):
+            # Both BaseModel(AR) and DualHeadModel expose .generate(x, len_max).
+            return self.model.generate(x, len_max=self.len_max)
+        if self.mode == "ctc":
+            return self.model(x)
+        if self.mode in ("vlm", "lm"):
+            if len_x is None:
+                len_x = torch.tensor([x.size(-1)], dtype=torch.long, device=x.device)
+            return self.model.generate(x, len_x)
+        raise ValueError(f"unknown InferWrapper mode: {self.mode}")
 
 
 def get_mean_std_cv(cfgs: dict, results: dict = {}) -> dict:
@@ -240,7 +275,7 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
         """
         base = int(len(cfgs['categories']))
         arch_de = str(cfgs.get('arch_de'))
-        ar_mode = arch_de in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
+        ar_mode = arch_de in {"ar_transformer_xs", "ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
 
         if bool(cfgs.get('use_bpe', False)):
             tok_cfg = cfgs.get('tokenizer', {}) or {}
@@ -258,68 +293,6 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
         vocab_dec = base + (3 if ar_mode else 0)
         vocab_ctc = base
         return int(vocab_dec), int(vocab_ctc), int(pad_id), int(bos_id), int(eos_id)
-
-    class _ProfileWrapper(torch.nn.Module):
-        """Force execution of optional branches so THOP counts their params."""
-
-        def __init__(
-            self,
-            model: torch.nn.Module,
-            *,
-            kind: str,
-            force_dec_ctc: bool = False,
-            force_deep_supervision: bool = False,
-        ) -> None:
-            super().__init__()
-            self.model = model
-            self.kind = str(kind)
-            self.force_dec_ctc = bool(force_dec_ctc)
-            self.force_deep_supervision = bool(force_deep_supervision)
-
-        def forward(self, x: torch.Tensor):
-            with torch.no_grad():
-                # DualHeadModel aux branches are gated on model.training.
-                # BaseModel dec-CTC is gated on forward(return_dec_ctc=True).
-                if self.kind == 'dual':
-                    force_train = bool(self.force_dec_ctc or self.force_deep_supervision)
-                    prev_mode = self.model.training
-                    try:
-                        self.model.train(force_train)
-                        B = x.size(0)
-                        y_inp = torch.zeros(B, 2, dtype=torch.long, device=x.device)
-                        out = self.model(x, y_inp=y_inp, return_ar=True, return_ctc=True)
-                        y = out.get('ar_logits', None)
-                        if y is None:
-                            y = out['ctc_logits']
-                        for t in out.get('ar_logits_layers', []) or []:
-                            y = y + (t.sum() * 0.0)
-                        for t in out.get('dec_ctc_logits_layers', []) or []:
-                            y = y + (t.sum() * 0.0)
-                        return y
-                    finally:
-                        self.model.train(prev_mode)
-
-                if self.kind == 'base':
-                    # Try AR-style forward to ensure decoder-side CTC executes.
-                    B = x.size(0)
-                    y_inp = torch.zeros(B, 2, dtype=torch.long, device=x.device)
-                    out = self.model(
-                        x,
-                        y_inp=y_inp,
-                        return_ar_layers=bool(self.force_dec_ctc),
-                        return_dec_ctc=bool(self.force_dec_ctc),
-                    )
-                    if isinstance(out, dict):
-                        y = out['logits']
-                        for t in out.get('dec_ctc_logits_layers', []) or []:
-                            y = y + (t.sum() * 0.0)
-                        for t in out.get('logits_layers', []) or []:
-                            y = y + (t.sum() * 0.0)
-                        return y
-                    return out
-
-                # Fallback: just run the model.
-                return self.model(x)
 
     arch_de = str(cfgs.get('arch_de', ''))
     lm_mode = arch_de in {'byt5_small', 't5-small'}
@@ -367,20 +340,7 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
             vocab_ctc=vocab_ctc,
             categories=categories,
         ).eval()
-
-        # Dummy inputs for profiling (word vs sentence length heuristic)
-        T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
-        x = torch.randn(1, cfgs['num_channel'], T)
-        len_x = torch.tensor([T], dtype=torch.long)
-        labels = torch.zeros((1, 8), dtype=torch.long)
-
-        try:
-            macs, params = profile(model, inputs=(x, len_x, labels), verbose=False)
-        except Exception as exc:
-            # THOP may not fully support HF Transformer internals; always return params.
-            params = sum(p.numel() for p in model.parameters())
-            macs = 0
-            print(f"[WARN] THOP MACs failed for VLM; returning macs=0. Error: {exc}")
+        wrapper_mode = "vlm"
 
     elif lm_mode:
         # Build encoder + LM wrapper mirroring main.py
@@ -406,14 +366,8 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
             proj_dropout=float(cfgs.get('lm_proj_dropout', 0.0)),
             freeze_encoder=bool(cfgs.get('freeze', True)),
         ).eval()
+        wrapper_mode = "lm"
 
-        # Dummy inputs for profiling (word vs sentence length heuristic)
-        T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
-        x = torch.randn(1, cfgs['num_channel'], T)
-        len_x = torch.tensor([T], dtype=torch.long)
-        labels = torch.zeros((1, 8), dtype=torch.long)  # small label length to keep thop fast
-
-        macs, params = profile(model, inputs=(x, len_x, labels), verbose=False)
     else:
         vocab_dec, vocab_ctc, pad_id, bos_id, eos_id = _infer_vocab_and_ids(cfgs)
 
@@ -442,6 +396,7 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
                 tie_cfg=tie_cfg,
                 dual_cfg=dual_cfg,
             ).eval()
+            wrapper_mode = "dual"
         else:
             model = BaseModel(
                 cfgs['arch_en'],
@@ -455,32 +410,45 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
                 pad_id=pad_id,
                 decoder_side_ctc_cfg=cfgs.get('decoder_side_ctc', {}) or {},
             ).eval()
+            wrapper_mode = "ar" if getattr(model, "use_ar", False) else "ctc"
 
+        # BaseModel / DualHeadModel both expose .infer() to switch the encoder
+        # and AR decoder to their inference-mode fast paths (fused BN, cached attn).
         model.infer()
-        T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
-        x = torch.randn(1, cfgs['num_channel'], T)
 
-        if dual_enabled:
-            dec_ctc_cfg = dual_cfg.get('decoder_side_ctc', {}) or {}
-            deep_cfg = dual_cfg.get('deep_supervision', {}) or {}
-            wrap = _ProfileWrapper(
-                model,
-                kind='dual',
-                force_dec_ctc=bool(dec_ctc_cfg.get('enabled', False)),
-                force_deep_supervision=bool(deep_cfg.get('enabled', False)),
-            )
-            macs, params = profile(wrap, inputs=(x,), verbose=False)
-        else:
-            dec_ctc_cfg = cfgs.get('decoder_side_ctc', {}) or {}
-            wrap = _ProfileWrapper(
-                model,
-                kind='base',
-                force_dec_ctc=bool(dec_ctc_cfg.get('enabled', False)),
-            )
-            macs, params = profile(wrap, inputs=(x,), verbose=False)
+    # ---- Common: build dummy input, wrap, count FLOPs and total params ------
+    # Following the supervisor's approach (FlopCounterMode is ATen-level and
+    # captures attention SDPA + HF Transformer internals that THOP missed;
+    # InferWrapper.generate() runs the full autoregressive decode rather than
+    # a single forward step). For VLM/LM the model has its own generate(x,len_x).
+    T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+    x = torch.randn(1, cfgs['num_channel'], T)
+    len_x = torch.tensor([T], dtype=torch.long)
+    len_max = int(cfgs.get('generate_len_max', 32))
 
-    results['macs'] = int(macs)
+    wrapper = InferWrapper(model, mode=wrapper_mode, len_max=len_max)
+
+    # Params: total count including frozen branches (robust across thop's blind spots).
+    params = sum(p.numel() for p in model.parameters())
+
+    flops = 0
+    try:
+        with torch.no_grad():
+            with FlopCounterMode(wrapper, display=False) as flop_counter:
+                if wrapper_mode in ("vlm", "lm"):
+                    wrapper(x, len_x=len_x)
+                else:
+                    wrapper(x)
+            flops = int(flop_counter.get_total_flops())
+    except Exception as exc:
+        print(f"[WARN] FlopCounterMode failed for mode={wrapper_mode}: {exc}")
+        flops = 0
+
     results['params'] = int(params)
+    results['flops'] = int(flops)
+    # Legacy field: 1 MAC ≈ 2 FLOPs (one multiply + one add).
+    results['macs'] = int(flops // 2)
+    results['generate_len_max'] = len_max
     results = {k: v for k, v in sorted(results.items())}
     return results
 
@@ -537,8 +505,233 @@ def main_ac(dir_work: str) -> None:
 
     with open(os.path.join(dir_work, 'results.json'), 'w') as f:
         json.dump(results, f)
-                  
+
     print(results)
+
+
+# =============================================================================
+# LEGACY: pre-2026-05-11 thop-based compute counter.
+#
+# Switched to FlopCounterMode + InferWrapper(generate) on 2026-05-11 because
+# `thop.profile` (a) silently undercounts params in `nn.MultiheadAttention`
+# and gated cross-attention (our AR baseline was reported as 4.82M but is
+# actually 6.94M), and (b) only profiles a single forward step rather than
+# the full autoregressive generation, so reported MACs for AR/Hybrid/VLM/LM
+# were significantly under-reported.
+#
+# Snapshot of all results.json numbers produced by this legacy code is at
+# `results/compute_old_thop.{csv,json}` (captured 2026-05-11).
+#
+# To fall back:
+#   1) Uncomment `from thop import profile` at the top of this file.
+#   2) Rename `_LEGACY_get_macs_params` to `get_macs_params` (replacing the
+#      FlopCounterMode-based implementation above).
+# =============================================================================
+#
+# def _LEGACY_get_macs_params(cfgs: dict, results: dict = {}) -> dict:
+#     '''Calcualte the number of parameters and multiply-accumulate operations
+#     of the network.
+#
+#     LEGACY thop-based implementation. See header note above for why it was
+#     replaced.
+#     '''
+#     def _infer_vocab_and_ids(cfgs: dict):
+#         """Mirror main.py's vocab/special-token layout logic."""
+#         base = int(len(cfgs['categories']))
+#         arch_de = str(cfgs.get('arch_de'))
+#         ar_mode = arch_de in {"ar_transformer_xs", "ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
+#
+#         if bool(cfgs.get('use_bpe', False)):
+#             tok_cfg = cfgs.get('tokenizer', {}) or {}
+#             model_path = tok_cfg.get('model', None)
+#             if not model_path:
+#                 raise ValueError("use_bpe=true but tokenizer.model is missing in config")
+#             tok = BPETokenizer(model_path)
+#             vocab_dec = int(tok.vocab_size)
+#             pad_id, bos_id, eos_id = int(tok.PAD), int(tok.BOS), int(tok.EOS)
+#             vocab_ctc = base
+#             return vocab_dec, vocab_ctc, pad_id, bos_id, eos_id
+#
+#         # Character mode
+#         pad_id, bos_id, eos_id = base, base + 1, base + 2
+#         vocab_dec = base + (3 if ar_mode else 0)
+#         vocab_ctc = base
+#         return int(vocab_dec), int(vocab_ctc), int(pad_id), int(bos_id), int(eos_id)
+#
+#     class _ProfileWrapper(torch.nn.Module):
+#         """Force execution of optional branches so THOP counts their params."""
+#
+#         def __init__(self, model, *, kind: str, force_dec_ctc: bool = False,
+#                      force_deep_supervision: bool = False) -> None:
+#             super().__init__()
+#             self.model = model
+#             self.kind = str(kind)
+#             self.force_dec_ctc = bool(force_dec_ctc)
+#             self.force_deep_supervision = bool(force_deep_supervision)
+#
+#         def forward(self, x):
+#             with torch.no_grad():
+#                 if self.kind == 'dual':
+#                     force_train = bool(self.force_dec_ctc or self.force_deep_supervision)
+#                     prev_mode = self.model.training
+#                     try:
+#                         self.model.train(force_train)
+#                         B = x.size(0)
+#                         y_inp = torch.zeros(B, 2, dtype=torch.long, device=x.device)
+#                         out = self.model(x, y_inp=y_inp, return_ar=True, return_ctc=True)
+#                         y = out.get('ar_logits', None)
+#                         if y is None:
+#                             y = out['ctc_logits']
+#                         for t in out.get('ar_logits_layers', []) or []:
+#                             y = y + (t.sum() * 0.0)
+#                         for t in out.get('dec_ctc_logits_layers', []) or []:
+#                             y = y + (t.sum() * 0.0)
+#                         return y
+#                     finally:
+#                         self.model.train(prev_mode)
+#
+#                 if self.kind == 'base':
+#                     B = x.size(0)
+#                     y_inp = torch.zeros(B, 2, dtype=torch.long, device=x.device)
+#                     out = self.model(x, y_inp=y_inp,
+#                                      return_ar_layers=bool(self.force_dec_ctc),
+#                                      return_dec_ctc=bool(self.force_dec_ctc))
+#                     if isinstance(out, dict):
+#                         y = out['logits']
+#                         for t in out.get('dec_ctc_logits_layers', []) or []:
+#                             y = y + (t.sum() * 0.0)
+#                         for t in out.get('logits_layers', []) or []:
+#                             y = y + (t.sum() * 0.0)
+#                         return y
+#                     return out
+#
+#                 return self.model(x)
+#
+#     arch_de = str(cfgs.get('arch_de', ''))
+#     lm_mode = arch_de in {'byt5_small', 't5-small'}
+#     vlm_mode = bool(cfgs.get('vlm_enabled', False)) or arch_de == 'vlm'
+#
+#     if vlm_mode:
+#         encoder = build_encoder(cfgs['num_channel'], cfgs['arch_en'], cfgs['len_seq'])
+#         ratio_ds = int(getattr(encoder, 'ratio_ds', 1))
+#         d_cnn = int(cfgs.get('d_cnn', 512))
+#         vlm_cfg = cfgs.get('vlm', {}) or {}
+#         lm_name = str(vlm_cfg.get('lm_name', 'gpt2'))
+#         categories = cfgs.get('categories', None)
+#         vocab_ctc = int(len(categories)) if (categories and bool(vlm_cfg.get('hybrid_ctc', False))) else None
+#
+#         model = VLMModel(
+#             encoder=encoder, ratio_ds=ratio_ds, d_cnn=d_cnn, lm_name_or_path=lm_name,
+#             connector_type=str(vlm_cfg.get('connector_type', 'qformer')),
+#             num_queries=int(vlm_cfg.get('num_queries', 32)),
+#             qformer_layers=int(vlm_cfg.get('qformer_layers', 4)),
+#             qformer_nhead=int(vlm_cfg.get('qformer_nhead', 8)),
+#             qformer_dropout=float(vlm_cfg.get('qformer_dropout', 0.1)),
+#             prompt_text=vlm_cfg.get('prompt_text', 'Transcribe the handwritten text from IMU sensor signals:'),
+#             refine_prompt_text=vlm_cfg.get('refine_prompt_text', None),
+#             two_step_decode=bool(vlm_cfg.get('two_step_decode', False)),
+#             num_soft_tokens=int(vlm_cfg.get('num_soft_tokens', 20)),
+#             freeze_encoder=bool(cfgs.get('freeze', False)),
+#             freeze_lm=bool(vlm_cfg.get('freeze_lm', True)),
+#             use_lora=bool(vlm_cfg.get('use_lora', False)),
+#             lora_r=int(vlm_cfg.get('lora_r', 16)),
+#             lora_alpha=int(vlm_cfg.get('lora_alpha', 32)),
+#             lora_dropout=float(vlm_cfg.get('lora_dropout', 0.05)),
+#             lora_target_modules=vlm_cfg.get('lora_target_modules', None),
+#             max_new_tokens=int(vlm_cfg.get('max_new_tokens', 64)),
+#             num_beams=int(vlm_cfg.get('num_beams', 1)),
+#             repetition_penalty=float(vlm_cfg.get('repetition_penalty', 1.0)),
+#             local_files_only=bool(vlm_cfg.get('local_files_only', True)),
+#             z_dropout=float(vlm_cfg.get('z_dropout', 0.1)),
+#             label_smoothing=float(vlm_cfg.get('label_smoothing', 0.0)),
+#             vocab_ctc=vocab_ctc, categories=categories,
+#         ).eval()
+#
+#         T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+#         x = torch.randn(1, cfgs['num_channel'], T)
+#         len_x = torch.tensor([T], dtype=torch.long)
+#         labels = torch.zeros((1, 8), dtype=torch.long)
+#         try:
+#             macs, params = profile(model, inputs=(x, len_x, labels), verbose=False)
+#         except Exception as exc:
+#             params = sum(p.numel() for p in model.parameters())
+#             macs = 0
+#             print(f"[WARN] THOP MACs failed for VLM; returning macs=0. Error: {exc}")
+#
+#     elif lm_mode:
+#         encoder = build_encoder(cfgs['num_channel'], cfgs['arch_en'], cfgs['len_seq'])
+#         ratio_ds = int(getattr(encoder, 'ratio_ds', 1))
+#         lm_cfg = LMConfig(
+#             name=cfgs.get('lm_name', 'google/byt5-small'),
+#             train_lm=bool(cfgs.get('lm_train_lm', False)),
+#             max_new_tokens=int(cfgs.get('lm_max_new_tokens', 128)),
+#             num_beams=int(cfgs.get('lm_num_beams', 1)),
+#             length_penalty=float(cfgs.get('lm_length_penalty', 1.0)),
+#             min_new_tokens=int(cfgs.get('lm_min_new_tokens', 0)),
+#             local_files_only=bool(cfgs.get('lm_local_files_only', True)),
+#         )
+#         d_cnn = int(cfgs.get('d_cnn', 0))
+#         model = MultimodalLMModel(
+#             encoder=encoder, ratio_ds=ratio_ds, d_cnn=d_cnn, lm_cfg=lm_cfg,
+#             proj_dropout=float(cfgs.get('lm_proj_dropout', 0.0)),
+#             freeze_encoder=bool(cfgs.get('freeze', True)),
+#         ).eval()
+#         T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+#         x = torch.randn(1, cfgs['num_channel'], T)
+#         len_x = torch.tensor([T], dtype=torch.long)
+#         labels = torch.zeros((1, 8), dtype=torch.long)
+#         macs, params = profile(model, inputs=(x, len_x, labels), verbose=False)
+#
+#     else:
+#         vocab_dec, vocab_ctc, pad_id, bos_id, eos_id = _infer_vocab_and_ids(cfgs)
+#         dual_cfg = cfgs.get('dual_head', {}) or {}
+#         dual_enabled = isinstance(dual_cfg, dict) and bool(dual_cfg.get('enabled', False))
+#
+#         if dual_enabled:
+#             if bool(cfgs.get('use_bpe', False)):
+#                 raise ValueError("dual_head.enabled currently supports character mode only")
+#             tie_cfg = dual_cfg.get('tie', {}) or {}
+#             model = DualHeadModel(
+#                 arch_en=cfgs['arch_en'], arch_ar=cfgs['arch_de'],
+#                 arch_ctc=str(dual_cfg.get('arch_ctc', 'linear')),
+#                 in_chan=cfgs['num_channel'], vocab_ar=vocab_dec, vocab_ctc=vocab_ctc,
+#                 len_seq=cfgs['len_seq'],
+#                 use_gated_attention=bool(cfgs.get('use_gated_attention', False)),
+#                 gating_type=str(cfgs.get('gating_type', 'elementwise')),
+#                 pad_id=pad_id, bos_id=bos_id, eos_id=eos_id,
+#                 tie_cfg=tie_cfg, dual_cfg=dual_cfg,
+#             ).eval()
+#         else:
+#             model = BaseModel(
+#                 cfgs['arch_en'], cfgs['arch_de'], cfgs['num_channel'],
+#                 vocab_dec, cfgs['len_seq'],
+#                 use_gated_attention=bool(cfgs.get('use_gated_attention', False)),
+#                 gating_type=str(cfgs.get('gating_type', 'elementwise')),
+#                 vocab_ctc=vocab_ctc, pad_id=pad_id,
+#                 decoder_side_ctc_cfg=cfgs.get('decoder_side_ctc', {}) or {},
+#             ).eval()
+#
+#         model.infer()
+#         T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
+#         x = torch.randn(1, cfgs['num_channel'], T)
+#
+#         if dual_enabled:
+#             dec_ctc_cfg = dual_cfg.get('decoder_side_ctc', {}) or {}
+#             deep_cfg = dual_cfg.get('deep_supervision', {}) or {}
+#             wrap = _ProfileWrapper(model, kind='dual',
+#                                    force_dec_ctc=bool(dec_ctc_cfg.get('enabled', False)),
+#                                    force_deep_supervision=bool(deep_cfg.get('enabled', False)))
+#             macs, params = profile(wrap, inputs=(x,), verbose=False)
+#         else:
+#             dec_ctc_cfg = cfgs.get('decoder_side_ctc', {}) or {}
+#             wrap = _ProfileWrapper(model, kind='base',
+#                                    force_dec_ctc=bool(dec_ctc_cfg.get('enabled', False)))
+#             macs, params = profile(wrap, inputs=(x,), verbose=False)
+#
+#     results['macs'] = int(macs)
+#     results['params'] = int(params)
+#     results = {k: v for k, v in sorted(results.items())}
+#     return results
 
 
 if __name__ == '__main__':

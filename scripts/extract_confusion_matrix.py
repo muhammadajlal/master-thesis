@@ -64,12 +64,24 @@ DATASET_CONFIG = {
 # q_proj/k_proj/v_proj/out_proj instead of nn.MultiheadAttention's combined
 # in_proj_weight); a one-shot state_dict translator below repackages those
 # weights into the format the current GatedMultiheadAttention wrapper expects.
-def _ckpt_template_for(dataset: str) -> str:
-    """Pick the right baseline-checkpoint root per dataset.
-    WD-split datasets and equation datasets use the freshly-trained AR-Elementwise
-    runs (current code path, no state_dict translation needed); the original WI
-    Stabilo / OnHW baselines are in the legacy layout (translator handles them).
+def _ckpt_template_for(dataset: str, variant: str = "s") -> str:
+    """Pick the right baseline-checkpoint root per dataset and variant.
+
+    `variant="s"` (default): the standard `ar_transformer_s` vanilla baselines.
+        WD-split datasets and equation datasets use the freshly-trained
+        AR-Elementwise runs (current code path, no state_dict translation
+        needed); the original WI Stabilo / OnHW baselines are in the legacy
+        layout (translator handles them).
+
+    `variant="xs"`: the parameter-matched `ar_transformer_xs` vanilla baselines
+        (single result-tree, no legacy state-dict issues).
     """
+    if variant == "xs":
+        return (
+            "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-XS-blconv_b/"
+            "ar_transformer_xs__{dataset}/fold_{fold}/{fold}/checkpoints/best_cer.pth"
+        )
+    # variant == "s" (legacy / default):
     if dataset == "onhw_wd_word_rh":
         return "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating-WD/ar_transformer_s__{dataset}/fold_{fold}/{fold}/checkpoints/best_cer.pth"
     if dataset.startswith("onhw_equations_wi"):
@@ -160,7 +172,7 @@ def translate_old_attn_state_dict(state_dict: dict) -> dict:
 DATA_TEMPLATE = "/home/woody/iwso/iwso214h/imu-hwr/data/{dataset}"
 
 
-def build_confusion_matrix_for_fold(dataset: str, fold: int, device: str = "cuda") -> np.ndarray:
+def build_confusion_matrix_for_fold(dataset: str, fold: int, device: str = "cuda", variant: str = "s") -> np.ndarray:
     cats = DATASET_CONFIG[dataset]["categories"]
     base = len(cats)
     PAD_ID, BOS_ID, EOS_ID = base, base + 1, base + 2
@@ -169,10 +181,12 @@ def build_confusion_matrix_for_fold(dataset: str, fold: int, device: str = "cuda
 
     seed_everything(42)
 
+    arch_de = "ar_transformer_xs" if variant == "xs" else "ar_transformer_s"
+
     # Build model with the canonical AR-Elementwise hyperparameters.
     model = BaseModel(
         arch_en="blconv_b",
-        arch_de="ar_transformer_s",
+        arch_de=arch_de,
         in_chan=13,
         num_cls=num_cls,
         len_seq=0,
@@ -180,7 +194,7 @@ def build_confusion_matrix_for_fold(dataset: str, fold: int, device: str = "cuda
         gating_type="elementwise",
         pad_id=PAD_ID,
     ).to(device)
-    ckpt_path = _ckpt_template_for(dataset).format(dataset=dataset, fold=fold)
+    ckpt_path = _ckpt_template_for(dataset, variant=variant).format(dataset=dataset, fold=fold)
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     raw_sd = ckpt["model"]
     # Detect the older attention layout by presence of `q_proj.weight` keys.
@@ -269,6 +283,10 @@ def main():
     p.add_argument("--folds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     p.add_argument("--out-root", required=True, help="output root for confusion matrices")
     p.add_argument("--device", default="cuda")
+    p.add_argument("--variant", default="s", choices=["s", "xs"],
+                   help="which baseline to source the confusion matrix from: "
+                        "'s' = standard ar_transformer_s (default), "
+                        "'xs' = param-matched ar_transformer_xs")
     args = p.parse_args()
 
     out_dir = Path(args.out_root) / args.dataset
@@ -279,8 +297,8 @@ def main():
         if out_path.exists():
             print(f"[{args.dataset}][fold={fold}] exists, skipping {out_path}")
             continue
-        print(f"[{args.dataset}][fold={fold}] extracting…", flush=True)
-        conf, n_samples, n_subs = build_confusion_matrix_for_fold(args.dataset, fold, args.device)
+        print(f"[{args.dataset}][fold={fold}] extracting from {args.variant} baseline…", flush=True)
+        conf, n_samples, n_subs = build_confusion_matrix_for_fold(args.dataset, fold, args.device, variant=args.variant)
         np.save(out_path, conf)
         diag = int(conf.diagonal().sum())
         total = int(conf.sum())
