@@ -310,3 +310,27 @@ class DualHeadModel(nn.Module):
     @property
     def ratio_ds(self) -> int:
         return self.encoder.ratio_ds
+
+    @property
+    def use_ar(self) -> bool:
+        return True  # DualHeadModel always has an AR decoder
+
+    @torch.no_grad()
+    def generate(self, x: torch.Tensor, len_max: int = 32) -> torch.Tensor:
+        """Greedy AR generation through the AR head only (CTC head skipped).
+
+        Used by ``evaluate.py`` to count FLOPs along the inference path. Runs
+        for exactly ``len_max`` steps without EOS early-stop.
+        """
+        B = x.size(0)
+        device = x.device
+        pad_id = int(self.pad_id) if self.pad_id is not None else (self.vocab_ar - 3)
+        bos_id = int(self.bos_id) if self.bos_id is not None else (pad_id + 1)
+        in_lengths = torch.full((B,), x.size(-1), dtype=torch.long, device=device)
+        y_gen = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
+        for _ in range(int(len_max)):
+            out = self.forward(x, in_lengths=in_lengths, y_inp=y_gen, return_ar=True, return_ctc=False)
+            logits = out["ar_logits"]
+            nxt = logits[:, -1, :].argmax(-1, keepdim=True)
+            y_gen = torch.cat([y_gen, nxt], dim=1)
+        return y_gen

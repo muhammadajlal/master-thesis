@@ -208,3 +208,33 @@ class BaseModel(nn.Module):
     @property
     def ratio_ds(self) -> int:
         return self.encoder.ratio_ds
+
+    @property
+    def use_ar(self) -> bool:
+        return isinstance(self.decoder, ARDecoder)
+
+    @torch.no_grad()
+    def generate(self, x: torch.Tensor, len_max: int = 32) -> torch.Tensor:
+        """Greedy autoregressive decoding for inference / FLOPs profiling.
+
+        Returns the predicted token-id tensor of shape (B, len_max + 1), where
+        the first column is BOS. Generation runs for exactly `len_max` steps
+        without early stopping on EOS, so the cumulative cost reflects the
+        worst-case trajectory (matching what the FLOP counter should see).
+
+        Special-token IDs follow the char-tokenizer convention: PAD = self.pad_id
+        (or num_cls-3 if pad_id is None), BOS = pad_id + 1.
+        """
+        if not self.use_ar:
+            raise RuntimeError("generate() requires an AR decoder")
+        B = x.size(0)
+        device = x.device
+        pad_id = int(self.pad_id) if self.pad_id is not None else (self.num_cls - 3)
+        bos_id = pad_id + 1
+        in_lengths = torch.full((B,), x.size(-1), dtype=torch.long, device=device)
+        y_gen = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
+        for _ in range(int(len_max)):
+            logits = self.forward(x, in_lengths=in_lengths, y_inp=y_gen)
+            nxt = logits[:, -1, :].argmax(-1, keepdim=True)
+            y_gen = torch.cat([y_gen, nxt], dim=1)
+        return y_gen

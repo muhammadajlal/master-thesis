@@ -214,7 +214,7 @@ def _migrate_legacy_mha_keys(state_dict: dict) -> dict:
 def setup_tokenizer(cfg: dict):
     """Set up tokenizer and special IDs."""
     categories = cfg["categories"]
-    AR_MODE = cfg["arch_de"] in {"ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
+    AR_MODE = cfg["arch_de"] in {"ar_transformer_xs", "ar_transformer_s", "ar_transformer_m", "ar_transformer_l"}
 
     tok = None
     if cfg.get("use_bpe", False):
