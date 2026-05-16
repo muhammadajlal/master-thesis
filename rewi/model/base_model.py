@@ -220,7 +220,13 @@ class BaseModel(nn.Module):
         Returns the predicted token-id tensor of shape (B, len_max + 1), where
         the first column is BOS. Generation runs for exactly `len_max` steps
         without early stopping on EOS, so the cumulative cost reflects the
-        worst-case trajectory (matching what the FLOP counter should see).
+        worst-case trajectory.
+
+        Encoder-output caching: the encoder (and the optional mem_proj) runs
+        exactly ONCE; the loop only invokes the decoder against the cached
+        memory. This is the proper inference pattern — the previous naive
+        implementation re-encoded `x` every step, inflating the FLOP count
+        by ~len_max times.
 
         Special-token IDs follow the char-tokenizer convention: PAD = self.pad_id
         (or num_cls-3 if pad_id is None), BOS = pad_id + 1.
@@ -232,9 +238,14 @@ class BaseModel(nn.Module):
         pad_id = int(self.pad_id) if self.pad_id is not None else (self.num_cls - 3)
         bos_id = pad_id + 1
         in_lengths = torch.full((B,), x.size(-1), dtype=torch.long, device=device)
+
+        # Encode once, project to decoder dim once.
+        feats, enc_pad = self._encode_with_mask(x, in_lengths)
+        mem = feats if self.mem_proj is None else self.mem_proj(feats)
+
         y_gen = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
         for _ in range(int(len_max)):
-            logits = self.forward(x, in_lengths=in_lengths, y_inp=y_gen)
+            logits = self.decoder(y_gen, mem, enc_pad)  # (B, N, V)
             nxt = logits[:, -1, :].argmax(-1, keepdim=True)
             y_gen = torch.cat([y_gen, nxt], dim=1)
         return y_gen

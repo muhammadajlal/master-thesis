@@ -319,18 +319,25 @@ class DualHeadModel(nn.Module):
     def generate(self, x: torch.Tensor, len_max: int = 32) -> torch.Tensor:
         """Greedy AR generation through the AR head only (CTC head skipped).
 
-        Used by ``evaluate.py`` to count FLOPs along the inference path. Runs
-        for exactly ``len_max`` steps without EOS early-stop.
+        Encoder-output caching: the encoder (and optional mem_proj) runs
+        exactly ONCE; the loop only invokes the AR decoder against the cached
+        memory. CTC head is not computed.
+
+        Runs for exactly ``len_max`` steps without EOS early-stop.
         """
         B = x.size(0)
         device = x.device
         pad_id = int(self.pad_id) if self.pad_id is not None else (self.vocab_ar - 3)
         bos_id = int(self.bos_id) if self.bos_id is not None else (pad_id + 1)
         in_lengths = torch.full((B,), x.size(-1), dtype=torch.long, device=device)
+
+        # Encode once, project to decoder dim once.
+        feats, enc_pad, _ = self._encode_with_mask(x, in_lengths)
+        mem = feats if self.mem_proj is None else self.mem_proj(feats)
+
         y_gen = torch.full((B, 1), bos_id, dtype=torch.long, device=device)
         for _ in range(int(len_max)):
-            out = self.forward(x, in_lengths=in_lengths, y_inp=y_gen, return_ar=True, return_ctc=False)
-            logits = out["ar_logits"]
+            logits = self.decoder(y_gen, mem, enc_pad)  # (B, N, V_ar)
             nxt = logits[:, -1, :].argmax(-1, keepdim=True)
             y_gen = torch.cat([y_gen, nxt], dim=1)
         return y_gen

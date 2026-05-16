@@ -1049,7 +1049,70 @@ def train_one_epoch_hybrid(
     maybe_log_trainability(man, model, epoch=epoch, where="train_one_epoch_hybrid")
 
     clip_grad = float(getattr(man.cfgs, "clip_grad", 5.0) or 5.0)
-    
+
+    # ---- Input corruption setup (hybrid). Mirrors `train_one_epoch`. ------------
+    # Applies the same regularization to the AR head's y_inp; the CTC head is
+    # untouched (CTC has no teacher-forced input). Scheduled sampling is NOT
+    # supported in the hybrid loop yet (only input_corruption).
+    ic_cfg = getattr(man.cfgs, "input_corruption", {}) or {}
+    ic_enabled = bool(ic_cfg.get("enabled", False))
+    ic_p = float(ic_cfg.get("p_replace", 0.0))
+    ic_mode = str(ic_cfg.get("mode", "uniform")).lower()
+    ic_lo = 1
+    ic_hi = min(PAD_ID, BOS_ID, EOS_ID)
+    if ic_enabled and ic_p > 0.0 and ic_hi <= ic_lo:
+        raise ValueError(
+            f"input_corruption: cannot determine a valid replacement vocab range "
+            f"(lo={ic_lo}, hi={ic_hi}). Check tokenizer special token IDs."
+        )
+
+    ic_lookup = None
+    _SUB_MODES_H = ("bigram_right", "bigram_left", "self_confusion")
+    if ic_enabled and ic_p > 0.0 and ic_mode in _SUB_MODES_H:
+        cache_key = "bigram_table" if ic_mode in ("bigram_right", "bigram_left") else ic_mode
+        cache_attr = f"_ic_lookup_{cache_key}"
+        if hasattr(man, cache_attr):
+            ic_lookup = getattr(man, cache_attr)
+        else:
+            # DualHeadModel exposes vocab_ar (same role as BaseModel.num_cls).
+            vocab_size = int(getattr(model, "vocab_ar", 0)) or int(getattr(model, "num_cls", 0)) \
+                or int(getattr(man.cfgs, "num_cls", 0))
+            if vocab_size <= 0:
+                raise RuntimeError("input_corruption: cannot infer vocab_size from model")
+            ic_smoothing = float(ic_cfg.get("smoothing", 1.0))
+            spec_ids = (PAD_ID, BOS_ID, EOS_ID, 0)
+            if ic_mode in ("bigram_right", "bigram_left"):
+                ic_lookup = _build_bigram_lookup(
+                    dataloader, vocab_size, spec_ids,
+                    device=man.cfgs.device, smoothing=ic_smoothing,
+                )
+            elif ic_mode == "self_confusion":
+                conf_path_template = ic_cfg.get("confusion_path", None)
+                if conf_path_template is None:
+                    raise ValueError(
+                        "input_corruption mode=self_confusion requires "
+                        "input_corruption.confusion_path (with {fold} placeholder)"
+                    )
+                ic_lookup = _load_confusion_lookup(
+                    conf_path_template, fold=int(getattr(man.cfgs, "idx_fold", 0)),
+                    vocab_size=vocab_size, spec_ids=spec_ids,
+                    device=man.cfgs.device, smoothing=ic_smoothing,
+                )
+            setattr(man, cache_attr, ic_lookup)
+    elif ic_enabled and ic_p > 0.0 and ic_mode not in ("uniform", "adjacent_swap") + _SUB_MODES_H:
+        raise ValueError(
+            f"input_corruption.mode must be one of "
+            f"{{uniform, bigram_right, bigram_left, self_confusion, adjacent_swap}}, "
+            f"got: {ic_mode}"
+        )
+
+    if ic_enabled and ic_p > 0.0:
+        man.log(
+            f"[InputCorruption][hybrid] epoch={epoch} | mode={ic_mode} | p_replace={ic_p:.4f} "
+            f"(replacement_vocab=[{ic_lo}, {ic_hi}))"
+        )
+    # ----------------------------------------------------------------------------
+
     # AMP controllable via config (default true for backward compat)
     use_amp_cfg = bool(getattr(man.cfgs, "use_amp", True)) and torch.cuda.is_available()
 
@@ -1100,6 +1163,47 @@ def train_one_epoch_hybrid(
                         int(len_y.max().item()) if len_y.numel() else -1,
                     )
                 continue
+
+            # ---- Input corruption (hybrid AR head only) ------------------------
+            # The AR CE loss is computed against the unmodified y_tgt; the CTC
+            # loss is unaffected (encoder output, no teacher-forced input).
+            if ic_enabled and ic_p > 0.0:
+                real_mask = (y_inp != PAD_ID) & (y_inp != BOS_ID) & (y_inp != EOS_ID)
+
+                if ic_mode == "adjacent_swap":
+                    real_next = real_mask.roll(-1, dims=-1)
+                    real_next[:, -1] = False
+                    swap_cand = (
+                        (torch.rand_like(y_inp, dtype=torch.float) < ic_p)
+                        & real_mask & real_next
+                    )
+                    y_next = y_inp.roll(-1, dims=-1)
+                    y_prev = y_inp.roll(1, dims=-1)
+                    swap_back = swap_cand.roll(1, dims=-1)
+                    swap_back[:, 0] = False
+                    new_y = torch.where(swap_cand, y_next, y_inp)
+                    new_y = torch.where(swap_back, y_prev, new_y)
+                    y_inp = new_y
+                else:
+                    rand_mask = (torch.rand_like(y_inp, dtype=torch.float) < ic_p) & real_mask
+                    if ic_mode == "uniform":
+                        rand_tokens = torch.randint(
+                            ic_lo, ic_hi, y_inp.shape,
+                            device=y_inp.device, dtype=y_inp.dtype,
+                        )
+                    else:
+                        if ic_mode == "bigram_left":
+                            key = torch.roll(y_inp, shifts=1, dims=-1)
+                            key[:, 0] = BOS_ID
+                        else:
+                            key = y_inp
+                        lookup_idx = key.clamp(min=0, max=ic_lookup.size(0) - 1)
+                        rows = ic_lookup[lookup_idx]
+                        flat = rows.reshape(-1, rows.size(-1))
+                        sampled = torch.multinomial(flat, 1).reshape_as(y_inp)
+                        rand_tokens = sampled.to(dtype=y_inp.dtype)
+                    y_inp = torch.where(rand_mask, rand_tokens, y_inp)
+            # --------------------------------------------------------------------
 
             out = model(x, in_lengths=len_x, y_inp=y_inp, return_ar=True, return_ctc=True)
 
