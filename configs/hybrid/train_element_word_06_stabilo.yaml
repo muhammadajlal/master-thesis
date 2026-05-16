@@ -51,7 +51,7 @@ num_channel: 13
 num_worker: 16
 seed: 42
 size_batch: 64
-test: true
+test: false
 use_amp: true
 
 tokenizer:
