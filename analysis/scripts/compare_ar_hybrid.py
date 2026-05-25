@@ -227,8 +227,16 @@ def plot_pca(
     save_path: str,
     max_points: int = 50000,
     seed: int = 42,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
 ):
-    """Plot PCA of encoder frame features, colored by character class."""
+    """Plot PCA of encoder frame features, colored by character class.
+
+    If ``xlim`` / ``ylim`` are passed, the panel uses those axis limits
+    instead of matplotlib's data-driven auto-scaling. This is how the
+    AR-only and Hybrid PCA panels get rendered with identical canvases
+    so they look symmetric on the page.
+    """
     from sklearn.decomposition import PCA
 
     N = features.shape[0]
@@ -247,23 +255,36 @@ def plot_pca(
     char_to_color = {c: cmap(i) for i, c in enumerate(unique_chars)}
     colors = [char_to_color[c] for c in char_labels]
 
-    fig, ax = plt.subplots(figsize=(14, 12), dpi=150)
-    ax.scatter(emb[:, 0], emb[:, 1], c=colors, s=1, alpha=0.4, rasterized=True)
-    ax.set_title(f"{title}\n(var explained: {pca.explained_variance_ratio_[:2].sum():.2%})", fontsize=14)
-    ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%})")
-    ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%})")
+    # Landscape aspect (wider than tall) so the two side-by-side panels
+    # fill the row when embedded in the paper. Short title (just the
+    # variance percentage) avoids truncation under narrow minipage widths;
+    # the latex subcaption identifies which panel is AR vs hybrid.
+    fig, ax = plt.subplots(figsize=(7, 5), dpi=150)
+    ax.scatter(emb[:, 0], emb[:, 1], c=colors, s=2, alpha=0.45, rasterized=True)
+    ax.set_title(f"PC1 + PC2 = {pca.explained_variance_ratio_[:2].sum():.1%}", fontsize=18, pad=10)
+    ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%})", fontsize=16)
+    ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%})", fontsize=16)
+    ax.tick_params(axis="both", which="major", labelsize=12)
+    if xlim is not None:
+        ax.set_xlim(*xlim)
+    if ylim is not None:
+        ax.set_ylim(*ylim)
 
     from matplotlib.lines import Line2D
     max_legend = 40
     legend_chars = unique_chars[:max_legend]
     handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=char_to_color[c],
-                       markersize=6, label=c if c != '' else '<blank>') for c in legend_chars]
-    ax.legend(handles=handles, fontsize=6, ncol=4, loc='upper right', framealpha=0.7)
+                       markersize=7, label=c if c != '' else '<blank>') for c in legend_chars]
+    ax.legend(handles=handles, fontsize=8, ncol=4, loc='upper right', framealpha=0.75)
 
-    plt.tight_layout()
+    # Fixed 6x6 canvas (no bbox_inches='tight') so both panels render at
+    # identical physical size when embedded side-by-side. Return the PCA
+    # embedding so the caller can compute shared axis limits across panels.
+    plt.tight_layout(pad=1.0)
     plt.savefig(save_path, dpi=150)
     plt.close()
     logger.info("Saved PCA plot: {}", save_path)
+    return emb, pca.explained_variance_ratio_
 
 
 def plot_tsne_side_by_side(
@@ -1295,6 +1316,32 @@ def main():
                 os.path.join(args.outdir, "tsne_comparison.pdf"),
                 perplexity=args.perplexity, seed=args.seed,
             )
+
+            # Re-render the two PCA panels with shared axis limits so they
+            # have identical canvases for the paper figure. The first
+            # plot_pca call (per checkpoint) returns the projected emb,
+            # but we re-run here to keep the helper stateless.
+            from sklearn.decomposition import PCA as _PCA
+            emb_ar_  = _PCA(n_components=2, random_state=args.seed).fit_transform(feats_ar['features'])
+            emb_hyb_ = _PCA(n_components=2, random_state=args.seed).fit_transform(feats_hyb['features'])
+            x_lo = min(emb_ar_[:, 0].min(), emb_hyb_[:, 0].min())
+            x_hi = max(emb_ar_[:, 0].max(), emb_hyb_[:, 0].max())
+            y_lo = min(emb_ar_[:, 1].min(), emb_hyb_[:, 1].min())
+            y_hi = max(emb_ar_[:, 1].max(), emb_hyb_[:, 1].max())
+            pad_x = 0.05 * (x_hi - x_lo)
+            pad_y = 0.05 * (y_hi - y_lo)
+            shared_xlim = (x_lo - pad_x, x_hi + pad_x)
+            shared_ylim = (y_lo - pad_y, y_hi + pad_y)
+            logger.info("Re-rendering PCAs with shared limits x=({:.1f},{:.1f}) y=({:.1f},{:.1f})",
+                        *shared_xlim, *shared_ylim)
+            plot_pca(feats_ar['features'], feats_ar['char_labels'],
+                     "AR-only Encoder Features (PCA)",
+                     os.path.join(args.outdir, "pca_ar_only.pdf"),
+                     seed=args.seed, xlim=shared_xlim, ylim=shared_ylim)
+            plot_pca(feats_hyb['features'], feats_hyb['char_labels'],
+                     "Hybrid CTC-AR Encoder Features (PCA)",
+                     os.path.join(args.outdir, "pca_hybrid.pdf"),
+                     seed=args.seed, xlim=shared_xlim, ylim=shared_ylim)
 
         # ── DD / Leak / M_off (averaged over all extracted samples) ── #
         dd_ar = dd_hyb = None

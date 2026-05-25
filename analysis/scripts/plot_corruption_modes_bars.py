@@ -50,54 +50,20 @@ MODES: list[tuple[str, str, str]] = [
     ("adjacentswap", "adjacent-swap",  "#d62728"),
 ]
 
-# Dir-name suffix for the OnHW-WI / private dataset family of runs:
-# Baseline-AR-InputCorruption-<SUFFIX>-blconv_b. Empty suffix is the
-# "main" uniform run (no mode in the dirname).
-_ONHW_WI_DIR_SUFFIX = {
-    "uniform":      "",
-    "bigramright":  "Bigram",
-    "bigramleft":   "BigramLeft",
-    "selfconf":     "SelfConf",
-    "adjacentswap": "AdjacentSwap",
-}
-
-
+# XS layout: one corruption-mode directory per mode, with per-dataset
+# subdirs inside. No -WD / -Equations variants needed (XS dirs cover
+# all 6 datasets uniformly). Baseline (no corruption) is the
+# elementwise-gating run under Baseline-AR-XS-blconv_b/.
 def mode_dir(mode_key: str, dataset_key: str) -> Path:
-    if dataset_key == "onhw_wd_word_rh":
-        return (
-            RESULTS_ROOT
-            / f"Baseline-AR-InputCorruption-WD-{mode_key}-blconv_b"
-            / f"ar_transformer_s__{dataset_key}"
-        )
-    if dataset_key == "onhw_equations_wi_word_rh":
-        return (
-            RESULTS_ROOT
-            / f"Baseline-AR-InputCorruption-Equations-WI-{mode_key}-blconv_b"
-            / f"ar_transformer_s__{dataset_key}"
-        )
-    if dataset_key == "onhw_equations_wd_word_rh":
-        return (
-            RESULTS_ROOT
-            / f"Baseline-AR-InputCorruption-Equations-WD-{mode_key}-blconv_b"
-            / f"ar_transformer_s__{dataset_key}"
-        )
-    suffix = _ONHW_WI_DIR_SUFFIX[mode_key]
-    dirname = (
-        "Baseline-AR-InputCorruption-blconv_b"
-        if suffix == ""
-        else f"Baseline-AR-InputCorruption-{suffix}-blconv_b"
+    return (
+        RESULTS_ROOT
+        / f"Baseline-AR-XS-InputCorruption-{mode_key}"
+        / f"ar_transformer_xs__{dataset_key}"
     )
-    return RESULTS_ROOT / dirname / f"ar_transformer_s__{dataset_key}"
 
 
 def baseline_dir(dataset_key: str) -> Path:
-    if dataset_key == "onhw_wd_word_rh":
-        return RESULTS_ROOT / "Baseline-AR-ElementwiseGating-WD" / f"ar_transformer_s__{dataset_key}"
-    if dataset_key == "onhw_equations_wi_word_rh":
-        return RESULTS_ROOT / "Baseline-AR-ElementwiseGating-Equations-WI" / f"ar_transformer_s__{dataset_key}"
-    if dataset_key == "onhw_equations_wd_word_rh":
-        return RESULTS_ROOT / "Baseline-AR-ElementwiseGating-Equations-WD" / f"ar_transformer_s__{dataset_key}"
-    return RESULTS_ROOT / "Baseline-AR-ElementwiseGating" / f"ar_transformer_s__{dataset_key}"
+    return RESULTS_ROOT / "Baseline-AR-XS-blconv_b" / f"ar_transformer_xs__{dataset_key}"
 
 
 def read_5fold_cer(model_dir: Path) -> float | None:
