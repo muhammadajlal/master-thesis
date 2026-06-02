@@ -70,11 +70,14 @@ def build_decoder(
 
         # CTC per-timestep Transformers
         case 'transformer_xs':
-            # Param-matched parallel to ar_transformer_xs (REWI's CTC budget).
-            # Mirrors the AR shrink: half the depth of `transformer_s`, slightly
-            # narrower FFN to land on the same total budget.
+            # Param-matched parallel to ar_transformer_xs (REWI's CTC budget,
+            # ~4.64 M with blconv_b). Same d_model / depth / heads as the AR
+            # sibling; the FFN is wider (1472 vs 896) to absorb the parameter
+            # budget that the AR decoder spends on cross-attention. Combined
+            # with the param-free sinusoidal PE in `Transformer`, total params
+            # land at 4.649 M (+0.27 % vs REWI 4.637 M).
             return Transformer(size_in=dim_in, num_cls=num_cls,
-                               d_model=256, nhead=4, num_layers=2, dim_ff=896,
+                               d_model=256, nhead=4, num_layers=2, dim_ff=1472,
                                p_drop=0.1, apply_softmax=False)
         case 'transformer_s':
             return Transformer(size_in=dim_in, num_cls=num_cls,
