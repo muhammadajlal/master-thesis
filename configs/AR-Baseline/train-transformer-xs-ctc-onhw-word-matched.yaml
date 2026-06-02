@@ -1,0 +1,47 @@
+# =========================
+# Transformer-CTC Baseline (param-matched, xs): transformer_xs + blconv_b
+# Dataset: onhw_wi_word_rh
+# Mirrors the existing s-side Baseline-Transformer-CTC experiment but at the
+# xs parameter budget. transformer_xs uses 2 layers instead of 4 and a slightly
+# narrower FFN (1024 -> 896) — same single-knob shrink as ar_transformer_xs.
+# =========================
+
+arch_de: 'transformer_xs'
+arch_en: 'blconv_b'
+aug: true
+cache: true
+checkpoint: null
+ctc_decoder: best_path
+device: cuda
+
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-Transformer-XS-CTC-Matched/transformer_xs__onhw_wi_word_rh
+
+epoch: 300
+epoch_warmup: 30
+freeze: false
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+save_best_only: true
+export_val_full: false
+idx_fold: 0
+len_seq: 0
+lr: 0.001
+num_channel: 13
+num_worker: 16
+seed: 42
+size_batch: 64
+test: false
+
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+# Not relevant for the CTC transformer (no cross-attention), but kept for parity.
+use_gated_attention: false
+gating_type: elementwise
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
