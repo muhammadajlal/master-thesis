@@ -19,7 +19,7 @@ set -euo pipefail
 
 IDX=${SLURM_ARRAY_TASK_ID}
 
-# 8 cells × 5 folds = 40 array tasks. CELL_IDX = IDX/5, FOLD = IDX%5.
+# 16 cells × 5 folds = 80 array tasks. CELL_IDX = IDX/5, FOLD = IDX%5.
 CELL_IDX=$(( IDX / 5 ))
 FOLD=$(( IDX % 5 ))
 
@@ -32,6 +32,14 @@ CELLS=(
   "+Hybrid/Priv-S|train_element_word_hybrid_01_xs_stabilo_sent/ar_transformer_xs__wi_sent_hw6_meta"
   "+Hybrid+Noise/OnHW-WI|HybridInputCorruption-XS-L01_uniform/ar_transformer_xs__onhw_wi_word_rh"
   "+Hybrid+Noise/Priv-S|HybridInputCorruption-XS-L01_uniform/ar_transformer_xs__wi_sent_hw6_meta"
+  "AR-only/OnHW-WD|Baseline-AR-XS-blconv_b/ar_transformer_xs__onhw_wd_word_rh"
+  "AR-only/Priv-W|Baseline-AR-XS-blconv_b/ar_transformer_xs__wi_word_hw6_meta"
+  "+Noise/OnHW-WD|Baseline-AR-XS-InputCorruption-uniform/ar_transformer_xs__onhw_wd_word_rh"
+  "+Noise/Priv-W|Baseline-AR-XS-InputCorruption-uniform/ar_transformer_xs__wi_word_hw6_meta"
+  "+Hybrid/OnHW-WD|train_element_word_hybrid_01_xs_onhw_wd/ar_transformer_xs__onhw_wd_word_rh"
+  "+Hybrid/Priv-W|train_element_word_hybrid_01_xs_stabilo/ar_transformer_xs__wi_word_hw6_meta"
+  "+Hybrid+Noise/OnHW-WD|HybridInputCorruption-XS-L01_uniform/ar_transformer_xs__onhw_wd_word_rh"
+  "+Hybrid+Noise/Priv-W|HybridInputCorruption-XS-L01_uniform/ar_transformer_xs__wi_word_hw6_meta"
 )
 ENTRY="${CELLS[$CELL_IDX]}"
 LABEL="${ENTRY%%|*}"
