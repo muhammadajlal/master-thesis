@@ -2,11 +2,11 @@
 """Generate corruption_modes_bars.pdf for paper 2.
 
 Grouped bar chart: one cluster per dataset. Each cluster uses a fixed
-left-to-right order: clean baseline, uniform, bigram-right, bigram-left,
+left-to-right order: baseline, uniform, bigram-right, bigram-left,
 self-confusion, adjacent-swap. This keeps the mode comparison visually
 stable across datasets.
 
-Data source: results/hwr2/Baseline-AR-InputCorruption-* and the clean
+Data source: results/hwr2/Baseline-AR-InputCorruption-* and the no-noise
 Baseline-AR-XS-blconv_b run, 5-fold mean CER.
 
 Run from anywhere:
@@ -47,7 +47,7 @@ MODES: list[tuple[str, str, str]] = [
 ]
 
 SERIES: list[tuple[str, str, str]] = [
-    ("__baseline__", "clean", "#7f7f7f"),
+    ("__baseline__", "baseline", "#7f7f7f"),
     *MODES,
 ]
 
