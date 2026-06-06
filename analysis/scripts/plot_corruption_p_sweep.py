@@ -34,6 +34,7 @@ OUT_PDF = Path(
 PANELS = [
     ("onhw_wi_word_rh", "OnHW-Words500 (WI)"),
     ("onhw_wd_word_rh", "OnHW-Words500 (WD)"),
+    ("wi_word_hw6_meta", "Private (words)"),
     ("wi_sent_hw6_meta", "Private (sentences)"),
 ]
 
@@ -73,10 +74,10 @@ def cell_path(dataset_key: str, p: float) -> Path:
 
 
 def main() -> None:
-    fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.2), sharex=False)
+    fig, axes = plt.subplots(2, 2, figsize=(9.5, 6.0), sharex=False)
     legend_handles = None
 
-    for ax, (dataset_key, label) in zip(axes, PANELS):
+    for ax, (dataset_key, label) in zip(axes.flat, PANELS):
         cers, wers = [], []
         for p in P_VALUES:
             cer, wer = read_5fold(cell_path(dataset_key, p))
@@ -107,11 +108,11 @@ def main() -> None:
         ["CER (left axis)", "WER (right axis)"],
         loc="lower center",
         ncol=2,
-        bbox_to_anchor=(0.5, -0.04),
+        bbox_to_anchor=(0.5, -0.02),
         frameon=False,
         fontsize=10,
     )
-    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    fig.tight_layout(rect=[0, 0.03, 1, 1])
     OUT_PDF.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_PDF, bbox_inches="tight")
     print(f"saved: {OUT_PDF}")
