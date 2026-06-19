@@ -58,12 +58,15 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$MODEL" == "hybrid" ]]; then
-    BASE_CFG="configs/decode_study/base_hybrid.yaml"
-elif [[ "$MODEL" == "rewi_ctc" ]]; then
-    BASE_CFG="configs/decode_study/base_rewi_ctc.yaml"
-else
-    BASE_CFG="configs/decode_study/base_ar.yaml"
+# Allow caller to override BASE_CFG via env var (used by XS cross-check sbatch).
+if [[ -z "${BASE_CFG:-}" ]]; then
+    if [[ "$MODEL" == "hybrid" ]]; then
+        BASE_CFG="configs/decode_study/base_hybrid.yaml"
+    elif [[ "$MODEL" == "rewi_ctc" ]]; then
+        BASE_CFG="configs/decode_study/base_rewi_ctc.yaml"
+    else
+        BASE_CFG="configs/decode_study/base_ar.yaml"
+    fi
 fi
 
 echo "═══════════════════════════════════════════════════════════"
