@@ -31,20 +31,53 @@ import matplotlib.pyplot as plt
 from scipy import stats as scipy_stats
 
 # ============================================================
-# Paths
+# Paths (variant-aware: HWRFormer xs = baseline, s = scaled)
 # ============================================================
 WORK_DIR = Path(__file__).resolve().parent.parent.parent  # REWI_work
 THESIS_DIR = WORK_DIR.parent.parent / "thesis"
-FIG_DIR = THESIS_DIR / "figures"
-TABLE_DIR = WORK_DIR / "analysis" / "tables" / "thesis_dual_dataset"
 
-# Input CSVs
-ONHW_CSV = WORK_DIR / "analysis" / "quant_all_val_predictions_ar_vs_hybrid.csv"
-STABILO_CSV = WORK_DIR / "analysis" / "quant_all_val_predictions_new.csv"
+# Per-variant specifications: each variant uses a different decoder arch and
+# different result groups; the input CSVs follow the same naming convention
+# (_xs suffix for baseline, no suffix for the original scaled run).
+VARIANT_SPECS = {
+    "xs": {
+        "arch_de": "ar_transformer_xs",
+        "ar_group": "Baseline-AR-XS-blconv_b",
+        "hyb_group": "train_element_word_hybrid_01_xs_onhw_wi",
+        "csv_suffix": "_xs",
+    },
+    "s": {
+        "arch_de": "ar_transformer_s",
+        "ar_group": "Baseline-AR",
+        "hyb_group": "Baseline-Hybrid/train_element_word_hybrid_06",
+        "csv_suffix": "",
+    },
+}
 
-# OnHW validation exports for collision analysis
-ONHW_AR_EXPORT_PAT = str(WORK_DIR.parent.parent / "results/hwr2/Baseline-AR/ar_transformer_s__onhw_wi_word_rh/fold_{fold}/exports/val_full_fold{fold}_epoch0.json")
-ONHW_HYB_EXPORT_PAT = str(WORK_DIR.parent.parent / "results/hwr2/Baseline-Hybrid/train_element_word_hybrid_06/ar_transformer_s__onhw_wi_word_rh/fold_{fold}/exports/val_full_fold{fold}_epoch0_ar.json")
+
+def _resolve_paths(variant: str):
+    spec = VARIANT_SPECS[variant]
+    suffix = spec["csv_suffix"]
+    arch = spec["arch_de"]
+    return {
+        "fig_dir": THESIS_DIR / "figures" / variant,
+        "table_dir": WORK_DIR / "analysis" / "tables" / f"thesis_dual_dataset_{variant}",
+        "onhw_csv": WORK_DIR / "analysis" / f"quant_all_val_predictions_ar_vs_hybrid{suffix}.csv",
+        "stabilo_csv": WORK_DIR / "analysis" / f"quant_all_val_predictions_new{suffix}.csv",
+        "onhw_ar_export_pat": str(WORK_DIR.parent.parent / f"results/hwr2/{spec['ar_group']}/{arch}__onhw_wi_word_rh/fold_{{fold}}/exports/val_full_fold{{fold}}_epoch0.json"),
+        "onhw_hyb_export_pat": str(WORK_DIR.parent.parent / f"results/hwr2/{spec['hyb_group']}/{arch}__onhw_wi_word_rh/fold_{{fold}}/exports/val_full_fold{{fold}}_epoch0_ar.json"),
+    }
+
+
+# Module-level globals are rebound inside main() once the variant is known.
+# They default to xs (the new primary baseline configuration).
+_default_paths = _resolve_paths("xs")
+FIG_DIR = _default_paths["fig_dir"]
+TABLE_DIR = _default_paths["table_dir"]
+ONHW_CSV = _default_paths["onhw_csv"]
+STABILO_CSV = _default_paths["stabilo_csv"]
+ONHW_AR_EXPORT_PAT = _default_paths["onhw_ar_export_pat"]
+ONHW_HYB_EXPORT_PAT = _default_paths["onhw_hyb_export_pat"]
 
 
 # ============================================================
@@ -397,7 +430,58 @@ def find_representative_examples(df: pd.DataFrame, task_name: str, n_per_quantil
 # ============================================================
 # Main
 # ============================================================
+def _parse_args():
+    p = argparse.ArgumentParser(
+        description="Dual-dataset analysis for the thesis (variant-aware)."
+    )
+    p.add_argument(
+        "--variant",
+        choices=sorted(VARIANT_SPECS.keys()),
+        default="xs",
+        help="HWRFormer variant. 'xs' = baseline (ar_transformer_xs, ~4.6 M); "
+             "'s' = scaled (ar_transformer_s, ~6.9 M). Default: xs.",
+    )
+    p.add_argument("--onhw-csv", type=Path, default=None,
+                   help="Override path to the OnHW predictions CSV.")
+    p.add_argument("--stabilo-csv", type=Path, default=None,
+                   help="Override path to the Stabilo predictions CSV.")
+    return p.parse_args()
+
+
 def main():
+    global FIG_DIR, TABLE_DIR, ONHW_CSV, STABILO_CSV
+    global ONHW_AR_EXPORT_PAT, ONHW_HYB_EXPORT_PAT
+
+    args = _parse_args()
+    paths = _resolve_paths(args.variant)
+    FIG_DIR = paths["fig_dir"]
+    TABLE_DIR = paths["table_dir"]
+    ONHW_CSV = Path(args.onhw_csv) if args.onhw_csv else paths["onhw_csv"]
+    STABILO_CSV = Path(args.stabilo_csv) if args.stabilo_csv else paths["stabilo_csv"]
+    ONHW_AR_EXPORT_PAT = paths["onhw_ar_export_pat"]
+    ONHW_HYB_EXPORT_PAT = paths["onhw_hyb_export_pat"]
+
+    print(f"=== Variant: {args.variant} ({VARIANT_SPECS[args.variant]['arch_de']}) ===")
+    print(f"  FIG_DIR:    {FIG_DIR}")
+    print(f"  TABLE_DIR:  {TABLE_DIR}")
+    print(f"  ONHW_CSV:   {ONHW_CSV}   exists={ONHW_CSV.exists()}")
+    print(f"  STABILO_CSV:{STABILO_CSV}   exists={STABILO_CSV.exists()}")
+    print()
+
+    missing = [(p, name) for p, name in [(ONHW_CSV, "ONHW_CSV"), (STABILO_CSV, "STABILO_CSV")] if not p.exists()]
+    if missing:
+        msg = ["ERROR: input CSV(s) not found:"]
+        for p, name in missing:
+            msg.append(f"  {name}: {p}")
+        msg.append("")
+        msg.append(
+            f"  For --variant={args.variant}, the predictions CSV(s) must be "
+            f"generated from validation exports first. Run the predictions-"
+            f"aggregator script after the val export eval pass (SLURM job "
+            f"export_xs_val_full or equivalent) finishes."
+        )
+        sys.exit("\n".join(msg))
+
     os.makedirs(FIG_DIR, exist_ok=True)
     os.makedirs(TABLE_DIR, exist_ok=True)
 
