@@ -1,0 +1,51 @@
+# ═══════════════════════════════════════════════════════════════════
+# Decoding Study — Base Config (AR-only model on OnHW500 WI)
+# ═══════════════════════════════════════════════════════════════════
+# This file is used as the base for all decoding experiments.
+# CLI overrides or YAML patches adjust decoder/method/params per run.
+
+# ── Model ────────────────────────────────────────────────────────
+arch_en: 'blconv_b'
+arch_de: 'ar_transformer_xs'
+num_channel: 13
+len_seq: 0
+use_bpe: false
+use_gated_attention: true
+gating_type: elementwise
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
+
+# ── Checkpoint (AR-only, element_word_onhw500, fold 0) ───────────
+# Override per-fold via CLI: --checkpoint ... --idx_fold ...
+checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-XS-blconv_b/ar_transformer_xs__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth
+
+# ── Dataset ──────────────────────────────────────────────────────
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+idx_fold: 0
+cache: true
+
+# ── Runtime ──────────────────────────────────────────────────────
+device: cuda
+seed: 42
+num_worker: 4
+size_batch: 64
+max_len: 200
+
+# ── Decoding parameters (defaults, override via CLI) ─────────────
+decoder: ar           # "ar" or "ctc"
+method: greedy        # "greedy", "beam", "beam_lm", "beam_rescore"
+beam_size: 4
+alpha: 0.6            # length normalisation exponent
+eos_bias: 0.0         # additive bias on EOS logit (γ)
+min_len: 0            # minimum output length
+min_len_ratio: 0.0    # min length as ratio of enc length
+
+# ── LM parameters ───────────────────────────────────────────────
+lm_path: null         # path to KenLM .binary or .arpa
+lm_weight: 0.0        # λ: LM weight
+insertion_bonus: 0.0   # β: per-char bonus (CTC)
+length_bonus: 0.0      # β: per-char bonus (AR rescoring)
+nbest_size: 16         # N-best list size for rescoring
+
+# ── Output ───────────────────────────────────────────────────────
+outdir: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/decode_study
