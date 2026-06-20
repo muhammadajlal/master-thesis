@@ -157,7 +157,8 @@ def main() -> None:
 
             _draw_metric(ax, P_VALUES, cer_means, cer_sems, CER_COLOR, "o", "-")
             ax.tick_params(axis="y", labelcolor=CER_COLOR, labelsize=9.0)
-            ax.axvline(DEFAULT_P, linestyle=":", color="gray", linewidth=1.1, zorder=1)
+            ax.axvline(DEFAULT_P, linestyle="--", color="#d62728",
+                       linewidth=1.8, alpha=0.75, zorder=4)
             ax.grid(True, alpha=0.3, linewidth=0.6)
             ax.set_axisbelow(True)
             ax.set_xticks(P_VALUES)
