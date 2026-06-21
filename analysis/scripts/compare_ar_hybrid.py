@@ -742,10 +742,10 @@ def plot_cosine_similarity_comparison(
             sim = cosine_similarity(f)
             im = ax.imshow(sim, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
 
-            ax.set_title(f'{label} — "{word_ar}"', fontsize=11, pad=18)
-            ax.set_xlabel("Frame index", fontsize=10)
-            ax.set_ylabel("Frame index", fontsize=10)
-            ax.tick_params(axis="both", labelsize=8)
+            ax.set_title(f'{label} — "{word_ar}"', fontsize=15, pad=18)
+            ax.set_xlabel("Frame index", fontsize=14)
+            ax.set_ylabel("Frame index", fontsize=14)
+            ax.tick_params(axis="both", labelsize=12)
 
             boundaries, seg_chars = _segments_from_char_labels(chars)
 
@@ -766,17 +766,19 @@ def plot_cosine_similarity_comparison(
                         transform=ax.get_xaxis_transform(),
                         ha="center",
                         va="bottom",
-                        fontsize=7,
+                        fontsize=11,
                         clip_on=False,
                     )
 
         if im is not None:
-            fig.colorbar(im, ax=[ax1, ax2], shrink=0.85, label="Cosine similarity", pad=0.02)
+            cbar = fig.colorbar(im, ax=[ax1, ax2], shrink=0.85, label="Cosine similarity", pad=0.02)
+            cbar.set_label("Cosine similarity", fontsize=13)
+            cbar.ax.tick_params(labelsize=11)
 
         # Move suptitle higher so it can't collide with per-axis titles/labels
         fig.suptitle(
             f'Cosine Similarity — GT: "{word_ar}" (subset_pos {sample_id}){title_suffix}',
-            fontsize=13,
+            fontsize=16,
             y=1.12,
         )
 
@@ -1105,18 +1107,20 @@ def plot_attention_comparison(
                 ax.set_axis_off()
                 continue
             im = ax.imshow(M, aspect="auto", origin="lower", cmap="viridis")
-            ax.set_xlabel("Encoder frame", fontsize=10)
-            ax.set_ylabel("Decoder token", fontsize=10)
-            ax.set_title(f'{name} — "{label}"', fontsize=11)
+            ax.set_xlabel("Encoder frame", fontsize=14)
+            ax.set_ylabel("Decoder token", fontsize=14)
+            ax.set_title(f'{name} — "{label}"', fontsize=15)
             if len(tgt) <= 30:
                 ax.set_yticks(range(len(tgt)))
-                ax.set_yticklabels(tgt, fontsize=7)
-            ax.tick_params(axis="both", labelsize=8)
+                ax.set_yticklabels(tgt, fontsize=11)
+            ax.tick_params(axis="both", labelsize=12)
 
-        fig.colorbar(im, ax=[ax1, ax2], shrink=0.85, label="Attention weight", pad=0.02)
+        cbar = fig.colorbar(im, ax=[ax1, ax2], shrink=0.85, label="Attention weight", pad=0.02)
+        cbar.set_label("Attention weight", fontsize=13)
+        cbar.ax.tick_params(labelsize=11)
         fig.suptitle(
             f'Cross-Attention — GT: "{label}"{title_suffix}',
-            fontsize=13, y=1.05,
+            fontsize=16, y=1.05,
         )
 
         safe_label = label[:10].replace("/", "_")
