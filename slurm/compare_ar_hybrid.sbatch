@@ -2,11 +2,11 @@
 #SBATCH -J ar_hyb_qual
 #SBATCH -o logs/slurm/%x_%j.out
 #SBATCH -e logs/slurm/%x_%j.err
-#SBATCH -p rtx3080
-#SBATCH --gres=gpu:rtx3080:1
+#SBATCH -p v100
+#SBATCH --gres=gpu:v100:1
 #SBATCH --cpus-per-task=8
 # NOTE: This cluster forbids --mem with GPU jobs. Remove/adjust if CPU-only.
-#SBATCH -t 08:00:00
+#SBATCH -t 24:00:00
 
 set -euo pipefail
 set -x
@@ -16,8 +16,8 @@ PROJ=$WORK/imu-hwr/work/REWI_work
 export PROJ
 
 # ---- Params you can tweak ----
-AR_CKPT=${AR_CKPT:-$WORK/imu-hwr/results/hwr2/element_word_onhw500_new/ar_transformer_s__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth}
-HYB_CKPT=${HYB_CKPT:-$WORK/imu-hwr/results/hwr2/train_element_word_hybrid_06/ar_transformer_s__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth}
+AR_CKPT=${AR_CKPT:-$WORK/imu-hwr/results/hwr2/Baseline-AR-ElementwiseGating/ar_transformer_s__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth}
+HYB_CKPT=${HYB_CKPT:-$WORK/imu-hwr/results/hwr2/Baseline-Hybrid/train_element_word_hybrid_06/ar_transformer_s__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth}
 DATASET=${DATASET:-onhw_wi_word_rh}
 FOLD=${FOLD:-0}
 OUTDIR=${OUTDIR:-figures/ar_vs_hybrid_new_new}

@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
 # Export `val_full_fold{k}_epoch0[_ar].json` for XS AR-only + Hybrid
-# on OnHW-WI and OnHW-WD, all 5 folds (2 datasets × 2 models × 5 = 20).
+# on PRIVATE word + sentence (Stabilo), all 5 folds.
+# (2 datasets × 2 models × 5 folds = 20 total).
 #
-# Each per-fold run patches `test:true` and `export_val_full:true` onto
-# the canonical training YAML stashed in the result dir and re-invokes
-# main.py with the best_cer checkpoint. Outputs land under
-# `<dir_work>/fold_<k>/exports/val_full_fold{k}_epoch0[_ar].json`,
-# matching the schema thesis_dual_dataset_analysis.py reads from.
-#
-# Run from work/REWI_work:
-#   bash analysis/scripts/_export_xs_val_full.sh
+# Companion to _export_xs_val_full.sh (OnHW WI/WD). Same per-fold
+# patching strategy: set test=True, export_val_full=True, epoch=1,
+# checkpoint=best_cer.pth, then re-invoke main.py.
 # ═══════════════════════════════════════════════════════════════════
 set -uo pipefail
 
@@ -31,12 +27,12 @@ cd "$PROJ"
 
 # (dir_work_root, arch_suffix=dataset_dir_name) tuples
 declare -a AR_RUNS=(
-    "Baseline-AR-XS-blconv_b|ar_transformer_xs__onhw_wi_word_rh"
-    "Baseline-AR-XS-blconv_b|ar_transformer_xs__onhw_wd_word_rh"
+    "Baseline-AR-XS-blconv_b|ar_transformer_xs__wi_word_hw6_meta"
+    "Baseline-AR-XS-blconv_b|ar_transformer_xs__wi_sent_hw6_meta"
 )
 declare -a HYB_RUNS=(
-    "train_element_word_hybrid_01_xs_onhw_wi|ar_transformer_xs__onhw_wi_word_rh"
-    "train_element_word_hybrid_01_xs_onhw_wd|ar_transformer_xs__onhw_wd_word_rh"
+    "train_element_word_hybrid_01_xs_stabilo|ar_transformer_xs__wi_word_hw6_meta"
+    "train_element_word_hybrid_01_xs_stabilo_sent|ar_transformer_xs__wi_sent_hw6_meta"
 )
 
 run_one() {
@@ -48,7 +44,6 @@ run_one() {
     local exports_dir="${fold_dir}/exports"
     mkdir -p "${exports_dir}"
 
-    # Pick canonical train_*.yaml as the base.
     local base_yaml
     base_yaml=$(ls -1 "${idx_dir}"/train_*.yaml 2>/dev/null | head -1)
     if [[ -z "${base_yaml}" ]]; then
@@ -60,7 +55,6 @@ run_one() {
         return 1
     fi
 
-    # Decide which export filename signals success.
     local out_suffix=""
     if [[ "${label}" == "hyb" ]]; then
         out_suffix="_ar"
@@ -71,7 +65,6 @@ run_one() {
         return 0
     fi
 
-    # Patch YAML: set test:true, export_val_full:true, epoch:1, freq_eval:1.
     local patched
     patched=$(mktemp --suffix=.yaml)
     "${PY_BIN}" - "${base_yaml}" "${patched}" "${ckpt}" <<'PY'
@@ -84,7 +77,6 @@ cfg["export_val_full"] = True
 cfg["epoch"] = 1
 cfg["freq_eval"] = 1
 cfg["checkpoint"] = ckpt
-# Drop the resolved tokenizer_obj if present so main.py rebuilds it.
 cfg.pop("tokenizer_obj", None)
 with open(dst, "w") as f:
     yaml.safe_dump(cfg, f, sort_keys=True)

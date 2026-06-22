@@ -195,6 +195,11 @@ def plot_ld_distribution(
     colors = ["C0", "C1", "C2", "C3"]
     x_label = "Normalized Levenshtein Distance ($d / |y|$)" if normalized else "Levenshtein Distance"
 
+    datasets = {k: v for k, v in datasets.items() if np.asarray(v).size > 0}
+    if not datasets:
+        plt.close(fig)
+        print(f"  Skipped (all subsets empty): {save_path}")
+        return
     all_max = max(float(v.max()) for v in datasets.values())
     if normalized:
         bins = np.linspace(0.0, min(all_max, 2.0), 50)
