@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate thesis/figures/p_replace_sweep_baseline_vs_scaled.pdf.
+"""Generate thesis/figures/p_replace_sweep_hwrformer_vs_l.pdf.
 
 Dual-variant version of plot_corruption_p_sweep.py.
-Rows = HWRFormer configuration (baseline xs / scaled s),
+Rows = HWRFormer configuration (HWRFormer / HWRFormer-L),
 columns = 4 datasets (OnHW WI word, OnHW WD word, private word,
 private sentence). Each panel: CER (left axis, solid line, circle
 markers) and WER (right axis, dashed line, square markers) vs
@@ -42,7 +42,7 @@ S_JSON = Path(
     "/home/woody/iwso/iwso214h/imu-hwr/publications/paper2_lncs_overleaf/s_numbers.json"
 )
 OUT_PDF = Path(
-    "/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/p_replace_sweep_baseline_vs_scaled.pdf"
+    "/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/p_replace_sweep_hwrformer_vs_l.pdf"
 )
 
 DATASETS: list[tuple[str, str]] = [
@@ -55,7 +55,7 @@ DATASETS: list[tuple[str, str]] = [
 P_VALUES = [0.00, 0.05, 0.10, 0.15, 0.20, 0.30]
 DEFAULT_P = 0.15
 
-ROW_TITLES = ["HWRFormer (baseline)", "HWRFormer (scaled)"]
+ROW_TITLES = ["HWRFormer", "HWRFormer-L"]
 
 CER_COLOR = "#1f77b4"
 WER_COLOR = "#ff7f0e"

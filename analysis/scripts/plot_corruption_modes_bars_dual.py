@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate thesis/figures/noise_modes_baseline_vs_scaled.pdf.
+"""Generate thesis/figures/noise_modes_hwrformer_vs_l.pdf.
 
 Dual-variant variant of plot_corruption_modes_bars.py. Rows = HWRFormer
-configuration (baseline xs / scaled s), columns = dataset (OnHW WI word,
+configuration (HWRFormer / HWRFormer-L), columns = dataset (OnHW WI word,
 OnHW WD word, private word, private sentence). Each panel is a 6-bar
 group with error bars: no-noise baseline, uniform, bigram-right,
 bigram-left, self-confusion, adjacent-swap at p_replace = 0.15.
@@ -37,7 +37,7 @@ S_JSON = Path(
     "/home/woody/iwso/iwso214h/imu-hwr/publications/paper2_lncs_overleaf/s_numbers.json"
 )
 OUT_PDF = Path(
-    "/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/noise_modes_baseline_vs_scaled.pdf"
+    "/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/noise_modes_hwrformer_vs_l.pdf"
 )
 
 DATASETS: list[tuple[str, str]] = [
@@ -61,7 +61,7 @@ SERIES: list[tuple[str, str, str]] = [
     *MODES,
 ]
 
-ROW_TITLES = ["HWRFormer (baseline)", "HWRFormer (scaled)"]
+ROW_TITLES = ["HWRFormer", "HWRFormer-L"]
 
 
 def _get(d, *keys, default=None):
