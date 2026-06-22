@@ -1,0 +1,58 @@
+# =========================
+# AR Baseline: ar_transformer_s + blconv_b WITHOUT SDPA gating
+# Dataset: wi_sent_hw6_meta (private sentence)
+# Symmetric private-sentence counterpart to train-ar-ungated-onhw-{wi,wd}-word.yaml.
+# Output fills the scaled-ungated private-sentence cells of tab:ar-baseline
+# and tab:gating-word (currently ---).
+#
+# Differences vs. the word YAMLs:
+#  - dir_dataset / dir_work point at wi_sent_hw6_meta.
+#  - categories list is the extended sentence-level charset (letters + digits
+#    + punctuation + space), copied from train-ar-xs-ungated-stabilo-sent.yaml;
+#    the OnHW letters-only charset would silently truncate sentence labels.
+#  - size_batch reduced to 32: sentences are longer than words and can OOM
+#    the rtx3080 10 GB GPUs at batch=64.
+# =========================
+
+arch_de: 'ar_transformer_s'
+freeze_decoder_epochs: 0
+pretrained_decoder_checkpoint: null
+
+arch_en: 'blconv_b'
+aug: true
+cache: true
+checkpoint: null
+ctc_decoder: best_path
+device: cuda
+
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-Ungated/ar_transformer_s__wi_sent_hw6_meta
+
+epoch: 300
+epoch_warmup: 30
+freeze: false
+freq_eval: 5
+freq_log: 50
+freq_save: 5
+save_best_only: true
+export_val_full: false
+idx_fold: 0
+len_seq: 0
+lr: 0.001
+num_channel: 13
+num_worker: 16
+seed: 42
+size_batch: 32
+test: false
+use_amp: true
+
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+use_gated_attention: false
+gating_type: elementwise
+
+categories: ['', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü', 'ß', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', ',', '(', ')', "'", '?', '!', '+', '=', '-', '/', ';', ':', '·', ' ']

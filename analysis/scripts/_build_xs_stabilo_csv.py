@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Aggregate XS val_full export JSONs into a single CSV.
+"""Aggregate XS Stabilo (private) val_full exports into the legacy CSV format.
 
-Mirrors the schema of `analysis/quant_all_val_predictions_ar_vs_hybrid.csv`
-but for the XS swap. Source JSONs live under
-  `results/hwr2/Baseline-AR-XS-blconv_b/<arch>/fold_<k>/exports/val_full_fold<k>_epoch0.json`
-  `results/hwr2/train_element_word_hybrid_01_xs_onhw_wi/<arch>/fold_<k>/exports/val_full_fold<k>_epoch0_ar.json`
-(plus the matching onhw_wd directories).
+Matches the schema of analysis/quant_all_val_predictions_new.csv (the scaled
+Stabilo CSV that thesis_dual_dataset_analysis.py expects):
+  - task: "word" or "sent" (dataset type, NOT AR vs Hybrid)
+  - one model's predictions per row; we use Hybrid (AR Decoding) on the
+    HWRFormer (baseline) at lambda_ctc=0.1 — the chapter's canonical
+    reporting point.
 
-Output: `analysis/quant_all_val_predictions_ar_vs_hybrid_xs.csv` (";"-separated).
+Source JSONs:
+  results/hwr2/train_element_word_hybrid_01_xs_stabilo/<arch>/fold_<k>/exports/val_full_fold<k>_epoch0_ar.json
+  results/hwr2/train_element_word_hybrid_01_xs_stabilo_sent/<arch>/fold_<k>/exports/val_full_fold<k>_epoch0_ar.json
+
+Output: analysis/quant_all_val_predictions_new_xs.csv (";"-separated).
 """
 from __future__ import annotations
 
@@ -17,18 +22,14 @@ from pathlib import Path
 
 WORK_DIR = Path(__file__).resolve().parent.parent.parent
 RESULTS = Path("/home/woody/iwso/iwso214h/imu-hwr/results/hwr2")
-OUT_CSV = WORK_DIR / "analysis" / "quant_all_val_predictions_ar_vs_hybrid_xs.csv"
+OUT_CSV = WORK_DIR / "analysis" / "quant_all_val_predictions_new_xs.csv"
 
-# (task_label, model_root, arch, dataset_task) tuples.
-SOURCES: list[tuple[str, str, str, str]] = [
-    ("AR-only", "Baseline-AR-XS-blconv_b",
-     "ar_transformer_xs__onhw_wi_word_rh", "word"),
-    ("AR-only", "Baseline-AR-XS-blconv_b",
-     "ar_transformer_xs__onhw_wd_word_rh", "word"),
-    ("Hybrid (AR Decoding)", "train_element_word_hybrid_01_xs_onhw_wi",
-     "ar_transformer_xs__onhw_wi_word_rh", "word"),
-    ("Hybrid (AR Decoding)", "train_element_word_hybrid_01_xs_onhw_wd",
-     "ar_transformer_xs__onhw_wd_word_rh", "word"),
+# (task_label, model_root, arch) — task is "word" / "sent" matching legacy
+SOURCES: list[tuple[str, str, str]] = [
+    ("word", "train_element_word_hybrid_01_xs_stabilo",
+     "ar_transformer_xs__wi_word_hw6_meta"),
+    ("sent", "train_element_word_hybrid_01_xs_stabilo_sent",
+     "ar_transformer_xs__wi_sent_hw6_meta"),
 ]
 
 
@@ -50,15 +51,13 @@ def levenshtein(a: str, b: str) -> int:
     return prev[-1]
 
 
-def find_export(model_root: str, arch: str, fold: int, is_hybrid: bool) -> Path | None:
+def find_export(model_root: str, arch: str, fold: int) -> Path | None:
     exports = RESULTS / model_root / arch / f"fold_{fold}" / "exports"
-    suffix = "_ar" if is_hybrid else ""
-    candidate = exports / f"val_full_fold{fold}_epoch0{suffix}.json"
+    # Hybrid models export *_ar.json (the AR-decoded predictions)
+    candidate = exports / f"val_full_fold{fold}_epoch0_ar.json"
     if candidate.exists():
         return candidate
-    # Fall back to the smallest-epoch export available.
-    pattern = f"val_full_fold{fold}_epoch*{suffix}.json"
-    options = sorted(exports.glob(pattern))
+    options = sorted(exports.glob(f"val_full_fold{fold}_epoch*_ar.json"))
     return options[0] if options else None
 
 
@@ -66,10 +65,9 @@ def main() -> None:
     rows = []
     missing: list[str] = []
     total = 0
-    for task, model_root, arch, dataset_task in SOURCES:
-        is_hybrid = task.startswith("Hybrid")
+    for task, model_root, arch in SOURCES:
         for fold in range(5):
-            export = find_export(model_root, arch, fold, is_hybrid)
+            export = find_export(model_root, arch, fold)
             if export is None:
                 missing.append(f"{task} {model_root} fold {fold}")
                 continue
@@ -89,10 +87,9 @@ def main() -> None:
                     "prediction": p,
                     "label": l,
                     "levenshtein_distance": levenshtein(p, l),
-                    "dataset_task": dataset_task,
                 })
             total += n
-            print(f"  + {task:<22s} fold {fold} {arch:<48s} n={n}")
+            print(f"  + {task:<6s} fold {fold} {arch:<48s} n={n}")
 
     if missing:
         print("Missing exports (skipped):")
@@ -100,10 +97,8 @@ def main() -> None:
             print(f"  - {m}")
 
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [
-        "task", "fold", "json_path", "sample_index",
-        "prediction", "label", "levenshtein_distance", "dataset_task",
-    ]
+    fieldnames = ["task", "fold", "json_path", "sample_index",
+                  "prediction", "label", "levenshtein_distance"]
     with open(OUT_CSV, "w", newline="") as fp:
         writer = csv.DictWriter(fp, fieldnames=fieldnames, delimiter=";")
         writer.writeheader()
