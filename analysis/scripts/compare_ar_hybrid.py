@@ -742,7 +742,7 @@ def plot_cosine_similarity_comparison(
             sim = cosine_similarity(f)
             im = ax.imshow(sim, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
 
-            ax.set_title(f'{label} — "{word_ar}"', fontsize=15, pad=18)
+            ax.set_title(f'{label} — "{word_ar}"', fontsize=20, pad=14)
             ax.set_xlabel("Frame index", fontsize=14)
             ax.set_ylabel("Frame index", fontsize=14)
             ax.tick_params(axis="both", labelsize=12)
@@ -775,12 +775,9 @@ def plot_cosine_similarity_comparison(
             cbar.set_label("Cosine similarity", fontsize=13)
             cbar.ax.tick_params(labelsize=11)
 
-        # Move suptitle higher so it can't collide with per-axis titles/labels
-        fig.suptitle(
-            f'Cosine Similarity — GT: "{word_ar}" (subset_pos {sample_id}){title_suffix}',
-            fontsize=16,
-            y=1.12,
-        )
+        # Suptitle removed: the per-panel titles ('AR-only — "<word>"' /
+        # 'Hybrid — "<word>"') already convey ground-truth and configuration;
+        # the suptitle was redundant in thesis figures.
 
         path = os.path.join(save_dir, f"cosine_sim_sample{sample_id:04d}_{word_ar[:10]}.pdf")
         fig.savefig(path, bbox_inches="tight")
@@ -1109,7 +1106,7 @@ def plot_attention_comparison(
             im = ax.imshow(M, aspect="auto", origin="lower", cmap="viridis")
             ax.set_xlabel("Encoder frame", fontsize=14)
             ax.set_ylabel("Decoder token", fontsize=14)
-            ax.set_title(f'{name} — "{label}"', fontsize=15)
+            ax.set_title(f'{name} — "{label}"', fontsize=20, pad=14)
             if len(tgt) <= 30:
                 ax.set_yticks(range(len(tgt)))
                 ax.set_yticklabels(tgt, fontsize=11)
@@ -1118,10 +1115,9 @@ def plot_attention_comparison(
         cbar = fig.colorbar(im, ax=[ax1, ax2], shrink=0.85, label="Attention weight", pad=0.02)
         cbar.set_label("Attention weight", fontsize=13)
         cbar.ax.tick_params(labelsize=11)
-        fig.suptitle(
-            f'Cross-Attention — GT: "{label}"{title_suffix}',
-            fontsize=16, y=1.05,
-        )
+        # Suptitle removed: the per-panel titles ('AR-only — "<word>"' /
+        # 'Hybrid — "<word>"') already carry ground-truth + configuration;
+        # the suptitle was redundant in thesis figures.
 
         safe_label = label[:10].replace("/", "_")
         path = os.path.join(save_dir, f"attn_sample{i:04d}_{safe_label}.pdf")
