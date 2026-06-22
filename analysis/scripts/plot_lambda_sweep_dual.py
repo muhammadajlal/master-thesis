@@ -179,17 +179,17 @@ def main() -> None:
 
     legend_handles = [
         Line2D([0], [0], color=XS_COLOR, marker="o", markersize=7, linewidth=2,
-               label=r"HWRFormer (baseline), 5-fold mean $\pm$ SEM"),
+               label=r"HWRFormer hybrid sweep, 5-fold mean $\pm$ SEM"),
         Line2D([0], [0], color=S_COLOR, marker="s", markersize=7, linewidth=2,
-               label=r"HWRFormer (scaled), 5-fold mean $\pm$ SEM"),
+               label=r"HWRFormer-L hybrid sweep, 5-fold mean $\pm$ SEM"),
         Line2D([0], [0], color=XS_COLOR, linestyle=":", linewidth=1.2,
-               label=r"AR-only baseline (xs, elementwise-gated)"),
+               label=r"HWRFormer AR-only reference (elementwise-gated)"),
         Line2D([0], [0], color=S_COLOR, linestyle=":", linewidth=1.2,
-               label=r"AR-only scaled (s, elementwise-gated)"),
+               label=r"HWRFormer-L AR-only reference (elementwise-gated)"),
         Line2D([0], [0], color=XS_COLOR, linestyle="--", linewidth=1.0,
-               label=r"baseline-selected $\lambda_{\mathrm{ctc}}{=}0.1$"),
+               label=r"HWRFormer selected $\lambda_{\mathrm{ctc}}{=}0.1$"),
         Line2D([0], [0], color=S_COLOR, linestyle="--", linewidth=1.0,
-               label=r"scaled-selected $\lambda_{\mathrm{ctc}}{=}0.6$"),
+               label=r"HWRFormer-L selected $\lambda_{\mathrm{ctc}}{=}0.6$"),
     ]
     fig.legend(
         handles=legend_handles,
