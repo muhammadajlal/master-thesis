@@ -19,12 +19,19 @@ WORK_DIR = Path(__file__).resolve().parent.parent.parent
 RESULTS = Path("/home/woody/iwso/iwso214h/imu-hwr/results/hwr2")
 OUT_CSV = WORK_DIR / "analysis" / "quant_all_val_predictions_ar_vs_noise_xs.csv"
 
-SOURCES: list[tuple[str, str, str, str]] = [
-    ("AR-only", "Baseline-AR-XS-blconv_b",
-     "ar_transformer_xs__onhw_wi_word_rh", "word"),
-    ("Noise (uniform p=0.15)", "Baseline-AR-XS-InputCorruption-uniform",
-     "ar_transformer_xs__onhw_wi_word_rh", "word"),
+DATASETS: list[tuple[str, str]] = [
+    ("ar_transformer_xs__onhw_wi_word_rh", "onhw_wi_word"),
+    ("ar_transformer_xs__onhw_wd_word_rh", "onhw_wd_word"),
+    ("ar_transformer_xs__wi_word_hw6_meta", "priv_word"),
+    ("ar_transformer_xs__wi_sent_hw6_meta", "priv_sent"),
 ]
+
+SOURCES: list[tuple[str, str, str, str]] = []
+for arch, dataset_task in DATASETS:
+    SOURCES.append(("AR-only", "Baseline-AR-XS-blconv_b", arch, dataset_task))
+    SOURCES.append(("Noise (uniform p=0.15)",
+                    "Baseline-AR-XS-InputCorruption-uniform",
+                    arch, dataset_task))
 
 
 def levenshtein(a: str, b: str) -> int:

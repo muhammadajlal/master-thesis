@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Aggregate eval_tf_perturbation_p{NNN}.json files and plot the
-prefix-perturbation robustness curves for the AR-only and AR + noise
-injection HWRFormer xs checkpoints on OnHW WI word.
+"""Aggregate eval_tf_perturbation_p{NNN}.json files and plot prefix-perturbation
+robustness curves on all four datasets.
 
-Inputs:
-    results/hwr2/Baseline-AR-XS-blconv_b/.../fold_{k}/eval_tf_perturbation_p{NNN}.json
-    results/hwr2/Baseline-AR-XS-InputCorruption-uniform/.../fold_{k}/eval_tf_perturbation_p{NNN}.json
+Inputs (per dataset, per checkpoint, per fold, per p in {0.00, 0.05, 0.10,
+0.15, 0.20}):
+    results/hwr2/<dir_root>/ar_transformer_xs__<dataset>/fold_{k}/
+        eval_tf_perturbation_p{NNN}.json
 
 Outputs:
-    analysis/prefix_perturbation_sweep.csv      (long-format aggregate)
-    thesis/figures/prefix_perturbation_robustness.pdf
+    analysis/prefix_perturbation_sweep.csv         (long-format aggregate)
+    thesis/figures/prefix_perturbation_robustness.pdf  (2 rows x 2 cols)
 
 Run from work/REWI_work:
     python analysis/scripts/plot_prefix_perturbation.py
@@ -33,9 +33,16 @@ THESIS_DIR = WORK_DIR.parent.parent / "thesis"
 OUT_FIG = THESIS_DIR / "figures" / "prefix_perturbation_robustness.pdf"
 
 P_VALUES = [0.00, 0.05, 0.10, 0.15, 0.20]
-ARCH = "ar_transformer_xs__onhw_wi_word_rh"
 
-SOURCES = [
+# (display_label, arch_suffix)
+DATASETS: list[tuple[str, str]] = [
+    ("OnHW WI word", "ar_transformer_xs__onhw_wi_word_rh"),
+    ("OnHW WD word", "ar_transformer_xs__onhw_wd_word_rh"),
+    ("Priv.\\ word", "ar_transformer_xs__wi_word_hw6_meta"),
+    ("Priv.\\ sent.", "ar_transformer_xs__wi_sent_hw6_meta"),
+]
+
+CHECKPOINTS: list[tuple[str, str]] = [
     ("AR-only", "Baseline-AR-XS-blconv_b"),
     ("AR + noise (uniform p=0.15)", "Baseline-AR-XS-InputCorruption-uniform"),
 ]
@@ -46,30 +53,33 @@ NOISE_COLOR = "#d62728"
 
 def load_results() -> list[dict]:
     rows: list[dict] = []
-    for task, dir_root in SOURCES:
-        for fold in range(5):
-            for p in P_VALUES:
-                p_tag = f"{int(round(p * 100)):03d}"
-                path = (
-                    RESULTS / dir_root / ARCH / f"fold_{fold}"
-                    / f"eval_tf_perturbation_p{p_tag}.json"
-                )
-                if not path.exists():
-                    print(f"missing: {path}")
-                    continue
-                with open(path) as fp:
-                    d = json.load(fp)
-                r = d.get("tf_perturbation", {})
-                rows.append({
-                    "task": task,
-                    "dir_root": dir_root,
-                    "fold": fold,
-                    "p_replace": float(p),
-                    "cer": float(r.get("cer", -1)),
-                    "wer": float(r.get("wer", -1)),
-                    "n_samples": int(r.get("n_samples", 0)),
-                    "json_path": str(path),
-                })
+    for task, dir_root in CHECKPOINTS:
+        for display, arch in DATASETS:
+            for fold in range(5):
+                for p in P_VALUES:
+                    p_tag = f"{int(round(p * 100)):03d}"
+                    path = (
+                        RESULTS / dir_root / arch / f"fold_{fold}"
+                        / f"eval_tf_perturbation_p{p_tag}.json"
+                    )
+                    if not path.exists():
+                        print(f"missing: {path}")
+                        continue
+                    with open(path) as fp:
+                        d = json.load(fp)
+                    r = d.get("tf_perturbation", {})
+                    rows.append({
+                        "task": task,
+                        "dir_root": dir_root,
+                        "arch": arch,
+                        "dataset_label": display,
+                        "fold": fold,
+                        "p_replace": float(p),
+                        "cer": float(r.get("cer", -1)),
+                        "wer": float(r.get("wer", -1)),
+                        "n_samples": int(r.get("n_samples", 0)),
+                        "json_path": str(path),
+                    })
     return rows
 
 
@@ -87,39 +97,54 @@ def write_csv(rows: list[dict]) -> None:
     print(f"wrote {len(rows)} rows to {OUT_CSV}")
 
 
-def plot(rows: list[dict]) -> None:
-    fig, ax = plt.subplots(1, 1, figsize=(7.5, 4.5))
-    for task, color, marker in [
-        ("AR-only", AR_COLOR, "o"),
-        ("AR + noise (uniform p=0.15)", NOISE_COLOR, "s"),
-    ]:
-        task_rows = [r for r in rows if r["task"] == task]
-        means: list[float] = []
-        sems: list[float] = []
-        for p in P_VALUES:
-            vals = [r["cer"] * 100.0 for r in task_rows if abs(r["p_replace"] - p) < 1e-9]
-            if not vals:
-                means.append(float("nan"))
-                sems.append(0.0)
-                continue
-            arr = np.array(vals, dtype=float)
-            means.append(float(arr.mean()))
-            sems.append(float(arr.std(ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0)
-        means_arr = np.array(means)
-        sems_arr = np.array(sems)
-        ax.errorbar(
-            P_VALUES, means_arr, yerr=sems_arr,
-            marker=marker, color=color, linewidth=2, capsize=3,
-            label=task,
+def _curve(rows: list[dict], task: str, arch: str) -> tuple[np.ndarray, np.ndarray]:
+    means: list[float] = []
+    sems: list[float] = []
+    for p in P_VALUES:
+        vals = [
+            r["cer"] * 100.0
+            for r in rows
+            if r["task"] == task and r["arch"] == arch
+            and abs(r["p_replace"] - p) < 1e-9
+        ]
+        if not vals:
+            means.append(float("nan"))
+            sems.append(0.0)
+            continue
+        arr = np.array(vals, dtype=float)
+        means.append(float(arr.mean()))
+        sems.append(
+            float(arr.std(ddof=1) / np.sqrt(len(arr))) if len(arr) > 1 else 0.0
         )
-    ax.set_xlabel(r"Prefix perturbation rate $p_{\mathrm{replace}}$", fontsize=12)
-    ax.set_ylabel(r"Teacher-forced \gls{cer} (\%)", fontsize=12)
-    ax.set_title(
-        r"Prefix-perturbation robustness, HWRFormer on OnHW WI word",
-        fontsize=12,
-    )
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper left", fontsize=10)
+    return np.array(means), np.array(sems)
+
+
+def plot(rows: list[dict]) -> None:
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
+    axes_flat = axes.flatten()
+    for idx, (display, arch) in enumerate(DATASETS):
+        ax = axes_flat[idx]
+        ar_m, ar_s = _curve(rows, "AR-only", arch)
+        no_m, no_s = _curve(rows, "AR + noise (uniform p=0.15)", arch)
+        ax.errorbar(
+            P_VALUES, ar_m, yerr=ar_s,
+            marker="o", color=AR_COLOR, linewidth=2, capsize=3,
+            label="AR-only",
+        )
+        ax.errorbar(
+            P_VALUES, no_m, yerr=no_s,
+            marker="s", color=NOISE_COLOR, linewidth=2, capsize=3,
+            label=r"AR + noise (uniform $p{=}0.15$)",
+        )
+        ax.set_title(display, fontsize=11)
+        ax.grid(True, alpha=0.3)
+        if idx in (2, 3):
+            ax.set_xlabel(r"Prefix perturbation rate $p_{\mathrm{replace}}$",
+                          fontsize=10.5)
+        if idx in (0, 2):
+            ax.set_ylabel(r"Teacher-forced \gls{cer} (\%)", fontsize=10.5)
+        if idx == 1:
+            ax.legend(loc="upper left", fontsize=9)
     fig.tight_layout()
     OUT_FIG.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_FIG, bbox_inches="tight")

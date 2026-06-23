@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Cascade analysis for noise injection on the HWRFormer (xs).
+"""Cascade analysis for noise injection on the HWRFormer (xs), all four datasets.
 
 Reads the per-sample CSV produced by _build_xs_aggregated_csv_noise.py
-and produces:
+and produces, separately for each of the four datasets (OnHW WI word,
+OnHW WD word, private word, private sentence):
 
 1. Per-position error rate as a function of word position k for AR-only
    and AR + noise injection.
-2. Conditional cascade probability P(err_{k+1} | err_k) for the two
-   models, both as a scalar (pooled over k) and as a function of k.
+2. Conditional cascade probability P(err_{k+1} | err_k), both pooled
+   over k and as a function of k.
 3. Paired McNemar exact binomial test on per-sample exact-match.
 
 Outputs:
-    thesis/figures/cascade_noise_injection.pdf      (two-panel figure)
-    analysis/cascade_noise_injection_summary.csv    (one-row summary)
+    thesis/figures/cascade_noise_injection.pdf     (2 rows x 4 cols)
+    analysis/cascade_noise_injection_summary.csv   (4 rows, one per dataset)
 
 Run from work/REWI_work:
     python analysis/scripts/cascade_analysis.py
@@ -43,14 +44,16 @@ TASK_NOISE = "Noise (uniform p=0.15)"
 AR_COLOR = "#1f77b4"
 NOISE_COLOR = "#d62728"
 
+DATASETS: list[tuple[str, str]] = [
+    ("onhw_wi_word", "OnHW WI word"),
+    ("onhw_wd_word", "OnHW WD word"),
+    ("priv_word", "Priv.\\ word"),
+    ("priv_sent", "Priv.\\ sent."),
+]
+
 
 def per_position_errors(pred: str, label: str) -> list[bool]:
-    """Return a per-position error vector of length max(len(pred), len(label)).
-
-    Positions inside both strings compare character by character.
-    Positions inside only one string are counted as errors (extra
-    prediction or missed character).
-    """
+    """Return a per-position error vector of length max(len(pred), len(label))."""
     n = max(len(pred), len(label))
     errs: list[bool] = []
     for k in range(n):
@@ -62,11 +65,6 @@ def per_position_errors(pred: str, label: str) -> list[bool]:
 
 
 def aggregate_position_stats(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    """Aggregate per-position error counts across samples.
-
-    Returns (position_axis, error_rate_per_position) up to a length
-    cap that covers all observed positions.
-    """
     n_at_pos: dict[int, int] = defaultdict(int)
     err_at_pos: dict[int, int] = defaultdict(int)
     for _, row in df.iterrows():
@@ -88,10 +86,6 @@ def aggregate_position_stats(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
 
 
 def conditional_cascade(df: pd.DataFrame) -> tuple[float, np.ndarray]:
-    """Compute P(err_{k+1} | err_k) pooled over k and as a function of k.
-
-    Returns (pooled_probability, per_position_conditional_rates).
-    """
     pooled_num = 0
     pooled_den = 0
     num_at_k: dict[int, int] = defaultdict(int)
@@ -122,18 +116,14 @@ def conditional_cascade(df: pd.DataFrame) -> tuple[float, np.ndarray]:
 
 
 def paired_mcnemar(ar_df: pd.DataFrame, noise_df: pd.DataFrame) -> dict[str, float]:
-    """Paired McNemar exact binomial test on per-sample exact-match correctness.
-
-    The two dataframes must share the (fold, sample_index) keys.
-    """
-    ar_idx = ar_df.set_index(["fold", "sample_index"]) ["levenshtein_distance"]
-    noise_idx = noise_df.set_index(["fold", "sample_index"]) ["levenshtein_distance"]
+    ar_idx = ar_df.set_index(["fold", "sample_index"])["levenshtein_distance"]
+    noise_idx = noise_df.set_index(["fold", "sample_index"])["levenshtein_distance"]
     joined = pd.concat({"ar": ar_idx, "noise": noise_idx}, axis=1).dropna()
     ar_correct = (joined["ar"] == 0).to_numpy()
     noise_correct = (joined["noise"] == 0).to_numpy()
     n_total = len(joined)
-    b = int(np.sum(ar_correct & ~noise_correct))  # AR correct, Noise wrong
-    c = int(np.sum(~ar_correct & noise_correct))  # AR wrong, Noise correct
+    b = int(np.sum(ar_correct & ~noise_correct))
+    c = int(np.sum(~ar_correct & noise_correct))
     n_disc = b + c
     if n_disc == 0:
         p_value = 1.0
@@ -151,53 +141,80 @@ def paired_mcnemar(ar_df: pd.DataFrame, noise_df: pd.DataFrame) -> dict[str, flo
     }
 
 
-def plot_results(
-    ar_positions: np.ndarray,
-    ar_rates: np.ndarray,
-    noise_positions: np.ndarray,
-    noise_rates: np.ndarray,
-    ar_cascade_k: np.ndarray,
-    noise_cascade_k: np.ndarray,
-    summary: dict[str, float],
-    out_path: Path,
-) -> None:
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+def analyse_dataset(df_all: pd.DataFrame, dataset_task: str) -> dict:
+    df_ds = df_all[df_all["dataset_task"] == dataset_task]
+    ar_df = df_ds[df_ds["task"] == TASK_AR].copy()
+    noise_df = df_ds[df_ds["task"] == TASK_NOISE].copy()
 
-    k_cap = min(
-        len(ar_rates), len(noise_rates),
-        max(int(np.sum(np.array([n >= 50 for n in [10] * 20]))), 12),
-    )
-    # Truncate the position axis to a meaningful range. OnHW words rarely
-    # exceed ~12 characters, so positions beyond k=12 are sparse.
-    k_cap_left = min(len(ar_rates), len(noise_rates), 15)
-    ax1.plot(
-        ar_positions[:k_cap_left], ar_rates[:k_cap_left] * 100.0,
-        marker="o", color=AR_COLOR, linewidth=2, label="AR-only",
-    )
-    ax1.plot(
-        noise_positions[:k_cap_left], noise_rates[:k_cap_left] * 100.0,
-        marker="s", color=NOISE_COLOR, linewidth=2, label="AR + noise (uniform $p{=}0.15$)",
-    )
-    ax1.set_xlabel("Character position $k$ (0-indexed)", fontsize=11)
-    ax1.set_ylabel("Per-position error rate (\\%)", fontsize=11)
-    ax1.set_title("Per-position error rate", fontsize=12)
-    ax1.grid(True, alpha=0.3)
-    ax1.legend(loc="upper left", fontsize=10)
+    ar_positions, ar_rates = aggregate_position_stats(ar_df)
+    noise_positions, noise_rates = aggregate_position_stats(noise_df)
+    ar_cascade_pooled, ar_cascade_k = conditional_cascade(ar_df)
+    noise_cascade_pooled, noise_cascade_k = conditional_cascade(noise_df)
+    mcnemar = paired_mcnemar(ar_df, noise_df)
 
-    k_cap_right = min(len(ar_cascade_k), len(noise_cascade_k), 12)
-    ax2.plot(
-        np.arange(k_cap_right), ar_cascade_k[:k_cap_right] * 100.0,
-        marker="o", color=AR_COLOR, linewidth=2, label="AR-only",
-    )
-    ax2.plot(
-        np.arange(k_cap_right), noise_cascade_k[:k_cap_right] * 100.0,
-        marker="s", color=NOISE_COLOR, linewidth=2, label="AR + noise (uniform $p{=}0.15$)",
-    )
-    ax2.set_xlabel("Character position $k$ (0-indexed)", fontsize=11)
-    ax2.set_ylabel(r"$\Pr[\mathrm{err}_{k+1} \mid \mathrm{err}_{k}]$ (\\%)", fontsize=11)
-    ax2.set_title("Conditional cascade probability", fontsize=12)
-    ax2.grid(True, alpha=0.3)
-    ax2.legend(loc="lower right", fontsize=10)
+    return {
+        "dataset_task": dataset_task,
+        "ar_positions": ar_positions,
+        "ar_rates": ar_rates,
+        "noise_positions": noise_positions,
+        "noise_rates": noise_rates,
+        "ar_cascade_k": ar_cascade_k,
+        "noise_cascade_k": noise_cascade_k,
+        "ar_cascade_pooled": ar_cascade_pooled,
+        "noise_cascade_pooled": noise_cascade_pooled,
+        "cascade_delta_pp": 100.0 * (ar_cascade_pooled - noise_cascade_pooled),
+        **mcnemar,
+    }
+
+
+def plot_grid(results: list[dict], out_path: Path) -> None:
+    n_ds = len(results)
+    fig, axes = plt.subplots(2, n_ds, figsize=(3.6 * n_ds, 6.2), sharey="row")
+    if n_ds == 1:
+        axes = axes.reshape(2, 1)
+    for col, (res, (_, label)) in enumerate(zip(results, DATASETS)):
+        # Position cap: trim the tail where samples become sparse. Words rarely
+        # exceed 12 characters on OnHW; sentences can be longer.
+        is_sentence = "sent" in res["dataset_task"]
+        k_cap_left = min(len(res["ar_rates"]), len(res["noise_rates"]),
+                         40 if is_sentence else 15)
+        ax_top = axes[0, col]
+        ax_top.plot(
+            res["ar_positions"][:k_cap_left], res["ar_rates"][:k_cap_left] * 100.0,
+            marker="o", color=AR_COLOR, linewidth=2, markersize=4, label="AR-only",
+        )
+        ax_top.plot(
+            res["noise_positions"][:k_cap_left], res["noise_rates"][:k_cap_left] * 100.0,
+            marker="s", color=NOISE_COLOR, linewidth=2, markersize=4,
+            label=r"AR + noise (uniform $p{=}0.15$)",
+        )
+        ax_top.set_title(label, fontsize=11)
+        ax_top.grid(True, alpha=0.3)
+        if col == 0:
+            ax_top.set_ylabel(r"Per-position error rate (\%)", fontsize=10.5)
+        ax_top.set_xlabel(r"Character position $k$", fontsize=10)
+        if col == n_ds - 1:
+            ax_top.legend(loc="lower right", fontsize=8)
+
+        k_cap_right = min(len(res["ar_cascade_k"]), len(res["noise_cascade_k"]),
+                          40 if is_sentence else 12)
+        ax_bot = axes[1, col]
+        ax_bot.plot(
+            np.arange(k_cap_right), res["ar_cascade_k"][:k_cap_right] * 100.0,
+            marker="o", color=AR_COLOR, linewidth=2, markersize=4, label="AR-only",
+        )
+        ax_bot.plot(
+            np.arange(k_cap_right), res["noise_cascade_k"][:k_cap_right] * 100.0,
+            marker="s", color=NOISE_COLOR, linewidth=2, markersize=4,
+            label=r"AR + noise (uniform $p{=}0.15$)",
+        )
+        ax_bot.grid(True, alpha=0.3)
+        if col == 0:
+            ax_bot.set_ylabel(
+                r"$\Pr[\mathrm{err}_{k+1} \mid \mathrm{err}_{k}]$ (\%)",
+                fontsize=10.5,
+            )
+        ax_bot.set_xlabel(r"Character position $k$", fontsize=10)
 
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -206,52 +223,58 @@ def plot_results(
     print(f"saved figure: {out_path}")
 
 
+def write_summary(results: list[dict], out_path: Path) -> None:
+    fieldnames = [
+        "dataset_task",
+        "n_total",
+        "ar_exact_match_pct",
+        "noise_exact_match_pct",
+        "ar_correct_noise_wrong",
+        "ar_wrong_noise_correct",
+        "n_discordant",
+        "p_value",
+        "ar_cascade_pooled",
+        "noise_cascade_pooled",
+        "cascade_delta_pp",
+    ]
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", newline="") as fp:
+        w = csv.DictWriter(fp, fieldnames=fieldnames)
+        w.writeheader()
+        for res in results:
+            w.writerow({k: res[k] for k in fieldnames})
+    print(f"wrote summary: {out_path}")
+
+
 def main() -> None:
     print(f"reading {IN_CSV}")
     df = pd.read_csv(IN_CSV, sep=";")
-    ar_df = df[df["task"] == TASK_AR].copy()
-    noise_df = df[df["task"] == TASK_NOISE].copy()
-    print(f"AR-only rows: {len(ar_df)}  Noise rows: {len(noise_df)}")
+    available = set(df["dataset_task"].unique())
+    print(f"datasets in CSV: {sorted(available)}")
 
-    ar_positions, ar_rates = aggregate_position_stats(ar_df)
-    noise_positions, noise_rates = aggregate_position_stats(noise_df)
-    ar_cascade_pooled, ar_cascade_k = conditional_cascade(ar_df)
-    noise_cascade_pooled, noise_cascade_k = conditional_cascade(noise_df)
-    mcnemar = paired_mcnemar(ar_df, noise_df)
+    results: list[dict] = []
+    for dataset_task, label in DATASETS:
+        if dataset_task not in available:
+            print(f"skipping {dataset_task}: not in CSV")
+            continue
+        res = analyse_dataset(df, dataset_task)
+        results.append(res)
+        print(
+            f"  {label:<18s}  N={res['n_total']:>6d}"
+            f"  AR={res['ar_exact_match_pct']:5.2f}%"
+            f"  Noise={res['noise_exact_match_pct']:5.2f}%"
+            f"  b={res['ar_correct_noise_wrong']:>5d}"
+            f"  c={res['ar_wrong_noise_correct']:>5d}"
+            f"  p={res['p_value']:.2e}"
+            f"  cascade {res['ar_cascade_pooled']:.3f}->{res['noise_cascade_pooled']:.3f}"
+        )
 
-    summary = {
-        "n_total": mcnemar["n_total"],
-        "ar_exact_match_pct": mcnemar["ar_exact_match_pct"],
-        "noise_exact_match_pct": mcnemar["noise_exact_match_pct"],
-        "ar_correct_noise_wrong": mcnemar["ar_correct_noise_wrong"],
-        "ar_wrong_noise_correct": mcnemar["ar_wrong_noise_correct"],
-        "n_discordant": mcnemar["n_discordant"],
-        "mcnemar_p_value": mcnemar["p_value"],
-        "ar_cascade_pooled": ar_cascade_pooled,
-        "noise_cascade_pooled": noise_cascade_pooled,
-        "cascade_delta_pp": 100.0 * (ar_cascade_pooled - noise_cascade_pooled),
-    }
+    if not results:
+        print("no datasets available; nothing to plot")
+        return
 
-    print("=== Summary ===")
-    for k, v in summary.items():
-        if isinstance(v, float):
-            print(f"  {k:30s} = {v:.4f}")
-        else:
-            print(f"  {k:30s} = {v}")
-
-    OUT_SUMMARY.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT_SUMMARY, "w", newline="") as fp:
-        w = csv.DictWriter(fp, fieldnames=list(summary.keys()))
-        w.writeheader()
-        w.writerow(summary)
-    print(f"wrote summary: {OUT_SUMMARY}")
-
-    plot_results(
-        ar_positions, ar_rates,
-        noise_positions, noise_rates,
-        ar_cascade_k, noise_cascade_k,
-        summary, OUT_FIG,
-    )
+    write_summary(results, OUT_SUMMARY)
+    plot_grid(results, OUT_FIG)
 
 
 if __name__ == "__main__":

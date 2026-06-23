@@ -22,7 +22,13 @@ cd "$PROJ"
 
 declare -a RUNS=(
     "ar|Baseline-AR-XS-blconv_b|ar_transformer_xs__onhw_wi_word_rh"
+    "ar|Baseline-AR-XS-blconv_b|ar_transformer_xs__onhw_wd_word_rh"
+    "ar|Baseline-AR-XS-blconv_b|ar_transformer_xs__wi_word_hw6_meta"
+    "ar|Baseline-AR-XS-blconv_b|ar_transformer_xs__wi_sent_hw6_meta"
     "noise|Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__onhw_wi_word_rh"
+    "noise|Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__onhw_wd_word_rh"
+    "noise|Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__wi_word_hw6_meta"
+    "noise|Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__wi_sent_hw6_meta"
 )
 declare -a P_VALUES=(0.00 0.05 0.10 0.15 0.20)
 
@@ -82,5 +88,5 @@ for entry in "${RUNS[@]}"; do
     done
 done
 
-echo "Summary: ${OK} ok / ${FAIL} fail / 50 total"
+echo "Summary: ${OK} ok / ${FAIL} fail / 200 total"
 exit $(( FAIL > 0 ? 1 : 0 ))

@@ -26,9 +26,15 @@ cd "$PROJ"
 
 declare -a AR_RUNS=(
     "Baseline-AR-XS-blconv_b|ar_transformer_xs__onhw_wi_word_rh"
+    "Baseline-AR-XS-blconv_b|ar_transformer_xs__onhw_wd_word_rh"
+    "Baseline-AR-XS-blconv_b|ar_transformer_xs__wi_word_hw6_meta"
+    "Baseline-AR-XS-blconv_b|ar_transformer_xs__wi_sent_hw6_meta"
 )
 declare -a NOISE_RUNS=(
     "Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__onhw_wi_word_rh"
+    "Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__onhw_wd_word_rh"
+    "Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__wi_word_hw6_meta"
+    "Baseline-AR-XS-InputCorruption-uniform|ar_transformer_xs__wi_sent_hw6_meta"
 )
 
 run_one() {
@@ -113,5 +119,5 @@ for entry in "${NOISE_RUNS[@]}"; do
     done
 done
 
-echo "Summary: ${OK} ok / ${FAIL} fail / 10 total"
+echo "Summary: ${OK} ok / ${FAIL} fail / 40 total"
 exit $(( FAIL > 0 ? 1 : 0 ))
