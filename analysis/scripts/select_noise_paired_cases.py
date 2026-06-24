@@ -281,8 +281,8 @@ def main() -> None:
     lines.append(r"\setlength{\tabcolsep}{4pt}")
     lines.append(r"\begin{tabular}{@{}llp{3.2cm}p{3.2cm}p{3.4cm}@{}}")
     lines.append(r"\toprule")
-    lines.append(r"Case & Dataset & Ground truth & AR-only output & "
-                 r"Noise + edit decomposition \\")
+    lines.append(r"Case & Dataset & Ground truth & HWRFormer output & "
+                 r"HWRFormer + noise output + edit decomposition \\")
     lines.append(r"\midrule")
     for r in table_rows:
         lines.append(

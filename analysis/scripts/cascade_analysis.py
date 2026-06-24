@@ -19,8 +19,9 @@ character at k is still produced after the insertion). Reports:
      from the prior analysis to preserve table continuity).
 
 Outputs:
-    thesis/figures/cascade_noise_injection.pdf
-    thesis/tables/cascade_noise_ar_decomp.tex          (AR-only sub/ins/del appendix)
+    thesis/figures/cascade_noise_injection.pdf         (per-position err + Delta_e histogram)
+    thesis/figures/cascade_noise_injection_ecdf.pdf    (per-position err + per-model eCDF)
+    thesis/tables/cascade_noise_ar_decomp.tex          (HWRFormer sub/ins/del appendix)
     analysis/cascade_noise_injection_summary.csv       (one row per dataset)
     analysis/aligned_edit_per_sample.csv               (per-sample diagnostic)
     analysis/aligned_edit_position_curves.csv          (per-(model, dataset, pos) curves)
@@ -47,13 +48,22 @@ WORK_DIR = Path(__file__).resolve().parent.parent.parent
 THESIS_DIR = WORK_DIR.parent.parent / "thesis"
 IN_CSV = WORK_DIR / "analysis" / "quant_all_val_predictions_ar_vs_noise_xs.csv"
 OUT_FIG = THESIS_DIR / "figures" / "cascade_noise_injection.pdf"
+OUT_FIG_ECDF = THESIS_DIR / "figures" / "cascade_noise_injection_ecdf.pdf"
 OUT_SUMMARY = WORK_DIR / "analysis" / "cascade_noise_injection_summary.csv"
 OUT_PER_SAMPLE = WORK_DIR / "analysis" / "aligned_edit_per_sample.csv"
 OUT_POSITION_CURVES = WORK_DIR / "analysis" / "aligned_edit_position_curves.csv"
 OUT_APPENDIX_TABLE = THESIS_DIR / "tables" / "cascade_noise_ar_decomp.tex"
 
+# CSV task labels (legacy; do not change without re-exporting the paired CSV)
 TASK_AR = "AR-only"
 TASK_NOISE = "Noise (uniform p=0.15)"
+
+# Display labels used in figures and tables. Align with thesis terminology:
+# the XS-architecture recognizer is HWRFormer, and the noise-injection
+# variant is the same architecture trained with uniform input corruption.
+LABEL_AR = "HWRFormer"
+LABEL_NOISE = r"HWRFormer + noise (uniform $p{=}0.15$)"
+LABEL_NOISE_SHORT = "HWRFormer + noise"
 
 AR_COLOR = "#1f77b4"
 NOISE_COLOR = "#d62728"
@@ -313,8 +323,8 @@ def plot_grid(results: list[dict], curves: pd.DataFrame, out_path: Path) -> None
         # ----- Top row: aligned per-reference-position error rate -----
         ax_top = axes[0, col]
         for task, color, marker, leg in [
-            (TASK_AR, AR_COLOR, "o", "AR-only"),
-            (TASK_NOISE, NOISE_COLOR, "s", r"AR + noise (uniform $p{=}0.15$)"),
+            (TASK_AR, AR_COLOR, "o", LABEL_AR),
+            (TASK_NOISE, NOISE_COLOR, "s", LABEL_NOISE),
         ]:
             sub = curves[
                 (curves["dataset_task"] == dataset_task)
@@ -357,7 +367,8 @@ def plot_grid(results: list[dict], curves: pd.DataFrame, out_path: Path) -> None
         if int(zero_mask.sum()) > 0:
             ax_bot.bar(
                 [0.0], [int(zero_mask.sum())], width=widths[0] * 1.05,
-                color="0.4", edgecolor="black", linewidth=0.5, label="unchanged",
+                color="0.4", edgecolor="black", linewidth=0.5,
+                label=r"same $\tilde{e}$",
             )
 
         # Vertical line at the per-sample mean
@@ -390,13 +401,126 @@ def plot_grid(results: list[dict], curves: pd.DataFrame, out_path: Path) -> None
             from matplotlib.lines import Line2D
             ax_bot.legend(
                 handles=[
-                    Line2D([0], [0], color=AR_COLOR, lw=4, label="noise wins ($\\Delta<0$)"),
-                    Line2D([0], [0], color=NOISE_COLOR, lw=4, label="AR wins ($\\Delta>0$)"),
-                    Line2D([0], [0], color="0.4", lw=4, label="unchanged"),
+                    Line2D([0], [0], color=AR_COLOR, lw=4,
+                           label=r"noise wins ($\Delta\tilde{e}<0$)"),
+                    Line2D([0], [0], color=NOISE_COLOR, lw=4,
+                           label=r"HWRFormer wins ($\Delta\tilde{e}>0$)"),
+                    Line2D([0], [0], color="0.4", lw=4,
+                           label=r"same $\tilde{e}$ ($\Delta\tilde{e}=0$)"),
                     Line2D([0], [0], color="black", marker="D", lw=0,
-                           label="mean + 95\\% t-CI"),
+                           label=r"mean + 95\% t-CI"),
                 ],
                 loc="upper right", fontsize=7, framealpha=0.92,
+            )
+
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"saved figure: {out_path}")
+
+
+def plot_ecdf_grid(
+    per_sample: pd.DataFrame,
+    results: list[dict],
+    curves: pd.DataFrame,
+    out_path: Path,
+) -> None:
+    """Alternative bottom row: per-model empirical CDF of length-normalized
+    edit distance e_tilde. Two curves per panel: HWRFormer and HWRFormer +
+    noise. The crossing point (if any) shows where one model overtakes the
+    other in the cumulative sense. Per-model mean is overlaid as a dashed
+    vertical line, and the paired t-CI from the table is inset as a text
+    box. The top row is unchanged from plot_grid (aligned per-reference-
+    position error rate)."""
+    n_ds = len(results)
+    fig, axes = plt.subplots(2, n_ds, figsize=(3.6 * n_ds, 6.4), sharey=False)
+    if n_ds == 1:
+        axes = axes.reshape(2, 1)
+
+    for col, (res, (dataset_task, label)) in enumerate(zip(results, DATASETS)):
+        is_sentence = "sent" in dataset_task
+        pos_cap = POS_CAP_SENT if is_sentence else POS_CAP_WORD
+
+        # ----- Top row: aligned per-reference-position error rate (same as histogram fig) -----
+        ax_top = axes[0, col]
+        for task, color, marker, leg in [
+            (TASK_AR, AR_COLOR, "o", LABEL_AR),
+            (TASK_NOISE, NOISE_COLOR, "s", LABEL_NOISE),
+        ]:
+            sub = curves[
+                (curves["dataset_task"] == dataset_task)
+                & (curves["task"] == task)
+                & (curves["ref_pos"] < pos_cap)
+                & (curves["n_samples_at_pos"] >= MIN_SAMPLES_AT_POS)
+            ].sort_values("ref_pos")
+            ax_top.plot(
+                sub["ref_pos"].to_numpy(),
+                sub["err_rate"].to_numpy() * 100.0,
+                marker=marker, color=color, linewidth=2, markersize=4, label=leg,
+            )
+        ax_top.set_title(label, fontsize=11)
+        ax_top.grid(True, alpha=0.3)
+        if col == 0:
+            ax_top.set_ylabel(
+                r"Aligned per-ref-position error (\%)", fontsize=10.5
+            )
+        ax_top.set_xlabel(r"Reference position $k$", fontsize=10)
+        if col == n_ds - 1:
+            ax_top.legend(loc="lower right", fontsize=8)
+
+        # ----- Bottom row: per-model eCDF of e_tilde -----
+        ax_bot = axes[1, col]
+        ds_samples = per_sample[per_sample["dataset_task"] == dataset_task]
+        for task, color, leg in [
+            (TASK_AR, AR_COLOR, LABEL_AR),
+            (TASK_NOISE, NOISE_COLOR, LABEL_NOISE_SHORT),
+        ]:
+            evals = ds_samples[ds_samples["task"] == task]["edit_dist_norm"].to_numpy()
+            if evals.size == 0:
+                continue
+            e_sorted = np.sort(evals)
+            yvals = np.arange(1, e_sorted.size + 1) / e_sorted.size
+            ax_bot.plot(e_sorted, yvals, color=color, linewidth=2.2, label=leg)
+            mean_e = float(np.mean(evals))
+            ax_bot.axvline(mean_e, color=color, linestyle="--",
+                           linewidth=1.0, alpha=0.7)
+
+        ax_bot.set_xlim(0.0, 1.5)
+        ax_bot.set_ylim(0.0, 1.02)
+        ax_bot.grid(True, alpha=0.3)
+        ax_bot.set_xlabel(
+            r"$\tilde{e} = d(\hat{y}, y) / \max(1, |y|)$", fontsize=10,
+        )
+        if col == 0:
+            ax_bot.set_ylabel(r"$P(\tilde{e}_i \leq x)$", fontsize=10.5)
+
+        # Inset text: paired Delta_e_norm summary
+        text = (
+            r"$\bar{\Delta\tilde{e}} = " + f"{res['delta_e_norm_mean_pp']:+.2f}$ pp"
+            "\n95\\% CI = ["
+            f"{res['delta_e_norm_ci_lo_pp']:+.2f}, "
+            f"{res['delta_e_norm_ci_hi_pp']:+.2f}"
+            "] pp"
+        )
+        ax_bot.text(
+            0.97, 0.05, text, transform=ax_bot.transAxes,
+            ha="right", va="bottom", fontsize=8.5,
+            bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
+                      edgecolor="0.7", alpha=0.92),
+        )
+
+        if col == n_ds - 1:
+            from matplotlib.lines import Line2D
+            ax_bot.legend(
+                handles=[
+                    Line2D([0], [0], color=AR_COLOR, lw=2.2, label=LABEL_AR),
+                    Line2D([0], [0], color=NOISE_COLOR, lw=2.2,
+                           label=LABEL_NOISE_SHORT),
+                    Line2D([0], [0], color="0.4", linestyle="--", lw=1.0,
+                           label=r"per-model mean $\tilde{e}$"),
+                ],
+                loc="lower right", fontsize=8, framealpha=0.92,
             )
 
     fig.tight_layout()
@@ -452,17 +576,18 @@ def write_position_curves(curves: pd.DataFrame, out_path: Path) -> None:
 
 
 def write_appendix_ar_decomp(results: list[dict], out_path: Path) -> None:
-    """Auto-generate the AR-only sub/ins/del per-character-of-reference table."""
+    """Auto-generate the HWRFormer-baseline sub/ins/del per-character-of-reference table."""
     lines = []
     lines.append("% Auto-generated by analysis/scripts/cascade_analysis.py")
-    lines.append("% AR-only decomposition for the noise-injection paired analysis.")
+    lines.append("% HWRFormer-baseline decomposition for the noise-injection paired analysis.")
     lines.append(r"\begin{table}[H]")
     lines.append(r"\centering")
     lines.append(
-        r"\caption{AR-only per-character-of-reference sub/ins/del rates, "
-        r"reported as the companion to \cref{tab:cascade-noise-mcnemar}. "
-        r"Rates are pooled over the five folds and the same paired sample "
-        r"set used in the main table.}"
+        r"\caption{HWRFormer (baseline training, no noise injection) "
+        r"per-character-of-reference sub/ins/del rates, reported as the "
+        r"companion to \cref{tab:cascade-noise-mcnemar}. Rates are pooled "
+        r"over the five folds and the same paired sample set used in the "
+        r"main table.}"
     )
     lines.append(r"\label{tab:cascade-noise-ar-decomp}")
     lines.append(r"\small")
@@ -533,6 +658,7 @@ def main() -> None:
     write_summary(results, OUT_SUMMARY)
     write_appendix_ar_decomp(results, OUT_APPENDIX_TABLE)
     plot_grid(results, curves, OUT_FIG)
+    plot_ecdf_grid(per_sample, results, curves, OUT_FIG_ECDF)
 
 
 if __name__ == "__main__":
