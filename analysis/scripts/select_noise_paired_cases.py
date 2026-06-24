@@ -43,8 +43,8 @@ import pandas as pd
 WORK_DIR = Path(__file__).resolve().parent.parent.parent
 THESIS_DIR = WORK_DIR.parent.parent / "thesis"
 IN_PAIRED_CSV = WORK_DIR / "analysis" / "quant_all_val_predictions_ar_vs_noise_xs.csv"
-OUT_TABLE = THESIS_DIR / "tables" / "noise_paired_examples.tex"
-OUT_AUDIT = WORK_DIR / "analysis" / "noise_paired_cases.csv"
+OUT_TABLE = THESIS_DIR / "tables" / "noise_trajectory_examples.tex"
+OUT_AUDIT = WORK_DIR / "analysis" / "noise_trajectory_cases.csv"
 
 TASK_AR = "AR-only"
 TASK_NOISE = "Noise (uniform p=0.15)"
@@ -74,24 +74,36 @@ def latex_escape(s: str) -> str:
     return "".join(repl.get(ch, ch) for ch in s)
 
 
-def first_label_error_op(label: str, pred: str):
-    """Return (op, i, j) for the first replace or delete op against label.
-
-    i is the reference (label) index, j is the prediction index. Returns
-    None if the prediction matches the label exactly or only inserts.
+def first_edit_op(label: str, pred: str):
+    """Return (op, i, j) for the FIRST edit operation (replace, delete, or
+    insert) between label and pred. i is the source-side (label) index, j
+    is the destination-side (prediction) index. Convention from
+    Levenshtein.editops(label, pred):
+        replace (i, j): label[i] is replaced by pred[j]
+        delete  (i, j): label[i] is removed from pred; j is the insertion
+                        point in pred (no character of pred is consumed)
+        insert  (i, j): pred[j] is inserted before label[i] (i may equal
+                        len(label) for a trailing insert)
+    Returns None if label == pred exactly (no editops).
     """
-    for op, i, j in Levenshtein.editops(label, pred):
-        if op in ("replace", "delete"):
-            return (op, int(i), int(j))
-    return None
+    ops = Levenshtein.editops(label, pred)
+    if not ops:
+        return None
+    op, i, j = ops[0]
+    return (op, int(i), int(j))
 
 
 def render_label_cell(label: str, ar_first, no_first) -> str:
     """Underline label[i_min] where i_min is the earliest reference index of
-    a first replace/delete error over either model. The annotation marks
-    where the earliest model failure consumes the reference, not where each
-    model's prediction diverges."""
-    candidates = [op[1] for op in (ar_first, no_first) if op is not None]
+    the first edit operation over either model. For replace/delete, i is
+    the consumed reference position. For insert, i is the reference index
+    BEFORE which the insertion occurred (so label[i] is the character that
+    appears immediately after the insert in the alignment). The underline
+    annotates the earliest reference position whose alignment to a
+    prediction is non-trivial. If i == len(label) for both models (only
+    trailing inserts), no character is underlined."""
+    candidates = [op[1] for op in (ar_first, no_first)
+                  if op is not None]
     if not candidates:
         return "\\texttt{" + latex_escape(label) + "}"
     i = min(candidates)
@@ -107,15 +119,16 @@ def render_label_cell(label: str, ar_first, no_first) -> str:
 
 
 def render_pred_cell(pred: str, first_op) -> str:
-    """Render the prediction cell. If the first label-side error is a
-    substitution at (i, j), underline pred[j]. If it is a deletion at
-    (i, j), insert a '[del]' marker at prediction position j to mark that
-    label[i] was missing; no character in pred is underlined for a
-    deletion. If first_op is None, render the prediction verbatim."""
+    """Render the prediction cell with the first edit operation annotated:
+      - replace (i, j): underline pred[j] (the substituting character)
+      - delete  (i, j): insert a bold [del] marker at pred[j]; no
+                        unrelated character of pred is underlined
+      - insert  (i, j): underline pred[j] (the inserted character)
+    If first_op is None, render the prediction verbatim."""
     if first_op is None:
         return "\\texttt{" + latex_escape(pred) + "}"
     op, _i, j = first_op
-    if op == "replace":
+    if op in ("replace", "insert"):
         if not (0 <= j < len(pred)):
             return "\\texttt{" + latex_escape(pred) + "}"
         return (
@@ -134,6 +147,19 @@ def render_pred_cell(pred: str, first_op) -> str:
         + latex_escape(pred[j:])
         + "}"
     )
+
+
+def format_op_tag(first_op) -> str:
+    """Compact textual representation of the first edit operation, used in
+    audit CSV and in the per-row metadata of the LaTeX table."""
+    if first_op is None:
+        return "none"
+    op, i, j = first_op
+    if op == "replace":
+        return f"sub@ref{i}->pred{j}"
+    if op == "delete":
+        return f"del@ref{i}"
+    return f"ins@pred{j}/before ref{i}"
 
 
 def load_paired() -> pd.DataFrame:
@@ -202,9 +228,14 @@ def main() -> None:
              ("C2", case2, "largest degradation (priv. sent.)"),
              ("C3", case3, "median improvement (priv. sent.)")]
 
-    # Audit CSV
+    # Audit CSV. Includes the first edit operation for both models with
+    # both reference and prediction indices so reviewers can reproduce the
+    # rendered underline / [del] marker placement.
     audit_rows = []
     for tag, row, desc in cases:
+        label = row["label"]
+        ar_first = first_edit_op(label, row["prediction_ar"])
+        no_first = first_edit_op(label, row["prediction_noise"])
         audit_rows.append({
             "case": tag,
             "description": desc,
@@ -216,78 +247,105 @@ def main() -> None:
             "edit_dist_noise": int(row["edit_dist_noise"]),
             "delta_edit_raw": int(row["edit_dist_ar"] - row["edit_dist_noise"]),
             "delta_e_norm": float(row["delta_e_norm"]),
-            "label": row["label"],
+            "ar_first_op": format_op_tag(ar_first),
+            "ar_first_ref_idx": ar_first[1] if ar_first else -1,
+            "ar_first_pred_idx": ar_first[2] if ar_first else -1,
+            "noise_first_op": format_op_tag(no_first),
+            "noise_first_ref_idx": no_first[1] if no_first else -1,
+            "noise_first_pred_idx": no_first[2] if no_first else -1,
+            "label": label,
             "prediction_ar": row["prediction_ar"],
             "prediction_noise": row["prediction_noise"],
         })
     pd.DataFrame(audit_rows).to_csv(OUT_AUDIT, index=False)
     print(f"wrote audit: {OUT_AUDIT}")
 
-    # LaTeX table
+    # LaTeX table. All three rows are priv_sent (the Dataset column would be
+    # redundant), so we use a Delta_tilde_e column instead and report the
+    # (sub, ins, del, first-op) decomposition for BOTH models per row.
     table_rows = []
     for tag, row, _desc in cases:
-        ds_label = DATASET_LABELS.get(row["dataset_task"], row["dataset_task"])
         label = row["label"]
         pred_ar = row["prediction_ar"]
         pred_no = row["prediction_noise"]
-        ar_first = first_label_error_op(label, pred_ar)
-        no_first = first_label_error_op(label, pred_no)
+        ar_first = first_edit_op(label, pred_ar)
+        no_first = first_edit_op(label, pred_no)
 
+        ops_ar = Levenshtein.editops(label, pred_ar)
         ops_no = Levenshtein.editops(label, pred_no)
+        sub_a = sum(1 for op, _, _ in ops_ar if op == "replace")
+        ins_a = sum(1 for op, _, _ in ops_ar if op == "insert")
+        del_a = sum(1 for op, _, _ in ops_ar if op == "delete")
         sub_n = sum(1 for op, _, _ in ops_no if op == "replace")
         ins_n = sum(1 for op, _, _ in ops_no if op == "insert")
         del_n = sum(1 for op, _, _ in ops_no if op == "delete")
 
-        if no_first is not None:
-            first_err_tag = f"first-err ref={no_first[1]}"
-        else:
-            first_err_tag = "first-err --"
-        decomp = (
+        decomp_ar = (
             "\\newline\\itshape\\small ("
-            f"sub={sub_n}, ins={ins_n}, del={del_n}, {first_err_tag})"
+            f"sub={sub_a}, ins={ins_a}, del={del_a}, first={format_op_tag(ar_first)})"
+            "\\upshape\\normalsize"
+        )
+        decomp_no = (
+            "\\newline\\itshape\\small ("
+            f"sub={sub_n}, ins={ins_n}, del={del_n}, first={format_op_tag(no_first)})"
             "\\upshape\\normalsize"
         )
 
+        # Per-sample Delta_e_norm shown as a unitless ratio (not pp), since
+        # the per-sample value can exceed 1 when len_ref is small relative to
+        # the prediction edits. The pp scaling in tab:cascade-noise-mcnemar
+        # applies only to the per-fold MEAN.
+        delta_cell = f"${float(row['delta_e_norm']):+.2f}$"
+
         table_rows.append({
             "tag": tag,
-            "ds_label": ds_label,
+            "delta_cell": delta_cell,
             "gt_cell": render_label_cell(label, ar_first, no_first),
-            "ar_cell": render_pred_cell(pred_ar, ar_first),
-            "noise_cell": render_pred_cell(pred_no, no_first) + decomp,
+            "ar_cell": render_pred_cell(pred_ar, ar_first) + decomp_ar,
+            "noise_cell": render_pred_cell(pred_no, no_first) + decomp_no,
         })
 
     lines = []
     lines.append("% Auto-generated by analysis/scripts/select_noise_paired_cases.py")
-    lines.append("% Three deterministic paired examples for sec:noise-paired-examples.")
+    lines.append("% Three deterministic paired output examples for sec:noise-trajectory-examples.")
     lines.append(r"\begin{table}[H]")
     lines.append(r"\centering")
     lines.append(
         r"\caption{Three deterministic paired output examples on the "
-        r"private-sentence validation set, selected on the per-sample paired "
+        r"private-sentence validation set, selected on the per-sample "
         r"change in length-normalized edit distance "
-        r"$\Delta\tilde{e} = \tilde{e}_{\mathrm{noise}} - \tilde{e}_{\mathrm{AR}}$. "
-        r"C1 is the sample with the most negative $\Delta\tilde{e}$ "
-        r"(largest improvement under noise). C2 is the most positive "
-        r"$\Delta\tilde{e}$ (largest degradation). C3 is the median of the "
-        r"$\Delta\tilde{e} < 0$ subset. The reference cell underlines the "
-        r"earliest reference position assigned a replace or delete by either "
-        r"model. Prediction cells use the aligned prediction index of the "
-        r"first replace (underlined) or mark a deletion with \textbf{[del]} "
-        r"to indicate the missing reference character; no underline is "
-        r"placed on an unrelated prediction character.}"
+        r"$\Delta\tilde{e} = \tilde{e}_{\mathrm{noise}} - "
+        r"\tilde{e}_{\mathrm{HWRFormer}}$ (unitless ratio, negative favors "
+        r"the noise variant). C1 is the most negative $\Delta\tilde{e}$ "
+        r"(largest improvement under noise), C2 is the most positive "
+        r"$\Delta\tilde{e}$ (largest degradation), C3 is the median of the "
+        r"$\Delta\tilde{e} < 0$ subset over priv.\ sent. These rows are "
+        r"private-sentence examples chosen to make the observed exact-match "
+        r"versus normalized-edit trade-off readable. They do not represent "
+        r"all datasets. The reference cell underlines the earliest "
+        r"reference position assigned a replace, delete, or insert edit "
+        r"operation by either model's Levenshtein alignment. Each "
+        r"prediction cell uses the aligned prediction index of its own "
+        r"first edit operation. A substitution or insertion is underlined "
+        r"at the prediction-side index, while a deletion is marked with "
+        r"\textbf{[del]} at the prediction position where the missing "
+        r"reference character would have appeared. The (sub, ins, del, "
+        r"first-op) decomposition is reported below each prediction in "
+        r"italics. The first-op tag uses the notation sub@ref$i$-pred$j$, "
+        r"del@ref$i$, or ins@pred$j$/before ref$i$.}"
     )
-    lines.append(r"\label{tab:noise-paired-examples}")
+    lines.append(r"\label{tab:noise-trajectory-examples}")
     lines.append(r"\small")
     lines.append(r"\setlength{\tabcolsep}{4pt}")
-    lines.append(r"\begin{tabular}{@{}llp{3.2cm}p{3.2cm}p{3.4cm}@{}}")
+    lines.append(r"\begin{tabular}{@{}lrp{2.8cm}p{3.4cm}p{3.4cm}@{}}")
     lines.append(r"\toprule")
-    lines.append(r"Case & Dataset & Ground truth & HWRFormer output & "
-                 r"HWRFormer + noise output + edit decomposition \\")
+    lines.append(r"Case & $\Delta\tilde{e}$ & Ground truth & "
+                 r"HWRFormer output & HWRFormer + noise output \\")
     lines.append(r"\midrule")
     for r in table_rows:
         lines.append(
-            f"{r['tag']} & {r['ds_label']} & {r['gt_cell']} & {r['ar_cell']} "
-            f"& {r['noise_cell']} \\\\"
+            f"{r['tag']} & {r['delta_cell']} & {r['gt_cell']} & "
+            f"{r['ar_cell']} & {r['noise_cell']} \\\\"
         )
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
