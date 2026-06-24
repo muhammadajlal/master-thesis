@@ -125,8 +125,8 @@ def run_single_corruption_eval(
                 if hi < lo:
                     n_skipped_short += 1
                     continue
-                t = int(torch.randint(lo, hi + 1, (1,), generator=generator).item())
-                draw = int(torch.randint(0, pool_size, (1,), generator=generator).item())
+                t = int(torch.randint(lo, hi + 1, (1,), generator=generator, device=device).item())
+                draw = int(torch.randint(0, pool_size, (1,), generator=generator, device=device).item())
                 t_per_sample[b] = t
                 corrupt_id_per_sample[b] = pool[draw]
 
