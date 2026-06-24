@@ -430,9 +430,10 @@ def plot_ecdf_grid(
     edit distance e_tilde. Two curves per panel: HWRFormer and HWRFormer +
     noise. The crossing point (if any) shows where one model overtakes the
     other in the cumulative sense. Per-model mean is overlaid as a dashed
-    vertical line, and the paired t-CI from the table is inset as a text
-    box. The top row is unchanged from plot_grid (aligned per-reference-
-    position error rate)."""
+    vertical line; the paired t-CI of the per-fold mean Delta_e_norm from
+    the table is inset as a text box. The top row is unchanged from
+    plot_grid (aligned per-reference-position error rate). Legend is
+    figure-level at the bottom so it does not overlap per-panel insets."""
     n_ds = len(results)
     fig, axes = plt.subplots(2, n_ds, figsize=(3.6 * n_ds, 6.4), sharey=False)
     if n_ds == 1:
@@ -469,7 +470,7 @@ def plot_ecdf_grid(
         if col == n_ds - 1:
             ax_top.legend(loc="lower right", fontsize=8)
 
-        # ----- Bottom row: per-model eCDF of e_tilde -----
+        # ----- Bottom row: per-model eCDF of e_tilde (HWRFormer vs HWRFormer+noise) -----
         ax_bot = axes[1, col]
         ds_samples = per_sample[per_sample["dataset_task"] == dataset_task]
         for task, color, leg in [
@@ -495,35 +496,39 @@ def plot_ecdf_grid(
         if col == 0:
             ax_bot.set_ylabel(r"$P(\tilde{e}_i \leq x)$", fontsize=10.5)
 
-        # Inset text: paired Delta_e_norm summary
+        # Inset (bottom-left: free space below the exact-match plateau the
+        # curves jump to at x=0; avoids the top-left where the curves sit).
         text = (
-            r"$\bar{\Delta\tilde{e}} = " + f"{res['delta_e_norm_mean_pp']:+.2f}$ pp"
+            r"$\bar{\Delta\tilde{e}} = "
+            f"{res['delta_e_norm_mean_pp']:+.2f}$ pp"
             "\n95\\% CI = ["
             f"{res['delta_e_norm_ci_lo_pp']:+.2f}, "
             f"{res['delta_e_norm_ci_hi_pp']:+.2f}"
             "] pp"
         )
         ax_bot.text(
-            0.97, 0.05, text, transform=ax_bot.transAxes,
+            0.97, 0.03, text, transform=ax_bot.transAxes,
             ha="right", va="bottom", fontsize=8.5,
             bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
                       edgecolor="0.7", alpha=0.92),
         )
 
-        if col == n_ds - 1:
-            from matplotlib.lines import Line2D
-            ax_bot.legend(
-                handles=[
-                    Line2D([0], [0], color=AR_COLOR, lw=2.2, label=LABEL_AR),
-                    Line2D([0], [0], color=NOISE_COLOR, lw=2.2,
-                           label=LABEL_NOISE_SHORT),
-                    Line2D([0], [0], color="0.4", linestyle="--", lw=1.0,
-                           label=r"per-model mean $\tilde{e}$"),
-                ],
-                loc="lower right", fontsize=8, framealpha=0.92,
-            )
+    # Figure-level legend at the very bottom, outside any panel, to avoid
+    # overlapping the per-panel inset on the rightmost column.
+    from matplotlib.lines import Line2D
+    fig.legend(
+        handles=[
+            Line2D([0], [0], color=AR_COLOR, lw=2.2, label=LABEL_AR),
+            Line2D([0], [0], color=NOISE_COLOR, lw=2.2,
+                   label=LABEL_NOISE_SHORT),
+            Line2D([0], [0], color="0.4", linestyle="--", lw=1.0,
+                   label=r"per-model mean $\tilde{e}$"),
+        ],
+        loc="lower center", bbox_to_anchor=(0.5, -0.02), ncol=3,
+        fontsize=9, frameon=False, columnspacing=2.0, handlelength=2.4,
+    )
 
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
