@@ -39,8 +39,8 @@ OUT_FIG = REPO / "thesis" / "figures" / "single_corruption_recovery.pdf"
 OUT_CSV = WORK / "analysis" / "single_corruption_recovery.csv"
 
 MODELS = [
-    ("AR-only", "Baseline-AR-XS-blconv_b", "#1f77b4", "o"),
-    ("Noise", "Baseline-AR-XS-InputCorruption-uniform", "#d62728", "s"),
+    ("HWRFormer", "Baseline-AR-XS-blconv_b", "#1f77b4", "o"),
+    ("HWRFormer + noise", "Baseline-AR-XS-InputCorruption-uniform", "#d62728", "s"),
 ]
 DATASETS = [
     ("ar_transformer_xs__onhw_wi_word_rh", "onhw_wi_word", "OnHW WI word"),
