@@ -142,7 +142,7 @@ def plot(rows: list[dict]) -> None:
             ax.set_xlabel(r"Prefix perturbation rate $p_{\mathrm{replace}}$",
                           fontsize=10.5)
         if idx in (0, 2):
-            ax.set_ylabel(r"Teacher-forced \gls{cer} (\%)", fontsize=10.5)
+            ax.set_ylabel(r"Teacher-forced CER (%)", fontsize=10.5)
         if idx == 1:
             ax.legend(loc="upper left", fontsize=9)
     fig.tight_layout()
