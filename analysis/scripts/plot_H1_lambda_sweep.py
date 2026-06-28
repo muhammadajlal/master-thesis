@@ -174,7 +174,7 @@ def main() -> None:
             best_cer = m
             empirical_min = lam
 
-    fig, (ax_cer, ax_wer) = plt.subplots(1, 2, figsize=(9.0, 3.2), sharex=True)
+    fig, (ax_cer, ax_wer) = plt.subplots(1, 2, figsize=(9.0, 3.6), sharex=True)
     cer_color = "#1f77b4"
     wer_color = "#ff7f0e"
     ax_cer.plot(LAMBDA_VALUES, cer_means, color=cer_color, linewidth=2,
@@ -226,7 +226,7 @@ def main() -> None:
         Line2D([0], [0], color=wer_color, marker="s", markersize=6,
                linewidth=2, label=r"5-fold mean $\pm$ SEM (WER)"),
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
-               label=rf"selected $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$ (inherited from Ch.~5)"),
+               label=rf"selected $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
         Line2D([0], [0], color=EMPIRICAL_COLOR, linestyle=":", linewidth=1.2,
                label=rf"empirical min $\lambda_{{\mathrm{{ctc}}}}={empirical_min}$"),
     ]
@@ -237,11 +237,14 @@ def main() -> None:
                    label="MLP without CTC"),
         )
 
-    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.02),
-               ncol=len(handles), fontsize=10, frameon=False,
+    # 2-row legend (ceil(N/3) rows): avoids a single very wide row that
+    # forces the subplots to shrink horizontally.
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.04),
+               ncol=3, fontsize=10, frameon=False,
                handlelength=2.2, columnspacing=1.8)
 
-    fig.tight_layout(rect=[0, 0.08, 1, 1])
+    # Reserve ~16% of vertical for the 2-row legend below the subplots.
+    fig.tight_layout(rect=[0, 0.16, 1, 1])
     for out_pdf in (OUT_PDF_THESIS, OUT_PDF_PAPER):
         if out_pdf.parent.is_dir() or out_pdf == OUT_PDF_THESIS:
             out_pdf.parent.mkdir(parents=True, exist_ok=True)
