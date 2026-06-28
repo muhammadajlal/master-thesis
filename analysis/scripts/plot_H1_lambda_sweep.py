@@ -162,13 +162,17 @@ def main() -> None:
     wer_means = [m for m, _ in wer_stats]
     wer_sems = [s for _, s in wer_stats]
 
-    # Pick selected lambda = argmin CER among finite means
-    selected = LAMBDA_VALUES[0]
+    # SELECTED = the lambda actually used in Chapter 6 (inherited from the
+    # HWRFormer-L sweep of Chapter 5 for continuity, not a preference
+    # statement). EMPIRICAL_MIN = argmin CER among finite means on this
+    # sweep, kept on the figure as a secondary marker.
+    SELECTED_LAMBDA = 0.6
+    empirical_min = LAMBDA_VALUES[0]
     best_cer = float("inf")
     for lam, m in zip(LAMBDA_VALUES, cer_means):
         if not math.isnan(m) and m < best_cer:
             best_cer = m
-            selected = lam
+            empirical_min = lam
 
     fig, (ax_cer, ax_wer) = plt.subplots(1, 2, figsize=(9.0, 3.2), sharex=True)
     cer_color = "#1f77b4"
@@ -194,10 +198,18 @@ def main() -> None:
         ax_cer.axhline(p3_cer_mean, color="black", linestyle=":", linewidth=1.5, zorder=3)
         ax_wer.axhline(p3_wer_mean, color="black", linestyle=":", linewidth=1.5, zorder=3)
 
-    HIGHLIGHT = "#9467bd"
+    SELECTED_COLOR = "#9467bd"  # purple — the chapter's operating point
+    EMPIRICAL_COLOR = "#7f7f7f"  # grey  — empirical minimum (secondary)
     for ax in (ax_cer, ax_wer):
-        ax.axvspan(selected - 0.015, selected + 0.015, color=HIGHLIGHT, alpha=0.22, zorder=1)
-        ax.axvline(selected, color=HIGHLIGHT, linestyle="--", linewidth=1.6, alpha=0.9, zorder=2)
+        # Selected (inherited) operating point: solid emphasis.
+        ax.axvspan(SELECTED_LAMBDA - 0.015, SELECTED_LAMBDA + 0.015,
+                   color=SELECTED_COLOR, alpha=0.22, zorder=1)
+        ax.axvline(SELECTED_LAMBDA, color=SELECTED_COLOR, linestyle="-",
+                   linewidth=1.8, alpha=0.95, zorder=2)
+        # Empirical minimum: secondary thin dotted line.
+        if empirical_min != SELECTED_LAMBDA:
+            ax.axvline(empirical_min, color=EMPIRICAL_COLOR, linestyle=":",
+                       linewidth=1.2, alpha=0.8, zorder=2)
         ax.set_xlabel(r"$\lambda_{\mathrm{ctc}}$", fontsize=12)
         ax.grid(True, alpha=0.3)
 
@@ -213,8 +225,10 @@ def main() -> None:
                linewidth=2, label=r"5-fold mean $\pm$ SEM (CER)"),
         Line2D([0], [0], color=wer_color, marker="s", markersize=6,
                linewidth=2, label=r"5-fold mean $\pm$ SEM (WER)"),
-        Line2D([0], [0], color=HIGHLIGHT, linestyle="--", linewidth=1.6,
-               label=rf"selected $\lambda_{{\mathrm{{ctc}}}}={selected}$"),
+        Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
+               label=rf"selected $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$ (inherited from Ch.~5)"),
+        Line2D([0], [0], color=EMPIRICAL_COLOR, linestyle=":", linewidth=1.2,
+               label=rf"empirical min $\lambda_{{\mathrm{{ctc}}}}={empirical_min}$"),
     ]
     if not math.isnan(p3_cer_mean):
         handles.insert(
