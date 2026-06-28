@@ -119,12 +119,10 @@ def render_label_cell(label: str, ar_first, no_first) -> str:
 
 
 def render_pred_cell(pred: str, first_op) -> str:
-    """Render the prediction cell with the first edit operation annotated:
-      - replace (i, j): underline pred[j] (the substituting character)
-      - delete  (i, j): insert a bold [del] marker at pred[j]; no
-                        unrelated character of pred is underlined
-      - insert  (i, j): underline pred[j] (the inserted character)
-    If first_op is None, render the prediction verbatim."""
+    """Render the prediction cell with a plain underline on the first edit
+    position. Substitution and insertion underline pred[j]. Deletion has no
+    in-cell marker (the reference cell already shows the deletion via its
+    own underline). Verbatim rendering when there is no first edit op."""
     if first_op is None:
         return "\\texttt{" + latex_escape(pred) + "}"
     op, _i, j = first_op
@@ -138,15 +136,8 @@ def render_pred_cell(pred: str, first_op) -> str:
             + latex_escape(pred[j + 1:])
             + "}"
         )
-    # delete: label[i] missing in pred; mark the gap at pred position j
-    j = max(0, min(j, len(pred)))
-    return (
-        "\\texttt{"
-        + latex_escape(pred[:j])
-        + "\\textbf{[del]}"
-        + latex_escape(pred[j:])
-        + "}"
-    )
+    # delete: no in-cell marker; the reference cell shows the missing position.
+    return "\\texttt{" + latex_escape(pred) + "}"
 
 
 def format_op_tag(first_op) -> str:
@@ -224,15 +215,23 @@ def main() -> None:
     case2 = pick_extremum(sent, smallest=False)  # largest degradation
     case3 = pick_median_improvement(sent)        # median improvement
 
-    cases = [("C1", case1, "largest improvement (priv. sent.)"),
-             ("C2", case2, "largest degradation (priv. sent.)"),
-             ("C3", case3, "median improvement (priv. sent.)")]
+    # Reader-facing labels (col 1 + col 2 in the rendered table). The short
+    # qualitative outcome in col 6 is fixed per selection role: largest
+    # improvement under noise rescues an AR cascade, largest degradation
+    # breaks an exact match, median improvement shows the typical pattern
+    # of both models drifting with the noise variant drifting later.
+    cases = [
+        ("Case 1", case1, "Largest improvement", "Noise rescues an AR cascade."),
+        ("Case 2", case2, "Largest degradation", "Noise breaks a perfect output."),
+        ("Case 3", case3, "Typical improvement", "Both drift; noise drifts later and ends tighter."),
+    ]
 
     # Audit CSV. Includes the first edit operation for both models with
     # both reference and prediction indices so reviewers can reproduce the
-    # rendered underline / [del] marker placement.
+    # rendered underline placement.
     audit_rows = []
-    for tag, row, desc in cases:
+    for tag, row, role, _outcome in cases:
+        desc = f"{role.lower()} (priv. sent.)"
         label = row["label"]
         ar_first = first_edit_op(label, row["prediction_ar"])
         no_first = first_edit_op(label, row["prediction_noise"])
@@ -260,11 +259,14 @@ def main() -> None:
     pd.DataFrame(audit_rows).to_csv(OUT_AUDIT, index=False)
     print(f"wrote audit: {OUT_AUDIT}")
 
-    # LaTeX table. All three rows are priv_sent (the Dataset column would be
-    # redundant), so we use a Delta_tilde_e column instead and report the
-    # (sub, ins, del, first-op) decomposition for BOTH models per row.
+    # LaTeX table. Six reader-facing columns: Case identifier, descriptive
+    # selection role with Delta_tilde_e value, ground truth, both predictions
+    # with one short edit-count subline each, and a one-clause Outcome.
+    # First-edit underlines stay; the (sub, ins, del) decomposition is shown
+    # without the first-op coordinate. The audit CSV preserves the full
+    # decomposition with reference and prediction indices.
     table_rows = []
-    for tag, row, _desc in cases:
+    for tag, row, role, outcome in cases:
         label = row["label"]
         pred_ar = row["prediction_ar"]
         pred_no = row["prediction_noise"]
@@ -281,28 +283,28 @@ def main() -> None:
         del_n = sum(1 for op, _, _ in ops_no if op == "delete")
 
         decomp_ar = (
-            "\\newline\\itshape\\small ("
-            f"sub={sub_a}, ins={ins_a}, del={del_a}, first={format_op_tag(ar_first)})"
-            "\\upshape\\normalsize"
+            f"\\newline\\itshape\\footnotesize sub={sub_a}, ins={ins_a}, "
+            f"del={del_a}\\upshape\\normalsize"
         )
         decomp_no = (
-            "\\newline\\itshape\\small ("
-            f"sub={sub_n}, ins={ins_n}, del={del_n}, first={format_op_tag(no_first)})"
-            "\\upshape\\normalsize"
+            f"\\newline\\itshape\\footnotesize sub={sub_n}, ins={ins_n}, "
+            f"del={del_n}\\upshape\\normalsize"
         )
 
         # Per-sample Delta_e_norm shown as a unitless ratio (not pp), since
         # the per-sample value can exceed 1 when len_ref is small relative to
         # the prediction edits. The pp scaling in tab:cascade-noise-mcnemar
         # applies only to the per-fold MEAN.
-        delta_cell = f"${float(row['delta_e_norm']):+.2f}$"
+        delta = float(row["delta_e_norm"])
+        role_cell = f"{role} ($\\Delta\\tilde{{e}}={delta:+.2f}$)"
 
         table_rows.append({
             "tag": tag,
-            "delta_cell": delta_cell,
+            "role_cell": role_cell,
             "gt_cell": render_label_cell(label, ar_first, no_first),
             "ar_cell": render_pred_cell(pred_ar, ar_first) + decomp_ar,
             "noise_cell": render_pred_cell(pred_no, no_first) + decomp_no,
+            "outcome_cell": outcome,
         })
 
     lines = []
@@ -311,41 +313,29 @@ def main() -> None:
     lines.append(r"\begin{table}[!htbp]")
     lines.append(r"\centering")
     lines.append(
-        r"\caption{Three deterministic paired output examples on the "
-        r"private-sentence validation set, selected on the per-sample "
-        r"change in length-normalized edit distance "
+        r"\caption{Paired private-sentence examples comparing HWRFormer and "
+        r"HWRFormer + noise injection. Cases are selected by the paired "
+        r"change in length-normalized edit distance, "
         r"$\Delta\tilde{e} = \tilde{e}_{\mathrm{noise}} - "
-        r"\tilde{e}_{\mathrm{HWRFormer}}$ (unitless ratio, negative favors "
-        r"the noise variant). C1 is the most negative $\Delta\tilde{e}$ "
-        r"(largest improvement under noise), C2 is the most positive "
-        r"$\Delta\tilde{e}$ (largest degradation), C3 is the median of the "
-        r"$\Delta\tilde{e} < 0$ subset over priv.\ sent. These rows are "
-        r"private-sentence examples chosen to make the observed exact-match "
-        r"versus normalized-edit trade-off readable. They do not represent "
-        r"all datasets. The reference cell underlines the earliest "
-        r"reference position assigned a replace, delete, or insert edit "
-        r"operation by either model's Levenshtein alignment. Each "
-        r"prediction cell uses the aligned prediction index of its own "
-        r"first edit operation. A substitution or insertion is underlined "
-        r"at the prediction-side index, while a deletion is marked with "
-        r"\textbf{[del]} at the prediction position where the missing "
-        r"reference character would have appeared. The (sub, ins, del, "
-        r"first-op) decomposition is reported below each prediction in "
-        r"italics. The first-op tag uses the notation sub@ref$i$-pred$j$, "
-        r"del@ref$i$, or ins@pred$j$/before ref$i$.}"
+        r"\tilde{e}_{\mathrm{HWRFormer}}$, where negative values favor the "
+        r"noise-injection model. The three rows show the largest "
+        r"improvement, largest degradation, and a typical improvement case. "
+        r"Underlining marks the first aligned edit in each output. Edit "
+        r"counts below each prediction decompose the Levenshtein distance "
+        r"into substitutions, insertions, and deletions.}"
     )
     lines.append(r"\label{tab:noise-trajectory-examples}")
     lines.append(r"\small")
     lines.append(r"\setlength{\tabcolsep}{4pt}")
-    lines.append(r"\begin{tabular}{@{}lrp{2.8cm}p{3.4cm}p{3.4cm}@{}}")
+    lines.append(r"\begin{tabular}{@{}lp{2.7cm}p{2.0cm}p{2.6cm}p{2.6cm}p{2.4cm}@{}}")
     lines.append(r"\toprule")
-    lines.append(r"Case & $\Delta\tilde{e}$ & Ground truth & "
-                 r"HWRFormer output & HWRFormer + noise output \\")
+    lines.append(r"Case & Selection role & Ground truth & "
+                 r"HWRFormer output & HWRFormer + noise output & Outcome \\")
     lines.append(r"\midrule")
     for r in table_rows:
         lines.append(
-            f"{r['tag']} & {r['delta_cell']} & {r['gt_cell']} & "
-            f"{r['ar_cell']} & {r['noise_cell']} \\\\"
+            f"{r['tag']} & {r['role_cell']} & {r['gt_cell']} & "
+            f"{r['ar_cell']} & {r['noise_cell']} & {r['outcome_cell']} \\\\[4pt]"
         )
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -354,9 +344,9 @@ def main() -> None:
     OUT_TABLE.parent.mkdir(parents=True, exist_ok=True)
     OUT_TABLE.write_text("\n".join(lines) + "\n")
     print(f"wrote table: {OUT_TABLE}")
-    for tag, row, desc in cases:
+    for tag, row, role, _outcome in cases:
         print(
-            f"  {tag} ({desc}): {row['dataset_task']}/fold{int(row['fold'])}"
+            f"  {tag} ({role}): {row['dataset_task']}/fold{int(row['fold'])}"
             f"/sample{int(row['sample_index'])}"
             f"  delta_e_norm={float(row['delta_e_norm']):+.4f}"
             f"  delta_edit_raw={int(row['edit_dist_ar'] - row['edit_dist_noise']):+d}"
