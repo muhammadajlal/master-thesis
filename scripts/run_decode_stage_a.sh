@@ -12,13 +12,14 @@ PYTHON=${PYTHON:-python3}
 SKIP_DONE=${SKIP_DONE:-1}
 
 if [[ "$MODEL" == "hybrid" ]]; then
-    BASE_CFG="configs/decode_study/base_hybrid.yaml"
+    BASE_CFG="${BASE_CFG:-configs/decode_study/base_hybrid.yaml}"
 elif [[ "$MODEL" == "ar" ]]; then
-    BASE_CFG="configs/decode_study/base_ar.yaml"
+    BASE_CFG="${BASE_CFG:-configs/decode_study/base_ar.yaml}"
 else
     echo "ERROR: Stage A is AR-only. Use MODEL=hybrid or MODEL=ar."
     exit 1
 fi
+echo "Using BASE_CFG: $BASE_CFG"
 
 run() {
     local tag="$1"; shift
