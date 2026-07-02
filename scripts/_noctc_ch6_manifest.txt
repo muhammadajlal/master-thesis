@@ -1,0 +1,4 @@
+configs/_noctc_ch6/L1_mini_qformer/train-L1-mini-qformer-onhw_noctc.yaml
+configs/_noctc_ch6/L1_mini_qformer/train-L1-mini-qformer-word_noctc.yaml
+configs/_noctc_ch6/L2_kv_slim/train-L2-kv-slim-onhw_noctc.yaml
+configs/_noctc_ch6/L2_kv_slim/train-L2-kv-slim-word_noctc.yaml
