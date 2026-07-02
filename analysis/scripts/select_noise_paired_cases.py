@@ -58,7 +58,10 @@ DATASET_LABELS = {
 
 
 def latex_escape(s: str) -> str:
-    """Escape LaTeX special characters inside \\texttt cells."""
+    """Escape LaTeX special characters inside \\texttt cells, and inject
+    invisible mid-token break opportunities so long monospace tokens do not
+    overflow narrow p{} columns. \\allowbreak emits no glyph but lets LaTeX
+    wrap between characters of an otherwise unbreakable run."""
     repl = {
         "\\": r"\textbackslash{}",
         "{": r"\{",
@@ -71,7 +74,19 @@ def latex_escape(s: str) -> str:
         "^": r"\^{}",
         "~": r"\~{}",
     }
-    return "".join(repl.get(ch, ch) for ch in s)
+    break_after = 8
+    out = []
+    run = 0
+    for ch in s:
+        out.append(repl.get(ch, ch))
+        if ch in " \t-/()[].,;:!?":
+            run = 0
+        else:
+            run += 1
+            if run >= break_after:
+                out.append(r"\allowbreak{}")
+                run = 0
+    return "".join(out)
 
 
 def first_edit_op(label: str, pred: str):
@@ -327,14 +342,14 @@ def main() -> None:
     lines.append(r"\label{tab:noise-trajectory-examples}")
     lines.append(r"\small")
     lines.append(r"\setlength{\tabcolsep}{4pt}")
-    lines.append(r"\begin{tabular}{@{}lp{2.7cm}p{2.0cm}p{2.6cm}p{2.6cm}p{2.4cm}@{}}")
+    lines.append(r"\begin{tabular}{@{}p{3.0cm}p{2.2cm}p{2.8cm}p{2.8cm}p{2.6cm}@{}}")
     lines.append(r"\toprule")
-    lines.append(r"Case & Selection role & Ground truth & "
+    lines.append(r"Selection role & Ground truth & "
                  r"HWRFormer output & HWRFormer + noise output & Outcome \\")
     lines.append(r"\midrule")
     for r in table_rows:
         lines.append(
-            f"{r['tag']} & {r['role_cell']} & {r['gt_cell']} & "
+            f"{r['role_cell']} & {r['gt_cell']} & "
             f"{r['ar_cell']} & {r['noise_cell']} & {r['outcome_cell']} \\\\[4pt]"
         )
     lines.append(r"\bottomrule")

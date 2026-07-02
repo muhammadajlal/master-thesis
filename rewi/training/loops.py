@@ -187,10 +187,11 @@ def train_one_epoch_lm(
         )
         with autocast_ctx:
             out = model(x, len_x, labels=labels)
-            # Handle dict return from VLM with two_step_decode
-            if isinstance(out, dict):
+            # HuggingFace ModelOutput is dict-like, so isinstance(out, dict)
+            # is True even for the plain LM output. Discriminate by key.
+            if isinstance(out, dict) and "lm_out" in out:
                 loss_lm = out["lm_out"].loss
-                imu_tokens = out["imu_tokens"]
+                imu_tokens = out.get("imu_tokens", None)
             else:
                 loss_lm = out.loss
                 imu_tokens = None
