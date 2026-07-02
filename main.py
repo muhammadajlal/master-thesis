@@ -910,6 +910,13 @@ def load_checkpoint(cfgs, model, optimizer, lr_scheduler, manager, dataloader_tr
                     "warm-restarting from epoch {} with fresh optimizer",
                     e, epoch_start,
                 )
+            # Re-apply encoder freeze on resume. The freeze branch below is
+            # fresh-start-only; without this, a resumed frozen run (BaseModel)
+            # silently unfreezes the encoder inside the AdamW all-params group.
+            if getattr(cfgs, 'freeze', False):
+                for params in model.encoder.parameters():
+                    params.requires_grad = False
+                logger.info("[Resume] re-applied encoder freeze (cfgs.freeze=True)")
             maybe_log_optimizer_coverage(manager, optimizer, model, epoch=epoch_start, where="after_resume")
             
         elif cfgs.freeze:  # Freeze encoder

@@ -1,0 +1,114 @@
+# ==================================================================
+# F1: Frozen VLM-Pretrained Encoder + MLP Connector + LoRA GPT-2
+# Dataset: wi_word_hw6_meta (private, word-level, Stabilo)
+# Trainable: ~2.6M (MLP connector + LoRA + prompt, encoder frozen)
+# ==================================================================
+
+vlm_enabled: true
+
+# ── Encoder (frozen, loaded from VLM checkpoint) ────────────
+arch_en: "blconv_b"
+arch_de: "vlm"
+num_channel: 13
+len_seq: 0
+d_cnn: 512
+
+# Freeze encoder — pretrained weights loaded via checkpoint
+# {fold} is replaced by train_F2.sbatch at runtime
+freeze: true
+checkpoint: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/pretrained_encoders/hwrformer_xs_word/encoder_fold{fold}.pth
+
+# ── VLM configuration ─────────────────────────────────────
+vlm:
+  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2"
+  local_files_only: true
+
+  # MLP projector (LLaVA-1.5 style: Linear→GELU→Linear→LN)
+  connector_type: mlp
+  random_init_lm: false
+
+  # Q-Former params (ignored for MLP, kept for config compat)
+  num_queries: 16
+  qformer_layers: 2
+  qformer_nhead: 8
+  qformer_dropout: 0.15
+
+  # Prompt / prefix
+  prompt_text: "Transcribe the handwritten text from IMU sensor signals:"
+  num_soft_tokens: 20
+
+  # LM freezing / LoRA
+  freeze_lm: true
+  use_lora: true
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+  lora_target_modules: null
+
+  # Conditioning noise
+  z_dropout: 0.2
+
+  # Label smoothing
+  label_smoothing: 0.1
+
+  # Generation
+  max_new_tokens: 64
+  num_beams: 1
+
+  # Discriminative learning rates
+  lr_connector: 0.0002
+  lr_prompt: 0.0002
+  lr_lm: 0.00001
+
+# ── Data / paths ───────────────────────────────────────────
+dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/F1_frozen_enc_mlp/vlm__wi_word_hw6_meta_hwenc_ablation
+idx_fold: 0
+aug: true
+
+# ── Runtime ────────────────────────────────────────────────
+device: cuda
+seed: 42
+num_worker: 16
+cache: true
+
+# ── Training schedule ─────────────────────────────────────
+epoch: 300
+epoch_warmup: 30
+freq_eval: 5
+freq_log: 50
+freq_save: 10
+
+# ── Label settings ─────────────────────────────────────────
+lm_max_label_len: 96
+lm_use_amp: true
+
+# ── Optimization ───────────────────────────────────────────
+lr_enc: 0.0001
+weight_decay: 0.01
+lr: 0.0001
+size_batch: 8
+grad_accum_steps: 8
+
+# ── Checkpointing ─────────────────────────────────────────
+save_best_only: true
+export_val_full: false
+test: false
+
+# ── Tokenizer (legacy) ────────────────────────────────────
+tokenizer:
+  type: sentencepiece
+  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+# ── Gating / concat (disabled) ─────────────────────────────
+use_gated_attention: false
+gating_type: elementwise
+concat:
+  enabled: false
+
+ctc_decoder: best_path
+
+# ── Labels ─────────────────────────────────────────────────
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
