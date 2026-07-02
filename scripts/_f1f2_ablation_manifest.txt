@@ -1,0 +1,8 @@
+configs/_f1f2_ablation/train-F1-qenc-onhw.yaml
+configs/_f1f2_ablation/train-F1-qenc-word.yaml
+configs/_f1f2_ablation/train-F1-hwenc-onhw.yaml
+configs/_f1f2_ablation/train-F1-hwenc-word.yaml
+configs/_f1f2_ablation/train-F2-qenc-onhw.yaml
+configs/_f1f2_ablation/train-F2-qenc-word.yaml
+configs/_f1f2_ablation/train-F2-hwenc-onhw.yaml
+configs/_f1f2_ablation/train-F2-hwenc-word.yaml
