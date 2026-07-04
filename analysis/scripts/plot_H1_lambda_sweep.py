@@ -213,8 +213,8 @@ def main() -> None:
         ax.set_xlabel(r"$\lambda_{\mathrm{ctc}}$", fontsize=12)
         ax.grid(True, alpha=0.3)
 
-    ax_cer.set_ylabel("CER (\\%)", fontsize=12)
-    ax_wer.set_ylabel("WER (\\%)", fontsize=12)
+    ax_cer.set_ylabel("CER (%)", fontsize=12)
+    ax_wer.set_ylabel("WER (%)", fontsize=12)
     ax_cer.set_title(r"H1 multimodal CER vs $\lambda_{\mathrm{ctc}}$", fontsize=12)
     ax_wer.set_title(r"H1 multimodal WER vs $\lambda_{\mathrm{ctc}}$", fontsize=12)
 
@@ -227,9 +227,11 @@ def main() -> None:
                linewidth=2, label=r"5-fold mean $\pm$ SEM (WER)"),
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
                label=rf"selected $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
-        Line2D([0], [0], color=EMPIRICAL_COLOR, linestyle=":", linewidth=1.2,
-               label=rf"empirical min $\lambda_{{\mathrm{{ctc}}}}={empirical_min}$"),
     ]
+    if empirical_min != SELECTED_LAMBDA:
+        handles.append(
+            Line2D([0], [0], color=EMPIRICAL_COLOR, linestyle=":", linewidth=1.2,
+                   label=rf"empirical min $\lambda_{{\mathrm{{ctc}}}}={empirical_min}$"))
     if not math.isnan(p3_cer_mean):
         handles.insert(
             2,
