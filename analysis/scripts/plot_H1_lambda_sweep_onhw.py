@@ -148,8 +148,8 @@ def main() -> None:
 
     ax_cer.set_ylabel("CER (%)", fontsize=12)
     ax_wer.set_ylabel("WER (%)", fontsize=12)
-    ax_cer.set_title(r"Hybrid MLP CER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
-    ax_wer.set_title(r"Hybrid MLP WER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
+    ax_cer.set_title(r"MLP + CTC: CER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
+    ax_wer.set_title(r"MLP + CTC: WER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
 
     from matplotlib.lines import Line2D
 
@@ -159,7 +159,7 @@ def main() -> None:
         Line2D([0], [0], color=wer_color, marker="s", markersize=6,
                linewidth=2, label=r"5-fold mean $\pm$ SEM (WER)"),
         Line2D([0], [0], color="black", linestyle=":", linewidth=1.5,
-               label="MLP without CTC"),
+               label="MLP (no CTC)"),
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
                label=rf"OnHW operating point $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
     ]
