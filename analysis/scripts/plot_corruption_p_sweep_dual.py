@@ -186,7 +186,7 @@ def main() -> None:
                label="CER (left axis, 5-fold mean $\\pm$ SEM)"),
         Line2D([0], [0], color=WER_COLOR, marker="s", linewidth=2, linestyle="--",
                label="WER (right axis, 5-fold mean $\\pm$ SEM)"),
-        Line2D([0], [0], color="gray", linestyle=":", linewidth=1.1,
+        Line2D([0], [0], color="#d62728", linestyle="--", linewidth=1.8, alpha=0.75,
                label=r"adopted $p_{\mathrm{replace}}{=}0.15$"),
     ]
     fig.legend(

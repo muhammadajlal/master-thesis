@@ -3,7 +3,7 @@
 
 Differences from plot_contrastive_comparison.py:
   - no suptitle and no vendor/dataset codenames in the figure itself
-  - panel titles use the thesis nomenclature (Hybrid MLP baseline etc.),
+  - panel titles use reader-facing condition names,
     no internal experiment codes and no embedded cos/L2 numbers
     (per-dataset metrics live in tab:contrastive-alignment)
   - legend wording matches the thesis caption
@@ -28,10 +28,10 @@ BASE = Path("/home/woody/iwso/iwso214h/imu-hwr/analysis/embedding_viz")
 OUT_PDF = Path("/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/contrastive_comparison_umap.pdf")
 
 CONFIGS = [
-    ("H1_hybrid_mlp", "Hybrid MLP baseline"),
-    ("J2_contrastive_mlp", "MLP + sequence contrastive"),
-    ("H1_hybrid_pooling", "Hybrid Pooling-MLP baseline"),
-    ("J2_contrastive_pooling", "Pooling-MLP + sequence contrastive"),
+    ("H1_hybrid_mlp", "MLP + CTC"),
+    ("J2_contrastive_mlp", "MLP + CTC + seq. alignment"),
+    ("H1_hybrid_pooling", "Pool-MLP + CTC"),
+    ("J2_contrastive_pooling", "Pool-MLP + CTC + seq. alignment"),
 ]
 
 

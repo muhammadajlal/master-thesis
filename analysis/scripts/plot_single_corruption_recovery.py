@@ -45,8 +45,8 @@ MODELS = [
 DATASETS = [
     ("ar_transformer_xs__onhw_wi_word_rh", "onhw_wi_word", "OnHW WI word"),
     ("ar_transformer_xs__onhw_wd_word_rh", "onhw_wd_word", "OnHW WD word"),
-    ("ar_transformer_xs__wi_word_hw6_meta", "priv_word", "Priv.\\ word"),
-    ("ar_transformer_xs__wi_sent_hw6_meta", "priv_sent", "Priv.\\ sent."),
+    ("ar_transformer_xs__wi_word_hw6_meta", "priv_word", "Private word"),
+    ("ar_transformer_xs__wi_sent_hw6_meta", "priv_sent", "Private sentence"),
 ]
 
 
@@ -152,7 +152,7 @@ def main() -> None:
         ax.set_title(ds_label, fontsize=11)
         ax.set_xlabel(r"Offset from corrupted position $t$", fontsize=10)
         if col == 0:
-            ax.set_ylabel(r"$\Pr$(predict label$[t{+}\delta]$ correctly) (\%)",
+            ax.set_ylabel(r"$\Pr$(predict label$[t{+}\delta]$ correctly) (%)",
                           fontsize=10.5)
         ax.grid(True, alpha=0.3)
         if col == n_ds - 1:

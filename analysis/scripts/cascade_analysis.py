@@ -78,8 +78,8 @@ MIN_SAMPLES_AT_POS = 50
 DATASETS: list[tuple[str, str]] = [
     ("onhw_wi_word", "OnHW WI word"),
     ("onhw_wd_word", "OnHW WD word"),
-    ("priv_word", "Priv.\\ word"),
-    ("priv_sent", "Priv.\\ sent."),
+    ("priv_word", "Private word"),
+    ("priv_sent", "Private sentence"),
 ]
 
 
@@ -363,7 +363,7 @@ def plot_grid(results: list[dict], curves: pd.DataFrame, out_path: Path) -> None
         ax_top.grid(True, alpha=0.3)
         if col == 0:
             ax_top.set_ylabel(
-                r"Aligned per-ref-position error (\%)", fontsize=10.5
+                r"Aligned per-ref-position error (%)", fontsize=10.5
             )
         ax_top.set_xlabel(r"Reference position $k$", fontsize=10)
         if col == n_ds - 1:
@@ -430,7 +430,7 @@ def plot_grid(results: list[dict], curves: pd.DataFrame, out_path: Path) -> None
                     Line2D([0], [0], color="0.4", lw=4,
                            label=r"same $\tilde{e}$ ($\Delta\tilde{e}=0$)"),
                     Line2D([0], [0], color="black", marker="D", lw=0,
-                           label=r"mean + 95\% t-CI"),
+                           label="mean + 95% t-CI"),
                 ],
                 loc="upper right", fontsize=7, framealpha=0.92,
             )
@@ -486,7 +486,7 @@ def plot_ecdf_grid(
         ax_top.grid(True, alpha=0.3)
         if col == 0:
             ax_top.set_ylabel(
-                r"Aligned per-ref-position error (\%)", fontsize=10.5
+                r"Aligned per-ref-position error (%)", fontsize=10.5
             )
         ax_top.set_xlabel(r"Reference position $k$", fontsize=10)
         if col == n_ds - 1:
@@ -523,7 +523,7 @@ def plot_ecdf_grid(
         text = (
             r"$\bar{\Delta\tilde{e}} = "
             f"{res['delta_e_norm_mean_pp']:+.2f}$ pp"
-            "\n95\\% CI = ["
+            "\n95% CI = ["
             f"{res['delta_e_norm_ci_lo_pp']:+.2f}, "
             f"{res['delta_e_norm_ci_hi_pp']:+.2f}"
             "] pp"
