@@ -6,8 +6,7 @@ Companion to plot_H1_lambda_sweep_word.py (private word). For each lambda in
 best-CER epoch). The lambda=0.6 point lives under
 Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__onhw_wi_word_rh; the other
 nine points live under H1_LambdaSweep/H1_hybrid_mlp_lamNN__onhw_wi_word_rh.
-Marks lambda=0.2 (solid) as the OnHW operating point and lambda=0.6
-(dotted grey) as the private-word operating point.
+Marks lambda=0.2 (solid) as the OnHW operating point.
 
 Outputs:
   - results/hwr2/H1_LambdaSweep/h1_lambda_sweep_onhw_metrics.csv
@@ -108,7 +107,6 @@ def main() -> None:
     wer_sems = [s for _, s in wer_stats]
 
     SELECTED_LAMBDA = 0.2
-    SECONDARY_LAMBDA = 0.6
     empirical_min = LAMBDA_VALUES[0]
     best_cer = float("inf")
     for lam, m in zip(LAMBDA_VALUES, cer_means):
@@ -140,14 +138,11 @@ def main() -> None:
     ax_wer.axhline(ref_wer_mean, color="black", linestyle=":", linewidth=1.5, zorder=3)
 
     SELECTED_COLOR = "#9467bd"
-    EMPIRICAL_COLOR = "#7f7f7f"
     for ax in (ax_cer, ax_wer):
         ax.axvspan(SELECTED_LAMBDA - 0.015, SELECTED_LAMBDA + 0.015,
                    color=SELECTED_COLOR, alpha=0.22, zorder=1)
         ax.axvline(SELECTED_LAMBDA, color=SELECTED_COLOR, linestyle="-",
                    linewidth=1.8, alpha=0.95, zorder=2)
-        ax.axvline(SECONDARY_LAMBDA, color=EMPIRICAL_COLOR, linestyle=":",
-                   linewidth=1.2, alpha=0.8, zorder=2)
         ax.set_xlabel(r"$\lambda_{\mathrm{ctc}}$", fontsize=12)
         ax.grid(True, alpha=0.3)
 
@@ -168,10 +163,6 @@ def main() -> None:
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
                label=rf"OnHW operating point $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
     ]
-    handles.append(
-        Line2D([0], [0], color=EMPIRICAL_COLOR, linestyle=":", linewidth=1.2,
-               label=rf"private-word operating point $\lambda_{{\mathrm{{ctc}}}}={SECONDARY_LAMBDA}$"))
-
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.04),
                ncol=3, fontsize=10, frameon=False,
                handlelength=2.2, columnspacing=1.8)
