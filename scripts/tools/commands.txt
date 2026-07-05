@@ -14,7 +14,7 @@ ssh-add -t 8h ~/.ssh/id_ed25519
 -> Thesis 
 
 cd /home/woody/iwso/iwso214h/imu-hwr/thesis
-git commit -m "add quantitaive analysis"
+git commit -m "resolve Introduction.tex comments"
 git push origin master
 
 -> Paper 1

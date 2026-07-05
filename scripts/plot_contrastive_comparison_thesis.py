@@ -28,10 +28,10 @@ BASE = Path("/home/woody/iwso/iwso214h/imu-hwr/analysis/embedding_viz")
 OUT_PDF = Path("/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/contrastive_comparison_umap.pdf")
 
 CONFIGS = [
-    ("H1_hybrid_mlp", "MLP + CTC"),
-    ("J2_contrastive_mlp", "MLP + CTC + seq. alignment"),
-    ("H1_hybrid_pooling", "Pool-MLP + CTC"),
-    ("J2_contrastive_pooling", "Pool-MLP + CTC + seq. alignment"),
+    ("H1_hybrid_mlp", "HWR-GPT (MLP + CTC)"),
+    ("J2_contrastive_mlp", "HWR-GPT (MLP + CTC + seq. alignment)"),
+    ("H1_hybrid_pooling", "HWR-GPT (Pool-MLP + CTC)"),
+    ("J2_contrastive_pooling", "HWR-GPT (Pool-MLP + CTC + seq. alignment)"),
 ]
 
 
