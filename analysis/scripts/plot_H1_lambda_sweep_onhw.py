@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Aggregate and plot the H1 multimodal lambda_ctc sweep on the private word dataset.
+"""Aggregate and plot the multimodal lambda_ctc sweep on OnHW WI word (thesis fig 6.1).
 
-Companion to plot_H1_lambda_sweep.py (OnHW WI word). For each lambda in
+Companion to plot_H1_lambda_sweep_word.py (private word). For each lambda in
 {0.1..1.0}, read CER/WER from the canonical results.json (WER at the
-best-CER epoch). The lambda=0.6 point is the chapter operating point and
-lives under Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__wi_word_hw6_meta;
-lambda=0.2 reuses the transfer-table run under .../vlm__wi_word_hw6_meta_lam02;
-the other eight points live under H1_LambdaSweep/H1_hybrid_mlp_lamNN__wi_word_hw6_meta.
+best-CER epoch). The lambda=0.6 point lives under
+Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__onhw_wi_word_rh; the other
+nine points live under H1_LambdaSweep/H1_hybrid_mlp_lamNN__onhw_wi_word_rh.
+Marks lambda=0.2 (solid) as the OnHW operating point and lambda=0.6
+(dotted grey) as the private-word operating point.
 
 Outputs:
-  - results/hwr2/H1_LambdaSweep/h1_lambda_sweep_word_metrics.csv
-  - thesis/figures/h1_lambda_sweep_word.pdf
+  - results/hwr2/H1_LambdaSweep/h1_lambda_sweep_onhw_metrics.csv
+  - thesis/figures/h1_lambda_sweep.pdf  (paper2 keeps its own copy via
+    the original plot_H1_lambda_sweep.py)
 
 Run from anywhere:
-    python plot_H1_lambda_sweep_word.py
+    python plot_H1_lambda_sweep_onhw.py
 """
 from __future__ import annotations
 
@@ -36,23 +38,21 @@ HYBRID_BASE = RESULTS / "Ablations-MMLM" / "GPT-2" / "Hybrid" / "H1_hybrid_mlp"
 LAMBDA_DIRS: dict[float, Path] = {}
 for lam in LAMBDA_VALUES:
     if lam == 0.6:
-        LAMBDA_DIRS[lam] = HYBRID_BASE / "vlm__wi_word_hw6_meta"
-    elif lam == 0.2:
-        LAMBDA_DIRS[lam] = HYBRID_BASE / "vlm__wi_word_hw6_meta_lam02"
+        LAMBDA_DIRS[lam] = HYBRID_BASE / "vlm__onhw_wi_word_rh"
     else:
         LAMBDA_DIRS[lam] = (
             RESULTS / "H1_LambdaSweep"
-            / f"H1_hybrid_mlp_lam{int(round(lam * 10)):02d}__wi_word_hw6_meta"
+            / f"H1_hybrid_mlp_lam{int(round(lam * 10)):02d}__onhw_wi_word_rh"
         )
 
 # MLP-without-CTC reference (effectively lambda=0) on private word.
 NOCTC_DIR = (
     RESULTS / "Ablations-MMLM" / "GPT-2" / "AR-only" / "vlm_ablation_A1_mlp_pretrained"
-    / "vlm__wi_word_hw6_meta"
+    / "vlm__onhw_wi_word_rh"
 )
 
-OUT_CSV = RESULTS / "H1_LambdaSweep" / "h1_lambda_sweep_word_metrics.csv"
-OUT_PDF_THESIS = REPO / "thesis" / "figures" / "h1_lambda_sweep_word.pdf"
+OUT_CSV = RESULTS / "H1_LambdaSweep" / "h1_lambda_sweep_onhw_metrics.csv"
+OUT_PDF_THESIS = REPO / "thesis" / "figures" / "h1_lambda_sweep.pdf"
 
 
 def read_metrics(target_dir: Path) -> tuple[list[float], list[float]]:
@@ -107,7 +107,8 @@ def main() -> None:
     wer_means = [m for m, _ in wer_stats]
     wer_sems = [s for _, s in wer_stats]
 
-    SELECTED_LAMBDA = 0.6
+    SELECTED_LAMBDA = 0.2
+    SECONDARY_LAMBDA = 0.6
     empirical_min = LAMBDA_VALUES[0]
     best_cer = float("inf")
     for lam, m in zip(LAMBDA_VALUES, cer_means):
@@ -145,16 +146,15 @@ def main() -> None:
                    color=SELECTED_COLOR, alpha=0.22, zorder=1)
         ax.axvline(SELECTED_LAMBDA, color=SELECTED_COLOR, linestyle="-",
                    linewidth=1.8, alpha=0.95, zorder=2)
-        if empirical_min != SELECTED_LAMBDA:
-            ax.axvline(empirical_min, color=EMPIRICAL_COLOR, linestyle=":",
-                       linewidth=1.2, alpha=0.8, zorder=2)
+        ax.axvline(SECONDARY_LAMBDA, color=EMPIRICAL_COLOR, linestyle=":",
+                   linewidth=1.2, alpha=0.8, zorder=2)
         ax.set_xlabel(r"$\lambda_{\mathrm{ctc}}$", fontsize=12)
         ax.grid(True, alpha=0.3)
 
     ax_cer.set_ylabel("CER (%)", fontsize=12)
     ax_wer.set_ylabel("WER (%)", fontsize=12)
-    ax_cer.set_title(r"Hybrid MLP CER vs $\lambda_{\mathrm{ctc}}$ (private word)", fontsize=12)
-    ax_wer.set_title(r"Hybrid MLP WER vs $\lambda_{\mathrm{ctc}}$ (private word)", fontsize=12)
+    ax_cer.set_title(r"Hybrid MLP CER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
+    ax_wer.set_title(r"Hybrid MLP WER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
 
     from matplotlib.lines import Line2D
 
@@ -166,12 +166,11 @@ def main() -> None:
         Line2D([0], [0], color="black", linestyle=":", linewidth=1.5,
                label="MLP without CTC"),
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
-               label=rf"private-word operating point $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
+               label=rf"OnHW operating point $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
     ]
-    if empirical_min != SELECTED_LAMBDA:
-        handles.append(
-            Line2D([0], [0], color=EMPIRICAL_COLOR, linestyle=":", linewidth=1.2,
-                   label=rf"empirical min $\lambda_{{\mathrm{{ctc}}}}={empirical_min}$"))
+    handles.append(
+        Line2D([0], [0], color=EMPIRICAL_COLOR, linestyle=":", linewidth=1.2,
+               label=rf"private-word operating point $\lambda_{{\mathrm{{ctc}}}}={SECONDARY_LAMBDA}$"))
 
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.04),
                ncol=3, fontsize=10, frameon=False,
