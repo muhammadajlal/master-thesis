@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Contrastive Loss Comparison — H1 (CTC only) vs J2 (CTC + Contrastive)
-=====================================================================
+Contrastive Loss Comparison: CTC only vs CTC + Sequence-Level Alignment
+======================================================================
 Produces a 2x2 grid:
-  Left column:  H1 baseline (CTC only)
-  Right column: J2 contrastive (CTC + InfoNCE)
+  Left column:  CTC only
+  Right column: CTC + sequence-level contrastive alignment
   Top row:      MLP connector
-  Bottom row:   Pooling-MLP connector
+  Bottom row:   Pool-MLP connector
 
 Each panel shows IMU tokens (small) vs text anchors (large) in UMAP/PCA space.
 Joint fitting ensures comparable embedding spaces across panels.
@@ -37,9 +37,9 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 CONFIGS = [
     # (row_label, left_exp, right_exp, left_title, right_title)
     ("MLP", "H1_hybrid_mlp", "J2_contrastive_mlp",
-     "H1: MLP + CTC (baseline)", "J2: MLP + CTC + Contrastive"),
-    ("Pooling-MLP", "H1_hybrid_pooling", "J2_contrastive_pooling",
-     "H1p: Pool-MLP + CTC (baseline)", "J2p: Pool-MLP + CTC + Contrastive"),
+     "MLP + CTC", "MLP + CTC + seq. alignment"),
+    ("Pool-MLP", "H1_hybrid_pooling", "J2_contrastive_pooling",
+     "Pool-MLP + CTC", "Pool-MLP + CTC + seq. alignment"),
 ]
 
 
@@ -134,7 +134,7 @@ def make_figure(method: str = "umap", dataset: str = "both"):
     ds_name = {"both": "OnHW + Stabilo", "onhw": "OnHW", "hw6": "Stabilo"}[dataset]
     fig.suptitle(
         f"Effect of Contrastive Alignment Loss on Modality Gap ({ds_name})\n"
-        f"Left: CTC only (baseline)  |  Right: CTC + In-Batch Contrastive (InfoNCE)",
+        f"Left: CTC only  |  Right: CTC + sequence-level contrastive alignment",
         fontsize=13, fontweight="bold", y=0.98,
     )
     plt.tight_layout(rect=[0, 0, 1, 0.93])

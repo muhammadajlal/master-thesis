@@ -148,8 +148,8 @@ def main() -> None:
 
     ax_cer.set_ylabel("CER (%)", fontsize=12)
     ax_wer.set_ylabel("WER (%)", fontsize=12)
-    ax_cer.set_title(r"MLP + CTC: CER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
-    ax_wer.set_title(r"MLP + CTC: WER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
+    ax_cer.set_title(r"HWR-GPT (MLP + CTC): CER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
+    ax_wer.set_title(r"HWR-GPT (MLP + CTC): WER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
 
     from matplotlib.lines import Line2D
 
