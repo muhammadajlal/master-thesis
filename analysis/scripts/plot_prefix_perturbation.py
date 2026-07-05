@@ -38,8 +38,8 @@ P_VALUES = [0.00, 0.05, 0.10, 0.15, 0.20]
 DATASETS: list[tuple[str, str]] = [
     ("OnHW WI word", "ar_transformer_xs__onhw_wi_word_rh"),
     ("OnHW WD word", "ar_transformer_xs__onhw_wd_word_rh"),
-    ("Priv.\\ word", "ar_transformer_xs__wi_word_hw6_meta"),
-    ("Priv.\\ sent.", "ar_transformer_xs__wi_sent_hw6_meta"),
+    ("Private word", "ar_transformer_xs__wi_word_hw6_meta"),
+    ("Private sentence", "ar_transformer_xs__wi_sent_hw6_meta"),
 ]
 
 CHECKPOINTS: list[tuple[str, str]] = [
@@ -129,12 +129,12 @@ def plot(rows: list[dict]) -> None:
         ax.errorbar(
             P_VALUES, ar_m, yerr=ar_s,
             marker="o", color=AR_COLOR, linewidth=2, capsize=3,
-            label="AR-only",
+            label="HWRFormer",
         )
         ax.errorbar(
             P_VALUES, no_m, yerr=no_s,
             marker="s", color=NOISE_COLOR, linewidth=2, capsize=3,
-            label=r"AR + noise (uniform $p{=}0.15$)",
+            label=r"HWRFormer + noise (uniform $p{=}0.15$)",
         )
         ax.set_title(display, fontsize=11)
         ax.grid(True, alpha=0.3)

@@ -587,8 +587,8 @@ def main():
     plot_ld_distribution(
         {"OnHW AR-only": onhw_ar["lev_norm"].to_numpy(),
          "OnHW Hybrid": onhw_hyb["lev_norm"].to_numpy(),
-         "Stabilo Word": stabilo_word["lev_norm"].to_numpy(),
-         "Stabilo Sent": stabilo_sent["lev_norm"].to_numpy()},
+         "Private Word": stabilo_word["lev_norm"].to_numpy(),
+         "Private Sent.": stabilo_sent["lev_norm"].to_numpy()},
         FIG_DIR / "ld_distribution_norm_cross_dataset.pdf",
         "Cross-Dataset: Normalized LD Distribution",
         normalized=True,
