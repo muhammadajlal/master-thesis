@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Batch-recompute MACs and params for every architectural combo in the thesis.
 
-Per evaluate.py:get_macs_params(), the encoder signal length is hardcoded to
-T=1024 when 'word' is in dir_dataset and T=4096 otherwise — so MACs/params only
-depend on (arch_en, arch_de, gating, hybrid, task_type=word|sent) for a fixed
-generate_len_max. We compute each unique combo once.
+Per evaluate.py:get_macs_params(), the encoder signal length is T=1024 for
+'word' datasets and T=4096 for sentences, and the AR decode budget defaults to
+the rounded-up mean output length: 6 characters at the OnHW-words500 word
+reference (used for every word task) and 19 for private sentences — the thesis
+reporting convention that matches the paper's Table 1. So MACs/params depend
+only on (arch_en, arch_de, gating, hybrid, task_type). We compute each unique
+combo once.
 
 Output: results/thesis_macs.csv
 

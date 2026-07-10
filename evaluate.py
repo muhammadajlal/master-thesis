@@ -424,7 +424,15 @@ def get_macs_params(cfgs: dict, results: dict = {}) -> dict:
     T = 1024 if 'word' in cfgs['dir_dataset'] else 4096
     x = torch.randn(1, cfgs['num_channel'], T)
     len_x = torch.tensor([T], dtype=torch.long)
-    len_max = int(cfgs.get('generate_len_max', 32))
+    # MACs decode budget = rounded-up mean output length (thesis reporting
+    # convention, matching the paper's Table 1): 6 characters at the
+    # OnHW-words500 word reference (used for every word task so that OnHW and
+    # private-word MACs stay directly comparable), and 19 for private sentences.
+    # This reflects realistic short-sequence inference rather than a worst-case
+    # fixed budget. An explicit generate_len_max in the config overrides.
+    _dd = cfgs['dir_dataset']
+    _mean_out_len = 19 if 'sent' in _dd else 6
+    len_max = int(cfgs.get('generate_len_max', _mean_out_len))
 
     wrapper = InferWrapper(model, mode=wrapper_mode, len_max=len_max)
 
