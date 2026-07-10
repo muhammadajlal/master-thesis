@@ -2,48 +2,24 @@
 #SBATCH -J ctc_post_xs
 #SBATCH -o logs/slurm/%x_%j.out
 #SBATCH -e logs/slurm/%x_%j.err
-#SBATCH -p rtx3080
-#SBATCH --gres=gpu:rtx3080:1
+#SBATCH -p v100
+#SBATCH --gres=gpu:v100:1
 #SBATCH --cpus-per-task=8
-#SBATCH -t 06:00:00
-
+#SBATCH -t 04:00:00
 set -euo pipefail
-set -x
-
 WORK=/home/woody/iwso/iwso214h
 PROJ=$WORK/imu-hwr/work/REWI_work
-PAPER=$WORK/imu-hwr/publications/paper2_lncs_overleaf
-
-module load python/3.12-conda 2>/dev/null || true
-source /apps/python/3.12-conda/etc/profile.d/conda.sh
 ENV_PREFIX=$WORK/imu-hwr/envs/rewi26
-conda activate "$ENV_PREFIX"
-PY_BIN="$ENV_PREFIX/bin/python3"
-
-export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
-cd "$PROJ"
-
-# Template each ckpt path with {fold}; the script substitutes per fold.
-CKPT_BASE='results/hwr2/train_element_word_hybrid_XX_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth'
-
-CKPTS=()
-for k in 01 02 03 04 05 06 07 08 09 10; do
-  CKPTS+=("${CKPT_BASE/XX/$k}")
-done
-
-$PY_BIN analysis/scripts/ctc_posterior_lambda_analysis.py \
+source "$(conda info --base 2>/dev/null)/etc/profile.d/conda.sh" 2>/dev/null || true
+conda activate "$ENV_PREFIX" 2>/dev/null || true
+cd "$PROJ"; export PYTHONPATH="$PROJ:${PYTHONPATH:-}" HF_HUB_OFFLINE=1
+mkdir -p "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/analysis/ctc_post_xs_out"
+$ENV_PREFIX/bin/python3 analysis/scripts/ctc_posterior_lambda_analysis.py \
   --lambdas 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 \
-  --ckpts "${CKPTS[@]}" \
-  --folds 0,1,2,3,4 \
-  --dataset data/onhw_wi_word_rh \
-  --arch_en blconv_b \
-  --arch_de ar_transformer_xs \
-  --use_gated_attention \
-  --gating_type elementwise \
-  --device cuda \
-  --outdir "$PAPER/figures/ctc_posterior_lambda_xs"
-
-# Copy the foldavg figure to the file name expected by supplementary.tex.
-cp "$PAPER/figures/ctc_posterior_lambda_xs/metrics_vs_lambda_foldavg.pdf" \
-   "$PAPER/figures/ctc_metrics_vs_lambda_foldavg.pdf"
-echo "Done. Final figure at: $PAPER/figures/ctc_metrics_vs_lambda_foldavg.pdf"
+  --ckpts results/hwr2/train_element_word_hybrid_01_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_02_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_03_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_04_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_05_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_06_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_07_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_08_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_09_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth results/hwr2/train_element_word_hybrid_10_xs_onhw_wi/ar_transformer_xs__onhw_wi_word_rh/fold_{fold}/{fold}/checkpoints/best_cer.pth \
+  --dataset data/onhw_wi_word_rh --folds 0,1,2,3,4 --qual_fold 0 \
+  --arch_de ar_transformer_xs --arch_en blconv_b --gating_type elementwise \
+  --n_quant_samples 500 --device cuda \
+  --outdir "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/analysis/ctc_post_xs_out"
+echo "=== DONE; outputs in /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/analysis/ctc_post_xs_out ==="
+ls "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/analysis/ctc_post_xs_out"

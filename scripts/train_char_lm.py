@@ -185,16 +185,28 @@ def main():
     all_folds = [0, 1, 2, 3, 4]
 
     if args.per_fold:
-        # Train one LM per fold, each excluding the test fold
+        # Train one LM per fold, each excluding the held-out fold.
+        #
+        # The corpus is built from val.json, which is the disjoint
+        # writer-independent fold partition (each of the 25,199 samples appears
+        # under exactly one key). Taking val.json folds != test_fold therefore
+        # yields the exact training portion for that fold, with every held-out
+        # writer excluded and no sample duplicated.
+        #
+        # NOTE: train.json[k] is the per-fold *complement* (all samples except
+        # val fold k), so concatenating several train.json keys — as an earlier
+        # version did — re-introduces the held-out fold's writers (4x) and
+        # inflates their word frequencies. Building from the val.json partition
+        # avoids that leak.
         for test_fold in all_folds:
             train_folds = [f for f in all_folds if f != test_fold]
             fold_outdir = os.path.join(args.outdir, f"fold_{test_fold}")
             print(f"\n{'═' * 60}")
-            print(f"  Training LM for fold {test_fold} (training on folds {train_folds})")
+            print(f"  Training LM for fold {test_fold} (val.json partition folds {train_folds})")
             print(f"{'═' * 60}")
             train_one(
                 args.dataset, train_folds, args.order, fold_outdir,
-                args.split, args.skip_binary,
+                split="val", skip_binary=args.skip_binary,
                 memory=args.memory, temp_prefix=args.temp_prefix,
             )
         print(f"\nPer-fold LMs saved under {args.outdir}/fold_*/")

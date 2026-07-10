@@ -147,11 +147,15 @@ def main() -> None:
         ax.axhline(ar_s_value, color=S_COLOR, linestyle=":", linewidth=1.2,
                    alpha=0.65, zorder=2)
 
-        # vertical selection markers
-        ax.axvline(SELECTED_XS, color=XS_COLOR, linestyle="--",
-                   linewidth=1.0, alpha=0.55, zorder=2)
-        ax.axvline(SELECTED_S, color=S_COLOR, linestyle="--",
-                   linewidth=1.0, alpha=0.55, zorder=2)
+        # vertical selection markers (bold + shaded band, matching Fig 6.3 style)
+        ax.axvspan(SELECTED_XS - 0.02, SELECTED_XS + 0.02,
+                   color=XS_COLOR, alpha=0.18, linewidth=0, zorder=1)
+        ax.axvline(SELECTED_XS, color=XS_COLOR, linestyle="-",
+                   linewidth=1.8, alpha=0.95, zorder=6)
+        ax.axvspan(SELECTED_S - 0.02, SELECTED_S + 0.02,
+                   color=S_COLOR, alpha=0.18, linewidth=0, zorder=1)
+        ax.axvline(SELECTED_S, color=S_COLOR, linestyle="-",
+                   linewidth=1.8, alpha=0.95, zorder=6)
 
         ax.set_xlabel(r"$\lambda_{\mathrm{ctc}}$", fontsize=12)
         ax.set_ylabel(y_label, fontsize=12)
@@ -186,9 +190,9 @@ def main() -> None:
                label=r"HWRFormer AR-only reference (elementwise-gated)"),
         Line2D([0], [0], color=S_COLOR, linestyle=":", linewidth=1.2,
                label=r"HWRFormer-L AR-only reference (elementwise-gated)"),
-        Line2D([0], [0], color=XS_COLOR, linestyle="--", linewidth=1.0,
+        Line2D([0], [0], color=XS_COLOR, linestyle="-", linewidth=1.8,
                label=r"HWRFormer selected $\lambda_{\mathrm{ctc}}{=}0.1$"),
-        Line2D([0], [0], color=S_COLOR, linestyle="--", linewidth=1.0,
+        Line2D([0], [0], color=S_COLOR, linestyle="-", linewidth=1.8,
                label=r"HWRFormer-L selected $\lambda_{\mathrm{ctc}}{=}0.6$"),
     ]
     fig.legend(

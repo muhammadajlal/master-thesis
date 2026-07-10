@@ -19,10 +19,10 @@ BASE = Path("/home/woody/iwso/iwso214h/imu-hwr/analysis/embedding_viz")
 OUT_PDF = Path("/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/v3c_contrastive_comparison_umap.pdf")
 
 PANELS = [
-    ("H1_hybrid_mlp", "HWR-GPT (MLP + CTC)"),
-    ("J2_contrastive_mlp", "HWR-GPT (MLP + CTC + seq. alignment)"),
-    ("H1_hybrid_pooling", "HWR-GPT (Pool-MLP + CTC)"),
-    ("J2_contrastive_pooling", "HWR-GPT (Pool-MLP + CTC + seq. alignment)"),
+    ("H1_hybrid_mlp", "Hybrid HWR-GPT (MLP)"),
+    ("J2_contrastive_mlp", "Hybrid HWR-GPT (MLP) + seq. alignment"),
+    ("H1_hybrid_pooling", "Hybrid HWR-GPT (Pool-MLP)"),
+    ("J2_contrastive_pooling", "Hybrid HWR-GPT (Pool-MLP) + seq. alignment"),
 ]
 DATASETS = [
     ("onhw", "OnHW", "tab:blue"),
@@ -96,7 +96,7 @@ def main() -> None:
         handles.extend(h)
         labels.extend(l)
     unique = dict(zip(labels, handles))
-    fig.legend(unique.values(), unique.keys(), loc="lower center", ncol=4, fontsize=10, frameon=False)
+    fig.legend(unique.values(), unique.keys(), loc="lower center", ncol=4, fontsize=14, frameon=False, markerscale=2.0, columnspacing=1.8, handletextpad=0.5)
     fig.suptitle(
         "Dataset and Modality Structure Before and After Sequence-Level Alignment (Fold 0)",
         fontsize=14, fontweight="bold", y=0.98,
