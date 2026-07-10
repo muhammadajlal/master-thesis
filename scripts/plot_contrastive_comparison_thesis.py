@@ -28,10 +28,10 @@ BASE = Path("/home/woody/iwso/iwso214h/imu-hwr/analysis/embedding_viz")
 OUT_PDF = Path("/home/woody/iwso/iwso214h/imu-hwr/thesis/figures/contrastive_comparison_umap.pdf")
 
 CONFIGS = [
-    ("H1_hybrid_mlp", "HWR-GPT (MLP + CTC)"),
-    ("J2_contrastive_mlp", "HWR-GPT (MLP + CTC + seq. alignment)"),
-    ("H1_hybrid_pooling", "HWR-GPT (Pool-MLP + CTC)"),
-    ("J2_contrastive_pooling", "HWR-GPT (Pool-MLP + CTC + seq. alignment)"),
+    ("H1_hybrid_mlp", "Hybrid HWR-GPT (MLP)"),
+    ("J2_contrastive_mlp", "Hybrid HWR-GPT (MLP) + seq. alignment"),
+    ("H1_hybrid_pooling", "Hybrid HWR-GPT (Pool-MLP)"),
+    ("J2_contrastive_pooling", "Hybrid HWR-GPT (Pool-MLP) + seq. alignment"),
 ]
 
 
@@ -73,7 +73,7 @@ def main() -> None:
             ax.set_xlabel("UMAP dim 1", fontsize=10)
         if i % 2 == 0:
             ax.set_ylabel("UMAP dim 2", fontsize=10)
-        ax.legend(fontsize=9, loc="upper right")
+        ax.legend(fontsize=12, loc="upper right", markerscale=1.5)
         ax.tick_params(labelsize=8)
 
     plt.tight_layout()
