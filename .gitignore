@@ -201,3 +201,8 @@ texput.log
 *.fls
 *.fdb_latexmk
 *.synctex.gz
+# Generated analysis outputs (plots + result JSON) — regenerate from analysis/scripts/
+analysis/*_out/
+# Leak-free per-fold KenLM models — regenerate with scripts/train_char_lm.py --per_fold
+lm_noleak/
+logs/timeout_monitor/handled_indices.tsv
