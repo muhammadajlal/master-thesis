@@ -89,13 +89,16 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 nvidia-smi -L
 
-SEED=$((FOLD * 100 + MODEL_IDX * 10000))
+# Model-INDEPENDENT seed: both models must receive the identical corruption
+# positions and replacement characters on the same (dataset, fold) so the two
+# recovery curves are paired at the sample level.
+SEED=$((DATASET_IDX * 1000 + FOLD * 100))
 
 "$PY_BIN" eval_single_corruption.py \
     -c "$YAML" \
     --checkpoint "$CKPT" \
     --out "$OUT_PATH" \
-    --n_offsets 6 \
+    --n_offsets 4 \
     --n_corruptions_per_sample 1 \
     --min_eligibility_offset 1 \
     --seed "$SEED"

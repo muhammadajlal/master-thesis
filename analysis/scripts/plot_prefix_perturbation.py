@@ -120,7 +120,7 @@ def _curve(rows: list[dict], task: str, arch: str) -> tuple[np.ndarray, np.ndarr
 
 
 def plot(rows: list[dict]) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8.2), sharex=True)
     axes_flat = axes.flatten()
     for idx, (display, arch) in enumerate(DATASETS):
         ax = axes_flat[idx]
@@ -136,15 +136,17 @@ def plot(rows: list[dict]) -> None:
             marker="s", color=NOISE_COLOR, linewidth=2, capsize=3,
             label=r"HWRFormer + noise (uniform $p{=}0.15$)",
         )
-        ax.set_title(display, fontsize=11)
+        ax.set_title(display, fontsize=14)
+        ax.set_xticks(P_VALUES)
+        ax.tick_params(axis="both", labelsize=12)
         ax.grid(True, alpha=0.3)
         if idx in (2, 3):
             ax.set_xlabel(r"Prefix perturbation rate $p_{\mathrm{replace}}$",
-                          fontsize=10.5)
+                          fontsize=14)
         if idx in (0, 2):
-            ax.set_ylabel(r"Teacher-forced CER (%)", fontsize=10.5)
+            ax.set_ylabel(r"Teacher-forced CER (%)", fontsize=14)
         if idx == 1:
-            ax.legend(loc="upper left", fontsize=9)
+            ax.legend(loc="upper left", fontsize=12)
     fig.tight_layout()
     OUT_FIG.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_FIG, bbox_inches="tight")

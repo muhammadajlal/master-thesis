@@ -23,7 +23,7 @@ So "corruption of label[t]" replaces y_inp[t+1].
 For per-(model, dataset, fold) one JSON file is written:
     {
       "single_corruption": {
-        "offsets": [0, 1, 2, 3, 4, 5],
+        "offsets": [0, 1, 2, 3],
         "n_correct": [...],
         "n_total":   [...],
         "accuracy":  [...],
@@ -58,8 +58,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("-c", "--config", required=True)
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--out", required=True)
-    p.add_argument("--n_offsets", type=int, default=6,
-                   help="Number of decoder positions starting at t to score.")
+    p.add_argument("--n_offsets", type=int, default=4,
+                   help="Number of decoder positions starting at t to score "
+                        "(fixed cohort: eligibility requires t + n_offsets-1 < L).")
     p.add_argument("--n_corruptions_per_sample", type=int, default=1,
                    help="Independent corruption positions evaluated per sample.")
     p.add_argument("--min_eligibility_offset", type=int, default=1,
@@ -96,6 +97,7 @@ def run_single_corruption_eval(
     n_seen = 0
     n_skipped_short = 0
     n_corruptions_applied = 0
+    n_identity_skipped = 0
     t0 = time.time()
 
     for x, y, len_x, len_y in loader:
@@ -120,15 +122,26 @@ def run_single_corruption_eval(
             corrupt_id_per_sample = torch.zeros((B,), dtype=torch.long, device=device)
             for b in range(B):
                 L = len_y_cpu[b]
-                hi = L - 1 - min_offset
+                # Fixed cohort: require t + (n_offsets - 1) < L so every offset
+                # 0..n_offsets-1 is scored for the SAME samples (no population
+                # drift across offsets). Equivalent to t in [1, L - n_offsets].
+                hi = L - 1 - (n_offsets - 1)
                 lo = 1
                 if hi < lo:
                     n_skipped_short += 1
                     continue
                 t = int(torch.randint(lo, hi + 1, (1,), generator=generator, device=device).item())
-                draw = int(torch.randint(0, pool_size, (1,), generator=generator, device=device).item())
+                # Exclude identity replacements: redraw until the replacement
+                # differs from the original character label[t] (= y_tgt[b, t]).
+                orig_id = int(y_tgt[b, t].item())
+                corrupt_id = orig_id
+                while corrupt_id == orig_id:
+                    draw = int(torch.randint(0, pool_size, (1,), generator=generator, device=device).item())
+                    corrupt_id = int(pool[draw].item())
+                    if corrupt_id == orig_id:
+                        n_identity_skipped += 1
                 t_per_sample[b] = t
-                corrupt_id_per_sample[b] = pool[draw]
+                corrupt_id_per_sample[b] = corrupt_id
 
             # Apply corruption: y_inp[b, t+1] holds label[t] in standard layout.
             for b in range(B):
@@ -176,8 +189,10 @@ def run_single_corruption_eval(
         "n_correct": n_correct,
         "n_total": n_total,
         "accuracy": accuracy,
+        "n_eligible": n_total[0] if n_offsets > 0 else 0,
         "n_samples_seen": n_seen,
         "n_corruptions_applied": n_corruptions_applied,
+        "n_identity_skipped": n_identity_skipped,
         "n_skipped_too_short": n_skipped_short,
         "n_per_sample": n_per_sample,
         "min_offset": min_offset,
