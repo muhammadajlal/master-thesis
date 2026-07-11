@@ -140,9 +140,11 @@ def run_perturbed_tf_eval(
         len_y_cpu = len_y.cpu().tolist()
         y_cpu = y.cpu()
         for b in range(B):
-            ids = arg[b]
-            preds.append(decode_ids(ids, chars, PAD_ID, BOS_ID, EOS_ID))
             L = int(len_y_cpu[b])
+            # Clamp to the valid target span (y1..yL + EOS slot); avoids padded-position
+            # insertions when EOS is missed (which worsens as p_replace grows).
+            ids = arg[b][:L + 1]
+            preds.append(decode_ids(ids, chars, PAD_ID, BOS_ID, EOS_ID))
             lab_ids = y_cpu[b, :L].tolist() if y.dim() == 2 else []
             labels.append(decode_ids(lab_ids, chars, PAD_ID, BOS_ID, EOS_ID))
         n_seen += B

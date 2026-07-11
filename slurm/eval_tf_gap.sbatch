@@ -5,9 +5,9 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH -t 02:00:00
-#SBATCH --array=0-39
+#SBATCH --array=0-79
 # ═══════════════════════════════════════════════════════════════════
-# Teacher-forcing vs free-running AR gap (4 cells × 2 datasets × 5 folds)
+# Teacher-forcing vs free-running AR gap (16 cells = 4 conditions × 4 datasets × 5 folds)
 # ═══════════════════════════════════════════════════════════════════
 # Submit:
 #   cd work/REWI_work

@@ -157,10 +157,13 @@ def run_tf_eval(model, loader, cfg, device, max_samples: int | None):
             # learns logits[t] -> y_tgt[t]); we take argmax across all output
             # positions and decode the resulting sequence as the "what the
             # model would write at every step given the right prefix" string.
-            ids = arg[b]
+            L = int(len_y_cpu[b])
+            # Clamp to the valid target span (positions predicting y1..yL plus the
+            # EOS slot); decode_ids still stops at an earlier EOS. Prevents missed-EOS
+            # argmaxes at padded positions from leaking in as batch-dependent insertions.
+            ids = arg[b][:L + 1]
             preds.append(decode_ids(ids, chars, PAD_ID, BOS_ID, EOS_ID))
 
-            L = int(len_y_cpu[b])
             if y.dim() == 2:
                 lab_ids = y_cpu[b, :L].tolist()
             else:

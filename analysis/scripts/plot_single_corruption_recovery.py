@@ -122,7 +122,7 @@ def main() -> None:
 
     # Plot 1x4 grid
     n_ds = len(DATASETS)
-    fig, axes = plt.subplots(1, n_ds, figsize=(3.6 * n_ds, 3.4),
+    fig, axes = plt.subplots(1, n_ds, figsize=(3.8 * n_ds, 3.8),
                              sharey=True)
     if n_ds == 1:
         axes = [axes]
@@ -141,22 +141,24 @@ def main() -> None:
                 means.append(m)
                 sems.append(s)
             ax.plot(offsets, [m * 100 for m in means],
-                    color=color, marker=marker, linewidth=2,
-                    markersize=6, label=model_label)
+                    color=color, marker=marker, linewidth=2.2,
+                    markersize=7, label=model_label)
             ax.fill_between(
                 offsets,
                 [(m - s) * 100 for m, s in zip(means, sems)],
                 [(m + s) * 100 for m, s in zip(means, sems)],
                 color=color, alpha=0.18, linewidth=0,
             )
-        ax.set_title(ds_label, fontsize=11)
-        ax.set_xlabel(r"Offset from corrupted position $t$", fontsize=10)
+        ax.set_title(ds_label, fontsize=14)
+        ax.set_xlabel(r"Offset from corrupted position $t$", fontsize=14)
         if col == 0:
             ax.set_ylabel(r"$\Pr$(predict label$[t{+}\delta]$ correctly) (%)",
-                          fontsize=10.5)
+                          fontsize=14)
+        ax.set_xticks(range(n_offsets_seen))
+        ax.tick_params(axis="both", labelsize=12)
         ax.grid(True, alpha=0.3)
         if col == n_ds - 1:
-            ax.legend(loc="lower right", fontsize=9)
+            ax.legend(loc="lower right", fontsize=12)
 
     fig.tight_layout()
     OUT_FIG.parent.mkdir(parents=True, exist_ok=True)
