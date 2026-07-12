@@ -80,7 +80,7 @@ def _require_exists(p: str | None, *, name: str) -> None:
 # ─────────────────────────── CLI ─────────────────────────── #
 
 def parse_args():
-    p = argparse.ArgumentParser(description="AR-only vs Hybrid encoder analysis")
+    p = argparse.ArgumentParser(description="HWRFormer vs hybrid HWRFormer encoder analysis")
     p.add_argument("--ar_ckpt", type=str, default=None, help="AR-only best checkpoint path")
     p.add_argument("--hyb_ckpt", type=str, default=None, help="Hybrid best checkpoint path")
     p.add_argument("--dataset", type=str, default=None, help="Dataset root (e.g., onhw_wi_word_rh)")
@@ -342,8 +342,8 @@ def plot_tsne_side_by_side(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 10), dpi=150)
 
     for ax, emb_part, chars, title in [
-        (ax1, emb_ar, c_ar, "AR-only Encoder"),
-        (ax2, emb_hyb, c_hyb, "Hybrid CTC-AR Encoder"),
+        (ax1, emb_ar, c_ar, "HWRFormer Encoder"),
+        (ax2, emb_hyb, c_hyb, "hybrid HWRFormer Encoder"),
     ]:
         colors = [char_to_color[c] for c in chars]
         ax.scatter(emb_part[:, 0], emb_part[:, 1], c=colors, s=1, alpha=0.4, rasterized=True)
@@ -768,8 +768,8 @@ def plot_cosine_similarity_comparison(
 
         im = None
         panels = [
-            (ax1, f_ar, c_ar, "AR-only"),
-            (ax2, f_hyb, c_hyb, "Hybrid"),
+            (ax1, f_ar, c_ar, "HWRFormer"),
+            (ax2, f_hyb, c_hyb, "hybrid HWRFormer"),
         ]
 
         for ax, f, chars, label in panels:
@@ -787,7 +787,9 @@ def plot_cosine_similarity_comparison(
 
             boundaries, seg_chars = _segments_from_char_labels(chars)
 
-            # Green boundary grid
+            # Uniformly assigned reference-character bin boundaries: the frame axis
+            # is divided into |label| equal parts (see encoder_features.py). These
+            # are NOT measured/CTC character alignments.
             for b in boundaries[1:-1]:
                 ax.axhline(b - 0.5, color="lime", linewidth=0.5, alpha=0.7)
                 ax.axvline(b - 0.5, color="lime", linewidth=0.5, alpha=0.7)
@@ -813,9 +815,13 @@ def plot_cosine_similarity_comparison(
             cbar.set_label("Cosine similarity", fontsize=13)
             cbar.ax.tick_params(labelsize=11)
 
-        # Suptitle removed: the per-panel titles ('AR-only — "<word>"' /
-        # 'Hybrid — "<word>"') already convey ground-truth and configuration;
-        # the suptitle was redundant in thesis figures.
+        # Per-panel titles already convey ground-truth and configuration. A single
+        # footnote documents that the green lines are uniformly assigned
+        # reference-character bins, not a measured alignment (audit F3).
+        fig.text(0.5, -0.02,
+                 "Green lines: uniformly assigned reference-character bins "
+                 "(|label| equal frame divisions), not a measured alignment.",
+                 ha="center", va="top", fontsize=10, color="0.35")
 
         path = os.path.join(save_dir, f"cosine_sim_sample{sample_id:04d}_{word_ar[:10]}.pdf")
         fig.savefig(path, bbox_inches="tight")
@@ -1135,8 +1141,8 @@ def plot_attention_comparison(
         )
 
         for ax, M, tgt, name in [
-            (ax1, a_ar["attn"], tgt_ar, "AR-only"),
-            (ax2, a_hyb["attn"], tgt_hyb, "Hybrid"),
+            (ax1, a_ar["attn"], tgt_ar, "HWRFormer"),
+            (ax2, a_hyb["attn"], tgt_hyb, "hybrid HWRFormer"),
         ]:
             if M is None:
                 ax.set_axis_off()
@@ -1324,11 +1330,11 @@ def main():
             feats_ar = extract_encoder_features(model_ar, loader, args.device, categories, args.max_samples)
 
             plot_tsne(feats_ar['features'], feats_ar['char_labels'],
-                      "AR-only Encoder Features (t-SNE)",
+                      "HWRFormer Encoder Features (t-SNE)",
                       os.path.join(args.outdir, "tsne_ar_only.pdf"),
                       perplexity=args.perplexity, seed=args.seed)
             plot_pca(feats_ar['features'], feats_ar['char_labels'],
-                     "AR-only Encoder Features (PCA)",
+                     "HWRFormer Encoder Features (PCA)",
                      os.path.join(args.outdir, "pca_ar_only.pdf"),
                      seed=args.seed)
             del model_ar
@@ -1350,11 +1356,11 @@ def main():
             feats_hyb = extract_encoder_features(model_hyb, loader, args.device, categories, args.max_samples)
 
             plot_tsne(feats_hyb['features'], feats_hyb['char_labels'],
-                      "Hybrid CTC-AR Encoder Features (t-SNE)",
+                      "hybrid HWRFormer Encoder Features (t-SNE)",
                       os.path.join(args.outdir, "tsne_hybrid.pdf"),
                       perplexity=args.perplexity, seed=args.seed)
             plot_pca(feats_hyb['features'], feats_hyb['char_labels'],
-                     "Hybrid CTC-AR Encoder Features (PCA)",
+                     "hybrid HWRFormer Encoder Features (PCA)",
                      os.path.join(args.outdir, "pca_hybrid.pdf"),
                      seed=args.seed)
 
@@ -1388,11 +1394,11 @@ def main():
             logger.info("Re-rendering PCAs with shared limits x=({:.1f},{:.1f}) y=({:.1f},{:.1f})",
                         *shared_xlim, *shared_ylim)
             plot_pca(feats_ar['features'], feats_ar['char_labels'],
-                     "AR-only Encoder Features (PCA)",
+                     "HWRFormer Encoder Features (PCA)",
                      os.path.join(args.outdir, "pca_ar_only.pdf"),
                      seed=args.seed, xlim=shared_xlim, ylim=shared_ylim)
             plot_pca(feats_hyb['features'], feats_hyb['char_labels'],
-                     "Hybrid CTC-AR Encoder Features (PCA)",
+                     "hybrid HWRFormer Encoder Features (PCA)",
                      os.path.join(args.outdir, "pca_hybrid.pdf"),
                      seed=args.seed, xlim=shared_xlim, ylim=shared_ylim)
 
