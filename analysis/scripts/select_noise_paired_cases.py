@@ -27,8 +27,9 @@ cell underlines pred[j] for a substitution (op=replace) and inserts a
 see that label[i] was missing in the prediction.
 
 Outputs:
-    thesis/tables/noise_paired_examples.tex   (\\input'd from chapter)
-    analysis/noise_paired_cases.csv           (audit trail)
+    thesis/tables/noise_trajectory_examples.tex   (\\input'd from chapter)
+    analysis/noise_trajectory_cases.csv            (audit trail; gitignored *.csv,
+                                                    regenerated deterministically here)
 
 Run from work/REWI_work:
     python analysis/scripts/select_noise_paired_cases.py
@@ -230,15 +231,15 @@ def main() -> None:
     case2 = pick_extremum(sent, smallest=False)  # largest degradation
     case3 = pick_median_improvement(sent)        # median improvement
 
-    # Reader-facing labels (col 1 + col 2 in the rendered table). The short
-    # qualitative outcome in col 6 is fixed per selection role: largest
-    # improvement under noise rescues an AR cascade, largest degradation
-    # breaks an exact match, median improvement shows the typical pattern
-    # of both models drifting with the noise variant drifting later.
+    # Reader-facing labels (col 1 + col 2 in the rendered table). The col-6
+    # outcome describes the paired FINAL greedy outputs only -- these are
+    # free-running results, not decoding trajectories, so no cascade/rescue
+    # wording is used (the "trajectory" framing is reserved for the
+    # single-corruption influence profile).
     cases = [
-        ("Case 1", case1, "Largest improvement", "Noise rescues an AR cascade."),
-        ("Case 2", case2, "Largest degradation", "Noise breaks a perfect output."),
-        ("Case 3", case3, "Typical improvement", "Both drift; noise drifts later and ends tighter."),
+        ("Case 1", case1, "Largest improvement", "Largest paired edit-distance reduction under noise."),
+        ("Case 2", case2, "Largest degradation", "Largest paired edit-distance increase under noise."),
+        ("Case 3", case3, "Typical improvement", "Typical paired improvement; both outputs remain imperfect."),
     ]
 
     # Audit CSV. Includes the first edit operation for both models with
@@ -311,7 +312,7 @@ def main() -> None:
         # the prediction edits. The pp scaling in tab:cascade-noise-mcnemar
         # applies only to the per-fold MEAN.
         delta = float(row["delta_e_norm"])
-        role_cell = f"{role} ($\\Delta\\tilde{{e}}={delta:+.2f}$)"
+        role_cell = f"{role} ($\\Delta e={delta:+.2f}$)"
 
         table_rows.append({
             "tag": tag,
@@ -331,8 +332,8 @@ def main() -> None:
         r"\caption{Paired private-sentence examples comparing HWRFormer and "
         r"HWRFormer + noise injection. Cases are selected by the paired "
         r"change in length-normalized edit distance, "
-        r"$\Delta\tilde{e} = \tilde{e}_{\mathrm{noise}} - "
-        r"\tilde{e}_{\mathrm{HWRFormer}}$, where negative values favor the "
+        r"$\Delta e = e_{\mathrm{noise}} - "
+        r"e_{\mathrm{HWRFormer}}$, where negative values favor the "
         r"noise-injection model. The three rows show the largest "
         r"improvement, largest degradation, and a typical improvement case. "
         r"Underlining marks the first aligned edit in each output. Edit "
