@@ -50,5 +50,6 @@ $PY_BIN analysis/scripts/compare_ar_hybrid.py \
   --difficulty_mode difficulty \
   --difficulty_csv "$DIFFICULTY_CSV" \
   --difficulty_task "AR-only" \
+  --difficulty_split wi \
   --device    cuda \
   --max_samples 1000
