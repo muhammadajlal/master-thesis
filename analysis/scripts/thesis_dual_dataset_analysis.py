@@ -1,27 +1,35 @@
 #!/usr/bin/env python3
 """
-Dual-dataset analysis for the thesis: OnHW (AR-only vs Hybrid) and Stabilo (word + sentence).
+Dual-dataset descriptive analysis for the thesis.
 
-Generates all missing figures and tables:
-  1. Levenshtein distance distribution (histogram + CDF)
-  2. Normalized LD distribution
-  3. Per-character error rate bar charts
-  4. Length dependence (Pearson correlations)
-  5. Collision analysis (label-frequency, writer-stratified)
-  6. Representative error examples (p50/p90/p99)
-  7. Fold-wise summary tables
-  8. Overall summary tables
+Reports how HWRFormer recognition errors are distributed across the public
+OnHW word benchmark and the private datasets. OnHW is always reported per
+writer split -- writer-independent (WI) and writer-dependent (WD) are NEVER
+pooled -- and the private data by target type (word, sentence).
 
-All outputs saved to thesis/figures/ and printed as LaTeX tables.
+Model naming (fixed across the thesis): HWRFormer is the complete end-to-end
+recognizer (shared CNN encoder + AR-transformer decoder). The decoder size sets
+the name:
+  * HWRFormer   = CNN encoder + ar_transformer_xs decoder (primary model).
+  * HWRFormer-L = CNN encoder + ar_transformer_s  decoder (scaled model).
+"AR-only" and "hybrid" are training conditions of the same recognizer.
+
+This script produces ONLY descriptive artifacts (distributions, per-character
+rates, within-task length correlations, collision rates, representative
+examples). It makes no causal or cross-task-comparability claim; the paired
+inferential statistics (McNemar, fold/writer uncertainty, paired NED effect)
+live in ``hybrid_paired_analysis.py``.
+
+Outputs: figures under thesis/figures/<variant>/ and tables/CSVs under
+analysis/tables/thesis_dual_dataset_<variant>/.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
@@ -31,53 +39,40 @@ import matplotlib.pyplot as plt
 from scipy import stats as scipy_stats
 
 # ============================================================
-# Paths (variant-aware: HWRFormer xs = baseline, s = scaled)
+# Paths (variant-aware: HWRFormer = xs, HWRFormer-L = s)
 # ============================================================
 WORK_DIR = Path(__file__).resolve().parent.parent.parent  # REWI_work
 THESIS_DIR = WORK_DIR.parent.parent / "thesis"
 
-# Per-variant specifications: each variant uses a different decoder arch and
-# different result groups; the input CSVs follow the same naming convention
-# (_xs suffix for baseline, no suffix for the original scaled run).
+# Each variant selects a decoder arch and its result groups. Input CSVs follow
+# the same naming convention (``_xs`` suffix for HWRFormer, no suffix for the
+# scaled HWRFormer-L run).
 VARIANT_SPECS = {
-    "xs": {
+    "xs": {  # HWRFormer
         "arch_de": "ar_transformer_xs",
-        "ar_group": "Baseline-AR-XS-blconv_b",
-        "hyb_group": "train_element_word_hybrid_01_xs_onhw_wi",
         "csv_suffix": "_xs",
     },
-    "s": {
+    "s": {   # HWRFormer-L
         "arch_de": "ar_transformer_s",
-        "ar_group": "Baseline-AR",
-        "hyb_group": "Baseline-Hybrid/train_element_word_hybrid_06",
         "csv_suffix": "",
     },
 }
+
+# Expected per-(condition, split) paired-sample counts for OnHW; the loader
+# asserts these so WI/WD can never be silently pooled or truncated.
+ONHW_EXPECTED = {("AR-only", "wi"): 25199, ("AR-only", "wd"): 25193,
+                 ("Hybrid (AR Decoding)", "wi"): 25199, ("Hybrid (AR Decoding)", "wd"): 25193}
 
 
 def _resolve_paths(variant: str):
     spec = VARIANT_SPECS[variant]
     suffix = spec["csv_suffix"]
-    arch = spec["arch_de"]
     return {
         "fig_dir": THESIS_DIR / "figures" / variant,
         "table_dir": WORK_DIR / "analysis" / "tables" / f"thesis_dual_dataset_{variant}",
         "onhw_csv": WORK_DIR / "analysis" / f"quant_all_val_predictions_ar_vs_hybrid{suffix}.csv",
         "stabilo_csv": WORK_DIR / "analysis" / f"quant_all_val_predictions_new{suffix}.csv",
-        "onhw_ar_export_pat": str(WORK_DIR.parent.parent / f"results/hwr2/{spec['ar_group']}/{arch}__onhw_wi_word_rh/fold_{{fold}}/exports/val_full_fold{{fold}}_epoch0.json"),
-        "onhw_hyb_export_pat": str(WORK_DIR.parent.parent / f"results/hwr2/{spec['hyb_group']}/{arch}__onhw_wi_word_rh/fold_{{fold}}/exports/val_full_fold{{fold}}_epoch0_ar.json"),
     }
-
-
-# Module-level globals are rebound inside main() once the variant is known.
-# They default to xs (the new primary baseline configuration).
-_default_paths = _resolve_paths("xs")
-FIG_DIR = _default_paths["fig_dir"]
-TABLE_DIR = _default_paths["table_dir"]
-ONHW_CSV = _default_paths["onhw_csv"]
-STABILO_CSV = _default_paths["stabilo_csv"]
-ONHW_AR_EXPORT_PAT = _default_paths["onhw_ar_export_pat"]
-ONHW_HYB_EXPORT_PAT = _default_paths["onhw_hyb_export_pat"]
 
 
 # ============================================================
@@ -103,25 +98,13 @@ def levenshtein(a: str, b: str) -> int:
 
 def load_csv(path: Path, sep: str = ";") -> pd.DataFrame:
     df = pd.read_csv(path, sep=sep)
-    # Normalize column names
-    col_map = {c: c.strip().lower() for c in df.columns}
-    df = df.rename(columns=col_map)
-    # Ensure strings
+    df = df.rename(columns={c: c.strip().lower() for c in df.columns})
     df["prediction"] = df["prediction"].fillna("").astype(str)
     df["label"] = df["label"].fillna("").astype(str)
-    # Compute derived columns
     df["label_chars"] = df["label"].str.len()
     df["lev_norm"] = df["levenshtein_distance"] / df["label_chars"].clip(lower=1)
     df["exact"] = (df["levenshtein_distance"] == 0).astype(int)
     return df
-
-
-def load_export_json(path: str) -> Tuple[List[str], List[str]]:
-    with open(path) as f:
-        d = json.load(f)
-    preds = [str(p) if p is not None else "" for p in d["predictions"]]
-    labels = [str(l) if l is not None else "" for l in d["labels"]]
-    return preds, labels
 
 
 # ============================================================
@@ -192,7 +175,7 @@ def plot_ld_distribution(
     """Plot histogram + CDF for multiple datasets on same axes."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5), dpi=150)
 
-    colors = ["C0", "C1", "C2", "C3"]
+    colors = ["C0", "C1", "C2", "C3", "C4", "C5"]
     x_label = "Normalized Levenshtein Distance ($d / |y|$)" if normalized else "Levenshtein Distance"
 
     datasets = {k: v for k, v in datasets.items() if np.asarray(v).size > 0}
@@ -236,12 +219,11 @@ def plot_ld_distribution(
 # 3. Per-Character Error Rate
 # ============================================================
 def compute_per_char_error_simple(preds: List[str], labels: List[str]) -> Dict[str, Dict]:
-    """Compute per-character error rates without jiwer dependency."""
+    """Per-character error rates via jiwer alignment (fallback: proportional)."""
     try:
         import jiwer
         stats = {}
-        cats = sorted(set("".join(labels)))
-        cats = [c for c in cats if c.strip()]
+        cats = [c for c in sorted(set("".join(labels))) if c.strip()]
         for c in cats:
             stats[c] = {"total": 0, "correct": 0, "substituted": 0, "deleted": 0}
 
@@ -273,16 +255,14 @@ def compute_per_char_error_simple(preds: List[str], labels: List[str]) -> Dict[s
         return stats
 
     except ImportError:
-        # Fallback: use alignment-free character counting
         print("  Warning: jiwer not available, using fallback per-char error")
-        char_counts = {}
-        char_errors = {}
+        char_counts: Dict[str, int] = {}
+        char_errors: Dict[str, float] = {}
         for pred, label in zip(preds, labels):
             for c in label:
                 char_counts[c] = char_counts.get(c, 0) + 1
             d = levenshtein(pred, label)
             if d > 0:
-                # Distribute errors proportionally across label chars
                 for c in set(label):
                     n_c = label.count(c)
                     char_errors[c] = char_errors.get(c, 0) + d * n_c / max(1, len(label))
@@ -294,11 +274,7 @@ def compute_per_char_error_simple(preds: List[str], labels: List[str]) -> Dict[s
         return stats
 
 
-def plot_per_char_error(
-    datasets: Dict[str, Dict[str, Dict]],
-    save_path: Path,
-    title: str,
-):
+def plot_per_char_error(datasets: Dict[str, Dict[str, Dict]], save_path: Path, title: str):
     """Bar chart of per-character error rates for multiple datasets."""
     all_chars = sorted(set().union(*(set(s.keys()) for s in datasets.values())))
     all_chars = [c for c in all_chars if c.strip()]
@@ -327,9 +303,15 @@ def plot_per_char_error(
 
 
 # ============================================================
-# 4. Length Dependence
+# 4. Length Dependence (within-task, descriptive)
 # ============================================================
 def compute_length_dependence(df: pd.DataFrame) -> pd.DataFrame:
+    """Within-task Pearson correlation of error with target length.
+
+    This is a within-task near-invariance check for the normalized metric e;
+    it does NOT license any cross-task comparison (target length, vocabulary,
+    and character frequencies all differ between tasks).
+    """
     rows = []
     for name, g in df.groupby("task"):
         y_len = g["label_chars"].to_numpy().astype(float)
@@ -357,27 +339,33 @@ def compute_length_dependence(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================
-# 5. Collision Analysis
+# 5. Collision Analysis (descriptive)
 # ============================================================
 def compute_collisions(df: pd.DataFrame, task_name: str) -> Dict:
-    """Find collisions: incorrect predictions matching other ground-truth labels."""
+    """Rate at which incorrect predictions coincide with some ground-truth label.
+
+    Reported descriptively. ``corpus_median_label_freq`` gives the base rate of
+    label frequencies so the collided-prediction frequency can be read against
+    it -- a high collision rate primarily reflects vocabulary-constrained
+    decoder outputs, not a tested frequency-bias mechanism.
+    """
     errors = df[df["levenshtein_distance"] > 0].copy()
     gt_set = set(df["label"].unique())
 
-    # Find collisions
     errors["is_collision"] = errors["prediction"].isin(gt_set)
     collisions = errors[errors["is_collision"]].copy()
 
     n_errors = len(errors)
     n_collisions = len(collisions)
 
-    # Label frequency of collided predictions
     gt_counts = df["label"].value_counts().to_dict()
     collisions["gt_label_count"] = collisions["prediction"].map(gt_counts).fillna(0).astype(int)
 
-    # Summary stats
     uid_weighted = collisions.drop_duplicates(subset=["fold", "sample_index"])
     gt_freq = uid_weighted["gt_label_count"]
+
+    # Base rate: median frequency of a label across the corpus (per-sample rows).
+    corpus_label_freq = df["label"].map(gt_counts)
 
     result = {
         "task": task_name,
@@ -386,6 +374,7 @@ def compute_collisions(df: pd.DataFrame, task_name: str) -> Dict:
         "n_collisions_uid": len(uid_weighted),
         "n_collisions_event": n_collisions,
         "collision_rate": n_collisions / max(1, n_errors),
+        "corpus_median_label_freq": float(corpus_label_freq.median()),
     }
 
     if len(gt_freq) > 0:
@@ -395,10 +384,7 @@ def compute_collisions(df: pd.DataFrame, task_name: str) -> Dict:
             "gt_freq_p95": float(gt_freq.quantile(0.95)),
         })
 
-    # Top collided predictions
-    top_collided = uid_weighted["prediction"].value_counts().head(10)
-    result["top_collided"] = top_collided.to_dict()
-
+    result["top_collided"] = uid_weighted["prediction"].value_counts().head(10).to_dict()
     return result
 
 
@@ -406,7 +392,11 @@ def compute_collisions(df: pd.DataFrame, task_name: str) -> Dict:
 # 6. Representative Examples
 # ============================================================
 def find_representative_examples(df: pd.DataFrame, task_name: str, n_per_quantile: int = 2) -> pd.DataFrame:
-    """Find examples nearest to p50, p90, p99 of nonzero error distribution."""
+    """Examples nearest p50/p90/p99 of the nonzero error distribution.
+
+    Emits explicit ``Ground Truth`` and ``Prediction`` columns; any arrow prose
+    must be written as ``Ground Truth -> Prediction`` to match this ordering.
+    """
     errors = df[df["levenshtein_distance"] > 0].copy()
     if len(errors) == 0:
         return pd.DataFrame()
@@ -426,8 +416,8 @@ def find_representative_examples(df: pd.DataFrame, task_name: str, n_per_quantil
                 "Idx": int(row["sample_index"]),
                 "d": int(row["levenshtein_distance"]),
                 "e": round(row["lev_norm"], 2),
-                "Prediction": row["prediction"],
                 "Ground Truth": row["label"],
+                "Prediction": row["prediction"],
             })
     return pd.DataFrame(rows)
 
@@ -436,354 +426,241 @@ def find_representative_examples(df: pd.DataFrame, task_name: str, n_per_quantil
 # Main
 # ============================================================
 def _parse_args():
-    p = argparse.ArgumentParser(
-        description="Dual-dataset analysis for the thesis (variant-aware)."
-    )
-    p.add_argument(
-        "--variant",
-        choices=sorted(VARIANT_SPECS.keys()),
-        default="xs",
-        help="HWRFormer variant. 'xs' = baseline (ar_transformer_xs, ~4.6 M); "
-             "'s' = scaled (ar_transformer_s, ~6.9 M). Default: xs.",
-    )
-    p.add_argument("--onhw-csv", type=Path, default=None,
-                   help="Override path to the OnHW predictions CSV.")
-    p.add_argument("--stabilo-csv", type=Path, default=None,
-                   help="Override path to the Stabilo predictions CSV.")
+    p = argparse.ArgumentParser(description="Dual-dataset descriptive analysis (variant-aware).")
+    p.add_argument("--variant", choices=sorted(VARIANT_SPECS.keys()), default="xs",
+                   help="'xs' = HWRFormer (ar_transformer_xs); 's' = HWRFormer-L (ar_transformer_s).")
+    p.add_argument("--onhw-csv", type=Path, default=None, help="Override OnHW predictions CSV.")
+    p.add_argument("--stabilo-csv", type=Path, default=None, help="Override Stabilo predictions CSV.")
     return p.parse_args()
 
 
-def main():
-    global FIG_DIR, TABLE_DIR, ONHW_CSV, STABILO_CSV
-    global ONHW_AR_EXPORT_PAT, ONHW_HYB_EXPORT_PAT
+def _split_onhw(onhw: pd.DataFrame, condition: str, split: str) -> pd.DataFrame:
+    """Return the OnHW rows for one (condition, writer-split), asserting the count."""
+    if "split" not in onhw.columns:
+        sys.exit("OnHW CSV lacks a 'split' column; rebuild it with _build_xs_aggregated_csv.py "
+                 "(WI and WD must be distinguishable, never pooled).")
+    sub = onhw[(onhw["task"] == condition) & (onhw["split"] == split)].copy()
+    exp = ONHW_EXPECTED.get((condition, split))
+    if exp is not None and len(sub) != exp:
+        sys.exit(f"OnHW {condition}/{split}: got {len(sub)} rows, expected {exp} (WI/WD pooling?).")
+    return sub
 
+
+def main():
     args = _parse_args()
     paths = _resolve_paths(args.variant)
-    FIG_DIR = paths["fig_dir"]
-    TABLE_DIR = paths["table_dir"]
-    ONHW_CSV = Path(args.onhw_csv) if args.onhw_csv else paths["onhw_csv"]
-    STABILO_CSV = Path(args.stabilo_csv) if args.stabilo_csv else paths["stabilo_csv"]
-    ONHW_AR_EXPORT_PAT = paths["onhw_ar_export_pat"]
-    ONHW_HYB_EXPORT_PAT = paths["onhw_hyb_export_pat"]
+    fig_dir = paths["fig_dir"]
+    table_dir = paths["table_dir"]
+    onhw_csv = Path(args.onhw_csv) if args.onhw_csv else paths["onhw_csv"]
+    stabilo_csv = Path(args.stabilo_csv) if args.stabilo_csv else paths["stabilo_csv"]
 
-    print(f"=== Variant: {args.variant} ({VARIANT_SPECS[args.variant]['arch_de']}) ===")
-    print(f"  FIG_DIR:    {FIG_DIR}")
-    print(f"  TABLE_DIR:  {TABLE_DIR}")
-    print(f"  ONHW_CSV:   {ONHW_CSV}   exists={ONHW_CSV.exists()}")
-    print(f"  STABILO_CSV:{STABILO_CSV}   exists={STABILO_CSV.exists()}")
-    print()
+    print(f"=== Variant: {args.variant} "
+          f"({'HWRFormer' if args.variant == 'xs' else 'HWRFormer-L'}, "
+          f"{VARIANT_SPECS[args.variant]['arch_de']}) ===")
+    print(f"  ONHW_CSV:    {onhw_csv}  exists={onhw_csv.exists()}")
+    print(f"  STABILO_CSV: {stabilo_csv}  exists={stabilo_csv.exists()}\n")
 
-    missing = [(p, name) for p, name in [(ONHW_CSV, "ONHW_CSV"), (STABILO_CSV, "STABILO_CSV")] if not p.exists()]
+    missing = [(p, n) for p, n in [(onhw_csv, "ONHW_CSV"), (stabilo_csv, "STABILO_CSV")] if not p.exists()]
     if missing:
-        msg = ["ERROR: input CSV(s) not found:"]
-        for p, name in missing:
-            msg.append(f"  {name}: {p}")
-        msg.append("")
-        msg.append(
-            f"  For --variant={args.variant}, the predictions CSV(s) must be "
-            f"generated from validation exports first. Run the predictions-"
-            f"aggregator script after the val export eval pass (SLURM job "
-            f"export_xs_val_full or equivalent) finishes."
-        )
-        sys.exit("\n".join(msg))
+        sys.exit("ERROR: input CSV(s) not found:\n" + "\n".join(f"  {n}: {p}" for p, n in missing))
 
-    os.makedirs(FIG_DIR, exist_ok=True)
-    os.makedirs(TABLE_DIR, exist_ok=True)
+    os.makedirs(fig_dir, exist_ok=True)
+    os.makedirs(table_dir, exist_ok=True)
 
     # ------------------------------------------------------------------
-    # Load data
+    # Load data. OnHW is split per writer condition (WI/WD), never pooled.
     # ------------------------------------------------------------------
-    print("Loading OnHW data...")
-    onhw = load_csv(ONHW_CSV)
-    onhw_ar = onhw[onhw["task"] == "AR-only"].copy()
-    onhw_hyb = onhw[onhw["task"] == "Hybrid (AR Decoding)"].copy()
+    print("Loading OnHW data (per writer split)...")
+    onhw = load_csv(onhw_csv)
+    onhw_ar_wi = _split_onhw(onhw, "AR-only", "wi")
+    onhw_ar_wd = _split_onhw(onhw, "AR-only", "wd")
+    onhw_hyb_wi = _split_onhw(onhw, "Hybrid (AR Decoding)", "wi")
+    onhw_hyb_wd = _split_onhw(onhw, "Hybrid (AR Decoding)", "wd")
 
     print("Loading Stabilo data...")
-    stabilo = load_csv(STABILO_CSV)
+    stabilo = load_csv(stabilo_csv)
     stabilo_word = stabilo[stabilo["task"] == "word"].copy()
     stabilo_sent = stabilo[stabilo["task"] == "sent"].copy()
 
-    print(f"  OnHW AR-only: {len(onhw_ar)}, Hybrid: {len(onhw_hyb)}")
-    print(f"  Stabilo Word: {len(stabilo_word)}, Sent: {len(stabilo_sent)}")
+    # Canonical labelled frames. OnHW appears per (writer split, training
+    # condition); nothing is pooled across WI and WD.
+    frames = [
+        ("OnHW WI (HWRFormer)", onhw_ar_wi),
+        ("OnHW WI (hybrid)", onhw_hyb_wi),
+        ("OnHW WD (HWRFormer)", onhw_ar_wd),
+        ("OnHW WD (hybrid)", onhw_hyb_wd),
+        ("Private word", stabilo_word),
+        ("Private sent.", stabilo_sent),
+    ]
+    for label, sub in frames:
+        print(f"  {label:22s} N={len(sub)}")
+
+    # One combined frame with the split-aware task labels above.
+    labeled = []
+    for label, sub in frames:
+        s = sub.copy()
+        s["task"] = label
+        labeled.append(s)
+    combined = pd.concat(labeled, ignore_index=True)
 
     # ------------------------------------------------------------------
-    # 1. Overall Summary Tables
+    # 1. Overall + fold-wise summary (per-split)
     # ------------------------------------------------------------------
-    print("\n=== Overall Summary Tables ===")
-
-    # OnHW: AR-only vs Hybrid
-    onhw_summary = compute_summary(onhw, group_col="task")
-    print("\nOnHW Summary:")
-    print(onhw_summary.to_string(index=False))
-    onhw_summary.to_csv(TABLE_DIR / "onhw_overall_summary.csv", index=False)
-
-    # Stabilo: word vs sent
-    stabilo_summary = compute_summary(stabilo, group_col="task")
-    print("\nStabilo Summary:")
-    print(stabilo_summary.to_string(index=False))
-    stabilo_summary.to_csv(TABLE_DIR / "stabilo_overall_summary.csv", index=False)
-
-    # Combined dual-dataset table
-    # For dual-dataset: use AR-only OnHW and Stabilo word (both word-level, comparable)
-    combined = pd.DataFrame()
-    onhw_ar_copy = onhw_ar.copy()
-    onhw_ar_copy["task"] = "OnHW (AR-only)"
-    onhw_hyb_copy = onhw_hyb.copy()
-    onhw_hyb_copy["task"] = "OnHW (Hybrid)"
-    stabilo_word_copy = stabilo_word.copy()
-    stabilo_word_copy["task"] = "Stabilo Word"
-    stabilo_sent_copy = stabilo_sent.copy()
-    stabilo_sent_copy["task"] = "Stabilo Sent"
-    combined = pd.concat([onhw_ar_copy, onhw_hyb_copy, stabilo_word_copy, stabilo_sent_copy])
+    print("\n=== Overall Summary (per split) ===")
     combined_summary = compute_summary(combined, group_col="task")
-    print("\nCombined Summary:")
     print(combined_summary.to_string(index=False))
-    combined_summary.to_csv(TABLE_DIR / "combined_overall_summary.csv", index=False)
+    combined_summary.to_csv(table_dir / "combined_overall_summary.csv", index=False)
 
-    # ------------------------------------------------------------------
-    # 2. Fold-Wise Summary
-    # ------------------------------------------------------------------
     print("\n=== Fold-Wise Summary ===")
-    foldwise_parts = []
-    for name, sub in [("OnHW (AR-only)", onhw_ar), ("OnHW (Hybrid)", onhw_hyb),
-                       ("Stabilo Word", stabilo_word), ("Stabilo Sent", stabilo_sent)]:
-        fw = compute_foldwise(sub, name)
-        foldwise_parts.append(fw)
-    foldwise = pd.concat(foldwise_parts, ignore_index=True)
-    print(foldwise.to_string(index=False))
-    foldwise.to_csv(TABLE_DIR / "combined_foldwise_summary.csv", index=False)
+    foldwise = pd.concat([compute_foldwise(sub, label) for label, sub in frames], ignore_index=True)
+    foldwise.to_csv(table_dir / "combined_foldwise_summary.csv", index=False)
 
     # ------------------------------------------------------------------
-    # 3. LD Distribution Figures
+    # 2. LD distribution figures (descriptive, per split)
     # ------------------------------------------------------------------
     print("\n=== LD Distribution Figures ===")
-
-    # OnHW: AR vs Hybrid
     plot_ld_distribution(
-        {"AR-only": onhw_ar["levenshtein_distance"].to_numpy(),
-         "Hybrid": onhw_hyb["levenshtein_distance"].to_numpy()},
-        FIG_DIR / "ld_distribution_onhw.pdf",
-        "OnHW Word-Level: Levenshtein Distance Distribution",
-        normalized=False,
-    )
-    plot_ld_distribution(
-        {"AR-only": onhw_ar["lev_norm"].to_numpy(),
-         "Hybrid": onhw_hyb["lev_norm"].to_numpy()},
-        FIG_DIR / "ld_distribution_norm_onhw.pdf",
-        "OnHW Word-Level: Normalized LD Distribution",
-        normalized=True,
-    )
-
-    # Stabilo: Word vs Sent
+        {"HWRFormer": onhw_ar_wi["lev_norm"].to_numpy(),
+         "hybrid": onhw_hyb_wi["lev_norm"].to_numpy()},
+        fig_dir / "ld_distribution_norm_onhw_wi.pdf",
+        "OnHW WI Word: Normalized LD Distribution", normalized=True)
     plot_ld_distribution(
         {"Word": stabilo_word["lev_norm"].to_numpy(),
          "Sentence": stabilo_sent["lev_norm"].to_numpy()},
-        FIG_DIR / "ld_distribution_norm_stabilo.pdf",
-        "Stabilo: Normalized LD Distribution",
-        normalized=True,
-    )
-
-    # Cross-dataset comparison (word-level only, normalized)
+        fig_dir / "ld_distribution_norm_stabilo.pdf",
+        "Private: Normalized LD Distribution", normalized=True)
     plot_ld_distribution(
-        {"OnHW AR-only": onhw_ar["lev_norm"].to_numpy(),
-         "OnHW Hybrid": onhw_hyb["lev_norm"].to_numpy(),
-         "Private Word": stabilo_word["lev_norm"].to_numpy(),
-         "Private Sent.": stabilo_sent["lev_norm"].to_numpy()},
-        FIG_DIR / "ld_distribution_norm_cross_dataset.pdf",
-        "Cross-Dataset: Normalized LD Distribution",
-        normalized=True,
-    )
+        {label: sub["lev_norm"].to_numpy() for label, sub in frames},
+        fig_dir / "ld_distribution_norm_cross_dataset.pdf",
+        "Cross-Dataset (descriptive): Normalized LD Distribution", normalized=True)
 
     # ------------------------------------------------------------------
-    # 4. Per-Character Error Rate
+    # 3. Per-character error rate (OnHW WI AR vs hybrid; private word vs sent)
     # ------------------------------------------------------------------
     print("\n=== Per-Character Error Rate ===")
-
-    onhw_ar_preds = onhw_ar["prediction"].tolist()
-    onhw_ar_labels = onhw_ar["label"].tolist()
-    onhw_hyb_preds = onhw_hyb["prediction"].tolist()
-    onhw_hyb_labels = onhw_hyb["label"].tolist()
-
-    stats_ar = compute_per_char_error_simple(onhw_ar_preds, onhw_ar_labels)
-    stats_hyb = compute_per_char_error_simple(onhw_hyb_preds, onhw_hyb_labels)
-
     plot_per_char_error(
-        {"AR-only": stats_ar, "Hybrid": stats_hyb},
-        FIG_DIR / "per_char_error_onhw.pdf",
-        "OnHW Word-Level: Per-Character Error Rate (AR-only vs Hybrid)",
-    )
-
-    # Stabilo word
-    stab_word_stats = compute_per_char_error_simple(
-        stabilo_word["prediction"].tolist(), stabilo_word["label"].tolist()
-    )
-    # Stabilo sent
-    stab_sent_stats = compute_per_char_error_simple(
-        stabilo_sent["prediction"].tolist(), stabilo_sent["label"].tolist()
-    )
+        {"HWRFormer": compute_per_char_error_simple(onhw_ar_wi["prediction"].tolist(),
+                                                    onhw_ar_wi["label"].tolist()),
+         "hybrid": compute_per_char_error_simple(onhw_hyb_wi["prediction"].tolist(),
+                                                 onhw_hyb_wi["label"].tolist())},
+        fig_dir / "per_char_error_onhw_wi.pdf",
+        "OnHW WI Word: Per-Character Error Rate (HWRFormer vs hybrid)")
     plot_per_char_error(
-        {"Stabilo Word": stab_word_stats, "Stabilo Sent": stab_sent_stats},
-        FIG_DIR / "per_char_error_stabilo.pdf",
-        "Stabilo: Per-Character Error Rate (Word vs Sentence)",
-    )
+        {"Private word": compute_per_char_error_simple(stabilo_word["prediction"].tolist(),
+                                                       stabilo_word["label"].tolist()),
+         "Private sent.": compute_per_char_error_simple(stabilo_sent["prediction"].tolist(),
+                                                        stabilo_sent["label"].tolist())},
+        fig_dir / "per_char_error_stabilo.pdf",
+        "Private: Per-Character Error Rate (word vs sentence)")
 
     # ------------------------------------------------------------------
-    # 5. Length Dependence
+    # 4. Length dependence (within-task) + 5. Collisions + 6. Examples
     # ------------------------------------------------------------------
-    print("\n=== Length Dependence ===")
+    print("\n=== Length Dependence (within-task) ===")
     len_dep = compute_length_dependence(combined)
     print(len_dep.to_string(index=False))
-    len_dep.to_csv(TABLE_DIR / "length_dependence.csv", index=False)
+    len_dep.to_csv(table_dir / "length_dependence.csv", index=False)
 
-    # ------------------------------------------------------------------
-    # 6. Collision Analysis
-    # ------------------------------------------------------------------
-    print("\n=== Collision Analysis ===")
-    collision_results = []
-    for name, sub in [("OnHW (AR-only)", onhw_ar), ("OnHW (Hybrid)", onhw_hyb),
-                       ("Stabilo Word", stabilo_word), ("Stabilo Sent", stabilo_sent)]:
-        result = compute_collisions(sub, name)
-        collision_results.append(result)
-        print(f"\n{name}:")
-        print(f"  Total: {result['n_total']}, Errors: {result['n_errors']}, "
-              f"Collisions (UID): {result['n_collisions_uid']}, "
-              f"Collision rate: {result['collision_rate']:.3f}")
-        if "gt_freq_median" in result:
-            print(f"  GT freq: median={result['gt_freq_median']:.0f}, "
-                  f"p90={result['gt_freq_p90']:.0f}, p95={result['gt_freq_p95']:.0f}")
-        print(f"  Top collided: {list(result['top_collided'].items())[:5]}")
-
-    # Save collision summary table
+    print("\n=== Collision Analysis (descriptive) ===")
+    collision_results = [compute_collisions(sub, label) for label, sub in frames]
+    for r in collision_results:
+        print(f"  {r['task']:22s} rate={r['collision_rate']:.3f} "
+              f"collided-freq med={r.get('gt_freq_median', 0):.0f} "
+              f"(corpus base rate={r['corpus_median_label_freq']:.0f})")
     collision_df = pd.DataFrame([{
         "Dataset": r["task"],
         "N": r["n_total"],
         "Errors": r["n_errors"],
         "Collisions (UID)": r["n_collisions_uid"],
         "Collision Rate": f"{r['collision_rate']:.3f}",
-        "GT Freq Median": f"{r.get('gt_freq_median', 0):.0f}",
-        "GT Freq p90": f"{r.get('gt_freq_p90', 0):.0f}",
+        "Collided Freq Median": f"{r.get('gt_freq_median', 0):.0f}",
+        "Corpus Freq Median": f"{r['corpus_median_label_freq']:.0f}",
         "GT Freq p95": f"{r.get('gt_freq_p95', 0):.0f}",
     } for r in collision_results])
-    print("\nCollision Summary:")
-    print(collision_df.to_string(index=False))
-    collision_df.to_csv(TABLE_DIR / "collision_summary.csv", index=False)
+    collision_df.to_csv(table_dir / "collision_summary.csv", index=False)
 
-    # ------------------------------------------------------------------
-    # 7. Representative Examples
-    # ------------------------------------------------------------------
     print("\n=== Representative Error Examples ===")
-    examples_parts = []
-    for name, sub in [("OnHW (AR-only)", onhw_ar), ("OnHW (Hybrid)", onhw_hyb),
-                       ("Stabilo Word", stabilo_word), ("Stabilo Sent", stabilo_sent)]:
-        ex = find_representative_examples(sub, name)
-        if len(ex) > 0:
-            examples_parts.append(ex)
-    examples = pd.concat(examples_parts, ignore_index=True)
-    print(examples.to_string(index=False))
-    examples.to_csv(TABLE_DIR / "representative_examples.csv", index=False)
+    examples = pd.concat([find_representative_examples(sub, label) for label, sub in frames
+                          if len(find_representative_examples(sub, label)) > 0], ignore_index=True)
+    examples.to_csv(table_dir / "representative_examples.csv", index=False)
 
     # ------------------------------------------------------------------
-    # 8. Generate LaTeX tables
+    # 7. LaTeX tables
     # ------------------------------------------------------------------
     print("\n=== Generating LaTeX Tables ===")
-    generate_latex_tables(combined_summary, foldwise, len_dep, collision_df, examples)
+    generate_latex_tables(table_dir, combined_summary, len_dep, collision_df, examples)
 
-    print("\nDone! All figures saved to:", FIG_DIR)
-    print("All tables saved to:", TABLE_DIR)
+    print("\nDone. Figures:", fig_dir, "\nTables:", table_dir)
 
 
-def generate_latex_tables(summary, foldwise, len_dep, collision, examples):
-    """Generate LaTeX table files."""
-
-    # Overall summary
-    with open(TABLE_DIR / "table_overall_summary.tex", "w") as f:
+def generate_latex_tables(table_dir, summary, len_dep, collision, examples):
+    """Emit LaTeX table files from the computed frames."""
+    with open(table_dir / "table_overall_summary.tex", "w") as f:
         f.write(r"""\begin{table}[t]
 \centering
-\caption{Overall quantitative summary using normalized Levenshtein distance $e_i = d_i / |y_i|$ across all datasets.
+\caption{Descriptive per-split summary using normalized Levenshtein distance $e_i = d_i / |y_i|$.
 Micro denotes $\sum_i d_i / \sum_i |y_i|$; Macro denotes $\frac{1}{N}\sum_i e_i$.
-Quantiles are computed over per-sample $e_i$.}
+OnHW WI and WD are reported separately and never pooled.}
 \label{tab:overall-dual-dataset}
 \begin{adjustbox}{max width=\textwidth}
 \begin{tabular}{lrrrrrrrrrrr}
 \toprule
 """)
-        f.write(" & ".join(summary.columns) + r" \\" + "\n")
-        f.write(r"\midrule" + "\n")
+        f.write(" & ".join(summary.columns) + r" \\" + "\n\\midrule\n")
         for _, row in summary.iterrows():
             f.write(" & ".join(str(v) for v in row.values) + r" \\" + "\n")
-        f.write(r"""\bottomrule
-\end{tabular}
-\end{adjustbox}
-\end{table}
-""")
+        f.write("\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n\\end{table}\n")
 
-    # Length dependence
-    with open(TABLE_DIR / "table_length_dependence.tex", "w") as f:
+    with open(table_dir / "table_length_dependence.tex", "w") as f:
         f.write(r"""\begin{table}[t]
 \centering
-\caption{Pearson correlation between ground-truth length $|y|$ and error: raw Levenshtein distance $d$ vs.\ normalized $e = d/|y|$. Results shown for the full set (All) and for incorrect predictions only ($e > 0$).}
+\caption{Within-task Pearson correlation between ground-truth length $|y|$ and error (raw $d$ vs.\ normalized $e = d/|y|$), for the full set (All) and incorrect predictions only ($e>0$). A within-task value near zero does not license cross-task comparison.}
 \label{tab:length-dependence}
 \begin{tabular}{lrrrr}
 \toprule
 """)
-        f.write(" & ".join(len_dep.columns) + r" \\" + "\n")
-        f.write(r"\midrule" + "\n")
+        f.write(" & ".join(len_dep.columns) + r" \\" + "\n\\midrule\n")
         for _, row in len_dep.iterrows():
             f.write(" & ".join(str(v) for v in row.values) + r" \\" + "\n")
-        f.write(r"""\bottomrule
-\end{tabular}
-\end{table}
-""")
+        f.write("\\bottomrule\n\\end{tabular}\n\\end{table}\n")
 
-    # Collision summary
-    with open(TABLE_DIR / "table_collision_summary.tex", "w") as f:
+    with open(table_dir / "table_collision_summary.tex", "w") as f:
         f.write(r"""\begin{table}[t]
 \centering
-\caption{Collision analysis across datasets. A collision occurs when an incorrect prediction exactly matches the ground-truth label of a different sample. GT Freq shows the distribution of \texttt{gt\_label\_count} for collided predictions (UID-weighted).}
+\caption{Collision analysis (descriptive). A collision is an incorrect prediction that exactly matches some ground-truth label. ``Collided Freq'' is the median corpus frequency of collided predictions; ``Corpus Freq'' is the median label frequency overall, given as the base rate for comparison.}
 \label{tab:collision-summary}
 \begin{adjustbox}{max width=\textwidth}
 \begin{tabular}{lrrrrrrr}
 \toprule
 """)
-        f.write(" & ".join(collision.columns) + r" \\" + "\n")
-        f.write(r"\midrule" + "\n")
+        f.write(" & ".join(collision.columns) + r" \\" + "\n\\midrule\n")
         for _, row in collision.iterrows():
             f.write(" & ".join(str(v) for v in row.values) + r" \\" + "\n")
-        f.write(r"""\bottomrule
-\end{tabular}
-\end{adjustbox}
-\end{table}
-""")
+        f.write("\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n\\end{table}\n")
 
-    # Representative examples
-    with open(TABLE_DIR / "table_representative_examples.tex", "w") as f:
+    with open(table_dir / "table_representative_examples.tex", "w") as f:
         f.write(r"""\begin{table}[t]
 \centering
-\caption{Representative examples near quantiles of the nonzero normalized Levenshtein error distribution ($e > 0$), two samples per quantile and dataset.}
+\caption{Representative examples near quantiles of the nonzero normalized error distribution ($e>0$), two per quantile and dataset. Columns are ordered Ground Truth then Prediction.}
 \label{tab:representative-examples}
 \begin{adjustbox}{max width=\textwidth}
-\begin{tabular}{llrrrrl l}
+\begin{tabular}{llrrrrll}
 \toprule
-Dataset & Quantile & Fold & Idx & $d$ & $e$ & Prediction & Ground Truth \\
+Dataset & Quantile & Fold & Idx & $d$ & $e$ & Ground Truth & Prediction \\
 \midrule
 """)
         for _, row in examples.iterrows():
-            pred = str(row["Prediction"]).replace("_", r"\_").replace("&", r"\&")
             gt = str(row["Ground Truth"]).replace("_", r"\_").replace("&", r"\&")
-            # Truncate long strings
-            if len(pred) > 25:
-                pred = pred[:22] + "..."
+            pred = str(row["Prediction"]).replace("_", r"\_").replace("&", r"\&")
             if len(gt) > 25:
                 gt = gt[:22] + "..."
+            if len(pred) > 25:
+                pred = pred[:22] + "..."
             f.write(f"{row['Dataset']} & {row['Quantile']} & {row['Fold']} & {row['Idx']} & "
-                    f"{row['d']} & {row['e']:.2f} & {pred} & {gt}" + r" \\" + "\n")
-        f.write(r"""\bottomrule
-\end{tabular}
-\end{adjustbox}
-\end{table}
-""")
+                    f"{row['d']} & {row['e']:.2f} & {gt} & {pred}" + r" \\" + "\n")
+        f.write("\\bottomrule\n\\end{tabular}\n\\end{adjustbox}\n\\end{table}\n")
 
-    print(f"  LaTeX tables saved to {TABLE_DIR}")
+    print(f"  LaTeX tables saved to {table_dir}")
 
 
 if __name__ == "__main__":
