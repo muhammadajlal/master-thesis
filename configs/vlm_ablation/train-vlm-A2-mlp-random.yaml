@@ -77,7 +77,7 @@ cache: true
 
 # ── Training schedule ─────────────────────────────────────
 epoch: 300
-epoch_warmup: 40
+epoch_warmup: 30
 freq_eval: 5
 freq_log: 50
 freq_save: 10
