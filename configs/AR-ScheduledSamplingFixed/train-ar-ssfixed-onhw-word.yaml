@@ -8,7 +8,7 @@
 # (Supervisor's suggestion as alternative to scheduled sampling.)
 # =========================
 
-arch_de: 'ar_transformer_s'
+arch_de: 'ar_transformer_xs'
 freeze_decoder_epochs: 0
 pretrained_decoder_checkpoint: null
 
@@ -20,7 +20,7 @@ ctc_decoder: best_path
 device: cuda
 
 dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-ScheduledSamplingFixed-blconv_b/ar_transformer_s__onhw_wi_word_rh
+dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Baseline-AR-XS-ScheduledSamplingFixed-blconv_b/ar_transformer_xs__onhw_wi_word_rh
 
 epoch: 300
 epoch_warmup: 30
