@@ -731,20 +731,30 @@ def train_one_epoch(
     ss_p_start = float(ss_cfg.get("p_start", 0.0))
     ss_p_end = float(ss_cfg.get("p_end", 1.0))
     ss_ramp_epochs = int(ss_cfg.get("ramp_epochs", max(1, int(getattr(man.cfgs, "epoch", 300)) // 2)))
+    # Optional teacher-forcing-only warm-up: for the first `delay_epochs` epochs the decoder
+    # is trained with pure teacher forcing (p_eff = 0) and the schedule below only begins
+    # afterwards, with `epoch` measured relative to the end of that phase. Defaults to 0, which
+    # reproduces the original schedule exactly (self-feedback from epoch 1 onwards).
+    ss_delay_epochs = int(ss_cfg.get("delay_epochs", 0))
     if ss_enabled and (ds_enabled or (dec_ctc_enabled and dec_ctc_lambda > 0.0)):
         raise ValueError(
             "scheduled_sampling is incompatible with deep_supervision or decoder_side_ctc. "
             "Disable those to run no-teacher-forcing experiments."
         )
     if ss_enabled:
-        if ss_ramp_epochs <= 0:
-            ss_p_eff = ss_p_end
+        if epoch < ss_delay_epochs:
+            ss_p_eff = 0.0
         else:
-            t = min(1.0, max(0.0, float(epoch) / float(ss_ramp_epochs)))
-            ss_p_eff = ss_p_start + t * (ss_p_end - ss_p_start)
+            epoch_rel = epoch - ss_delay_epochs
+            if ss_ramp_epochs <= 0:
+                ss_p_eff = ss_p_end
+            else:
+                t = min(1.0, max(0.0, float(epoch_rel) / float(ss_ramp_epochs)))
+                ss_p_eff = ss_p_start + t * (ss_p_end - ss_p_start)
         man.log(
             f"[ScheduledSampling] epoch={epoch} | p_eff={ss_p_eff:.4f} "
-            f"(p_start={ss_p_start} p_end={ss_p_end} ramp_epochs={ss_ramp_epochs})"
+            f"(p_start={ss_p_start} p_end={ss_p_end} ramp_epochs={ss_ramp_epochs} "
+            f"delay_epochs={ss_delay_epochs})"
         )
     else:
         ss_p_eff = 0.0
