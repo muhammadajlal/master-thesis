@@ -35,7 +35,14 @@ SOURCES = [
     "H2_hybrid_prompt_augmentation_pooling/train-H2-pooling-word.yaml",
     "H3_hybrid_two_step_prompt_pooling/train-H3-pooling-onhw.yaml",
     "H3_hybrid_two_step_prompt_pooling/train-H3-pooling-word.yaml",
-    # tab:contrastive-results / -alignment (J1 canonical; J2 was byte-identical rerun)
+    # tab:contrastive-results / -alignment.
+    # NOTE: J1 and J2 have byte-identical configs but ran on DIFFERENT code. The J1 base
+    # runs (2026-03-22/23, commit dc8c03b) predate the contrastive logit-scale fix
+    # (log_tau = log(0.07), i.e. tau = 0.07 instead of 1/0.07 = 14.29) and are superseded;
+    # J2 (2026-03-24/25) used the corrected working-tree implementation, subsequently
+    # committed as 78abeb3 on 2026-03-27, and supplies the reported lambda = 0.6 results.
+    # These clones are lambda = 0.2 and ran 2026-06-28, long after the fix, so they use the
+    # corrected loss despite the J1_ prefix. See REPRODUCIBILITY.md, "Superseded contrastive runs".
     "J1_contrastive_mlp/train-J1-mlp-onhw.yaml",
     "J1_contrastive_mlp/train-J1-mlp-word.yaml",
     "J1_contrastive_pooling/train-J1-pooling-onhw.yaml",

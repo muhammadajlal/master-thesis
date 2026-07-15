@@ -28,6 +28,11 @@ class Condition:
 
 
 CONDITIONS = {
+    "hwrformer": Condition(
+        "HWRFormer (elementwise gating)",
+        "Baseline-AR-XS-blconv_b/ar_transformer_xs__onhw_wi_word_rh/results.json",
+        "Baseline-AR-XS-blconv_b/ar_transformer_xs__wi_word_hw6_meta/results.json",
+    ),
     "mlp_pretrained": Condition(
         "MLP + pretrained GPT-2",
         "Ablations-MMLM/GPT-2/AR-only/vlm_ablation_A1_mlp_pretrained/"
@@ -160,10 +165,11 @@ def analyze(results_root: Path) -> dict[str, object]:
         for dataset in DATASETS:
             result = load_result(results_root / getattr(condition, dataset))
             loaded[key][dataset] = result
-            means[key][dataset] = {
-                metric: statistics.mean(result[metric].values())
-                for metric in ("cer", "wer")
-            }
+            means[key][dataset] = {}
+            for metric in ("cer", "wer"):
+                values = list(result[metric].values())
+                means[key][dataset][metric] = statistics.mean(values)
+                means[key][dataset][f"{metric}_sample_std"] = statistics.stdev(values)
 
     comparisons: dict[str, object] = {}
     for name, (a_key, b_key) in COMPARISONS.items():
@@ -186,7 +192,10 @@ def print_text(report: dict[str, object]) -> None:
         print(f"{key}: {values['label']}")
         for dataset in DATASETS:
             metrics = values[dataset]
-            print(f"  {dataset:7s} CER={metrics['cer']:.2f} WER={metrics['wer']:.2f}")
+            print(
+                f"  {dataset:7s} CER={metrics['cer']:.2f}+/-{metrics['cer_sample_std']:.2f} "
+                f"WER={metrics['wer']:.2f}+/-{metrics['wer_sample_std']:.2f}"
+            )
 
     print("\nPAIRED EFFECTS (B - A, percentage points)")
     for name, values in report["paired_comparisons"].items():

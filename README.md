@@ -59,9 +59,9 @@ work/REWI_work/
 ### 1) Environment
 
 ```bash
-conda create -n rewi python=3.10
+conda create -n rewi python=3.12.10
 conda activate rewi
-pip install -r requirements.txt
+pip install -r environment-lock.txt
 ```
 
 ### 2) Working directory
