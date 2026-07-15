@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate thesis/figures/imu_sample_macht.pdf.
 
-Representative OnHW500 WI raw-signal figure (fold 0, val sample id 377,
+Representative OnHW-words500 WI raw-signal figure (fold 0, val sample id 377,
 writer 5, label "macht", T=160). Recreates the original 5-panel layout
 (front acc / front gyro / front mag / back acc / tip force, all channels
 z-normalized per channel) with shortened y-axis labels so adjacent
@@ -48,7 +48,7 @@ def main() -> None:
 
     fig, axes = plt.subplots(5, 1, figsize=(7.2, 5.8), sharex=True)
     fig.suptitle(
-        'IMU sample: ground truth "macht" (OnHW500 WI, fold 0, T=160)',
+        'IMU sample: ground truth "macht" (OnHW-words500 WI, fold 0, T=160)',
         fontsize=11,
     )
 

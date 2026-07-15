@@ -33,19 +33,50 @@ data/
 ## Environment
 
 Run commands from the repository root (the folder created by `git clone`).
-
-Install dependencies (choose one):
-
-- Use your existing environment
-- Or install from `requirements.txt`:
+The retained experiment environment is documented in `ENVIRONMENT.md` and
+pinned in `environment-lock.txt`. Install the pinned Python packages with:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r environment-lock.txt
 ```
 
-Notes:
-- Determinism: we set `seed: 42` in configs, but GPU training can still be non-deterministic depending on CUDA/cuDNN.
-- Hardware: results in the thesis were obtained on GPUs (cluster + workstation). Exact wallclock can differ.
+The key retained versions are Python 3.12.10, PyTorch 2.9.1+cu128,
+Transformers 4.57.3, PEFT 0.18.1, JiWER 4.0.0, NumPy 2.2.5, SciPy 1.17.0,
+and timm 1.0.24. The local GPT-2 and ByT5-small files are identified by
+`model-assets.sha256`; those file hashes are authoritative
+when an upstream model revision is unavailable.
+
+The configurations set `seed: 42`, but GPU training can remain nondeterministic
+depending on CUDA/cuDNN kernels. Representative canonical SLURM logs identify
+Tesla V100-PCIE-32GB GPUs; job-specific logs remain authoritative. Exact
+wall-clock time can differ and is not used as thesis evidence.
+
+## Thesis inference MAC artifact
+
+The Chapter 6 HWR-GPT MAC rows are generated from the repository root with:
+
+```bash
+python analysis/scripts/vlm_macs_for_thesis.py
+```
+
+The script profiles the OnHW-words500 reference shape (`T=1024`) and the
+rounded-up mean GPT-2 output length of three tokens. It follows true greedy
+Hugging Face generation with key/value caching and fixes both the minimum and
+maximum new-token counts to three so early EOS output cannot change the traced
+shape. The training-only auxiliary CTC head is excluded unless the CTC
+posterior is an inference-time connector input.
+
+The output is written to the project-level
+`results/thesis_vlm_macs.json`; the retained thesis artifact has SHA-256
+`8eb81196eed60335ff7850776047f216322d8f7560b71198d8aaca285ae38ed5`.
+The JSON was regenerated twice with an identical checksum. These are operation
+counts, not latency, peak-memory, or variable-length deployment measurements.
+
+**Row naming.** The artifact names `K5_kv_multiview` as `Legacy K5 KV Multi-View`;
+that four-view, 8.08 M-trainable control is not reported in the thesis. The thesis's
+two-view, 5.12 M-trainable **Gated Multi-View** connector is `L2_kv_slim` and appears
+as `Gated Multi-View (thesis L2)` (4.874 B MACs). The explicit labels prevent the
+two configurations from being associated by their rounded 4.9 B MAC values.
 
 ## Partial one-command public replication
 
@@ -210,7 +241,7 @@ RESULTS_ROOT=../../results/hwr2
 | Frozen HWRFormer encoder diagnostics | `configs/_f1f2_ablation/train-F{1,2}-hwenc-{onhw,word}.yaml` | `Ablations-MMLM/GPT-2/AR-only/{F1_frozen_enc_mlp,F2_vlm_enc_ar}/*_hwenc_ablation` |
 | MLP + auxiliary CTC | `configs/H1_hybrid_ctc_vlm/train-H1-mlp-{onhw,word}.yaml`; OnHW λ = 0.2: `configs/H1_hybrid_ctc_vlm/lambda_sweep/train-H1-mlp-onhw-lam02.yaml`; private λ = 0.2: `configs/_lam02_ch6/H1_hybrid_ctc_vlm/train-H1-mlp-word_lam02.yaml` | `Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__DATA{,_lam02}`; the canonical OnHW λ = 0.2 result is archived under `H1_LambdaSweep/H1_hybrid_mlp_lam02__onhw_wi_word_rh` |
 | Pool-MLP + auxiliary CTC | `configs/H1_hybrid_ctc_vlm_pooling/train-H1-pooling-{onhw,word}.yaml`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_pooling/vlm__DATA{,_lam02}` |
-| Sequence-level contrastive MLP/Pool | `configs/J1_contrastive_{mlp,pooling}/`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid-Contrastive/J1_contrastive_{mlp,pooling}/vlm__DATA{,_lam02}` |
+| Sequence-level contrastive MLP/Pool | λ = 0.6: `configs/J2_contrastive_{mlp,pooling}/`; λ = 0.2: `configs/_lam02_ch6/J1_contrastive_{mlp,pooling}/` | λ = 0.6: `Ablations-MMLM/GPT-2/Hybrid-Contrastive/J2_contrastive_{mlp,pooling}/vlm__DATA`; λ = 0.2: `.../J1_contrastive_{mlp,pooling}/vlm__DATA_lam02`. **Do not use** `J1_contrastive_*/vlm__DATA` (no suffix): those λ = 0.6 base runs are superseded — see "Superseded contrastive runs" below |
 | Argmax compression + MSE | `configs/K1_ctc_mse/`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid/K1_ctc_mse/vlm__DATA{,_lam02}` |
 | Posterior reconstruction | `configs/K2_ctc_posterior/`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid/K2_ctc_posterior/vlm__DATA{,_lam02}` |
 | Argmax-segment contrastive alignment | `configs/K4_sea_contrastive/`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid-Contrastive/K4_sea_contrastive/vlm__DATA{,_lam02}` |
@@ -219,21 +250,82 @@ RESULTS_ROOT=../../results/hwr2
 | ByT5 control | `configs/M1_byt5_hybrid_mlp/train-M1-byt5-{onhw,word}.yaml` | `Ablations-MMLM/byt5-small/Hybrid/M1_byt5_hybrid_mlp/vlm__DATA` |
 | Shallow-Conformer control | `configs/N1_conformer_hybrid_mlp/train-N1-conformer-{onhw,word}.yaml` | `Ablations-MMLM/GPT-2/Hybrid/N1_conformer_hybrid_mlp/vlm__DATA` |
 
-Brace notation in the table is shorthand for the listed literal alternatives; it is not a shell command. The exact central-condition result paths used for thesis statistics are also encoded in `scripts/chapter6_analysis.py`, preventing the prose manifest from becoming the only source of truth.
+Brace notation in the table is shorthand for the listed literal alternatives; it is not a shell command. The result paths used by the paired comparisons in `scripts/chapter6_analysis.py` are encoded in that script. The alignment and auxiliary-CTC sensitivity paths are specified explicitly in the manifest above.
 
-### Chapter 5 configuration families
+### Model naming: thesis name to `arch_de`
 
-| Evidence family | Configuration family | Result family below `$RESULTS_ROOT` |
-|---|---|---|
-| REWI reference | `configs/Baseline-REWI/` | `Baseline-REWI/` |
-| HWRFormer and gating variants | `configs/AR-Baseline/` | `Baseline-AR-*` |
-| Input-noise study | `configs/AR-InputCorruption*/` | `Baseline-AR-InputCorruption*/` |
-| Auxiliary-CTC study | `configs/hybrid/` | `Baseline-Hybrid/` |
-| HWRFormer-L capacity controls | `configs/AR-Baseline-XS*/` | `Baseline-AR-XS*/` |
-| Hybrid-noise controls | `configs/HybridInputCorruption*/` | `Baseline-Hybrid-InputCorruption*/` |
-| Inference-time decoding study | `configs/decode_study/` | archived decoding outputs referenced by the Chapter 5 analysis scripts |
+The thesis model names do not match the historical directory names. **`arch_de` is the
+authoritative discriminator; directory names are not.** Read this table before using any
+Chapter 5 path:
 
-The Chapter 5 families contain the condition-specific YAML files used by the corresponding thesis tables. Preserve those YAMLs together with generated fold configurations and `results.json`; directory names alone are not a substitute for the archived parameters.
+| Thesis name | `arch_de` | Decoder | Params (OnHW word) | Historical marker |
+|---|---|---|---|---|
+| REWI | `bilstm_wide` | 3-layer BiLSTM + CTC head | 4.64 M | `Baseline-REWI/` |
+| **HWRFormer** | **`ar_transformer_xs`** | L = 2, d_ff = 896, d = 256, H = 4 | 4.64 M (elementwise) | `XS` in the path |
+| **HWRFormer-L** | **`ar_transformer_s`** | L = 4, d_ff = 1024, d = 256, H = 4 | 6.94 M (elementwise) | no `XS` in the path |
+
+The `XS` suffix therefore marks the thesis's **primary** model (HWRFormer), not a smaller
+control; paths without `XS` are the **larger** capacity control (HWRFormer-L). All reported
+Chapter 5 models use `arch_en: blconv_b`. Configurations naming `blconv_l`
+(`Baseline-AR-blconv_l`) or `transformer_{s,xs}` CTC decoders are exploratory work that no
+thesis table reports.
+
+### Chapter 5 conditions and results
+
+Every row below was verified by recomputing the thesis table values from the archived
+`results.json`. Where a configuration directory mixes architectures, the file glob is given.
+
+| Thesis condition | `arch_de` | Canonical configuration | Result family below `$RESULTS_ROOT` |
+|---|---|---|---|
+| REWI reference | `bilstm_wide` | `configs/Baseline-REWI/` | `Baseline-REWI/bilstm_wide__DATA` |
+| HWRFormer, elementwise gate (locked reference) | `ar_transformer_xs` | `configs/AR-Baseline/train-ar-baseline-xs-*.yaml` | `Baseline-AR-XS-blconv_b/ar_transformer_xs__DATA` |
+| HWRFormer, ungated | `ar_transformer_xs` | `configs/AR-Baseline/train-ar-xs-ungated-*.yaml` | `Baseline-AR-XS-Ungated/ar_transformer_xs__DATA` |
+| HWRFormer, headwise gate | `ar_transformer_xs` | `configs/AR-Baseline/train-ar-xs-headwise-*.yaml` | `Baseline-AR-XS-HeadwiseGating/ar_transformer_xs__DATA` |
+| HWRFormer-L, elementwise gate | `ar_transformer_s` | `configs/AR-Baseline-WD/`, `configs/AR-Baseline-Equations/` and the matching OnHW-WI/private variants | `Baseline-AR-ElementwiseGating*/ar_transformer_s__DATA` |
+| HWRFormer-L, ungated | `ar_transformer_s` | `configs/AR-Baseline/train-ar-ungated-*.yaml` | `Baseline-AR-Ungated/ar_transformer_s__DATA` |
+| HWRFormer-L, headwise gate | `ar_transformer_s` | `configs/AR-Baseline/train-ar-headwise-*.yaml` | `Baseline-AR-HeadwiseGating/ar_transformer_s__DATA` |
+| HWRFormer noise modes at p = 0.15 | `ar_transformer_xs` | `configs/AR-InputCorruption-XS/` | `Baseline-AR-XS-InputCorruption-{uniform,bigramright,bigramleft,selfconf,adjacentswap}/` |
+| HWRFormer noise-rate sweep | `ar_transformer_xs` | `configs/AR-InputCorruption-Sweep-XS/` | `Baseline-AR-XS-InputCorruption-Sweep-blconv_b/…__p0pXX` |
+| HWRFormer-L noise | `ar_transformer_s` | `configs/AR-InputCorruption/` | `Baseline-AR-InputCorruption-blconv_b/`, `…-WD-uniform/` |
+| Hybrid HWRFormer, λ = 0.1 | `ar_transformer_xs` | `configs/hybrid-xs/` | `train_element_word_hybrid_01_xs_{onhw_wi,onhw_wd,stabilo,stabilo_sent}/` |
+| Hybrid HWRFormer-L λ sweep (λ = 0.6 operating point) | `ar_transformer_s` | `configs/hybrid/` | `Baseline-Hybrid/train_element_word_hybrid_{01..10}/`, `train_element_word_hybrid_06_*/` |
+| Hybrid + noise, λ = 0.1 | `ar_transformer_xs` | `configs/HybridInputCorruption-XS-L01/` | `HybridInputCorruption-XS-L01_{uniform,bigram_left,bigram_right,self_confusion,adjacent_swap}/` |
+| Scheduled-sampling probe | see note | `configs/AR-NoTeacherForcing/`, `configs/AR-ScheduledSamplingFixed/` | `Baseline-AR-NoTeacherForcing-blconv_b/ar_transformer_s__DATA`, `Baseline-AR-ScheduledSamplingFixed-blconv_b/ar_transformer_s__DATA` |
+| Inference-time decoding study | `ar_transformer_xs` | `configs/decode_study/` | `decode_study_xs_full_{ar,hybrid}_noleak*/stage*__fold{0..4}/metrics.json` |
+
+> **Scheduled-sampling note.** The archived runs behind the thesis table were trained with
+> `arch_de: ar_transformer_s`, and the thesis reports them as **HWRFormer-L** — table, caption and
+> surrounding text agree with these results. The six retained configurations in
+> `configs/AR-NoTeacherForcing/` and `configs/AR-ScheduledSamplingFixed/` therefore use
+> `ar_transformer_s` and point to the matching archived result families. A temporary repointing to
+> unarchived `ar_transformer_xs` paths in commit `c035fbf` was superseded; the
+> `ar_transformer_s__*` result directories and generated fold YAMLs are authoritative.
+
+Preserve these YAMLs together with the generated fold configurations and `results.json`;
+directory names alone are not a substitute for the archived parameters.
+
+### Superseded contrastive runs
+
+`Ablations-MMLM/GPT-2/Hybrid-Contrastive/J1_contrastive_{mlp,pooling}/vlm__{onhw_wi_word_rh,wi_word_hw6_meta}`
+(the λ = 0.6 base runs, trained 2026-03-22/23) are **superseded and must not be reported**. They
+predate the contrastive logit-scale fix: under commit `dc8c03b`,
+`InBatchContrastiveLoss` initialized `log_tau = log(0.07)`, giving a logit scale of τ = 0.07
+instead of the intended τ = 1/0.07 = 14.29. That scale flattens the InfoNCE softmax and weakens
+the objective. On private words, the pre-fix MLP/Pool-MLP cosine similarities are 0.03/0.06,
+matching their respective no-alignment baselines at the reported precision, versus 0.27/0.28
+for the corrected runs. The corrected implementation matches the thesis methodology, which
+specifies a learnable logit scale initialized to log(1/0.07).
+
+The runs the thesis reports both use the corrected implementation:
+
+- λ = 0.6 → `J2_contrastive_{mlp,pooling}/` (trained 2026-03-24/25 with the corrected
+  working-tree implementation, subsequently committed as `78abeb3` on 2026-03-27).
+- λ = 0.2 → `J1_contrastive_{mlp,pooling}/vlm__DATA_lam02` (trained 2026-06-28, long after the fix;
+  the `J1_` prefix reflects only the configuration lineage cloned by
+  `scripts/clone_ch6_configs_lam02.py`, not the March code).
+
+The Fold-0 embedding geometry (`tab:contrastive-alignment`) and both UMAP figures are likewise
+generated from the `J2_*` dumps under `analysis/embedding_viz/`.
 
 ## Statistical reproduction
 

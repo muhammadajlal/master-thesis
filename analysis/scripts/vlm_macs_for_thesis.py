@@ -6,13 +6,13 @@ Same convention as evaluate.py:get_macs_params() so the two are comparable:
 
   - input  x     = randn(1, num_channel, T), T = 1024 for word datasets
   - profiler     = torch.utils.flop_counter.FlopCounterMode, MACs = FLOPs // 2
-  - decode budget L = MEAN_BPE_OUT = 3 GPT-2 subword tokens. This is the rounded-up
-    mean OnHW-words500 / private-word output length in the decoder's own units
-    (the ~6-character words tokenize to ~2.4 GPT-2 BPE tokens). It is the multimodal
-    analogue of the 6-character budget used for the character-level recognizers,
-    and reproduces the HWR-GPT MACs reported in the thesis (Chapter 6 tables).
-    One teacher-forced forward over L target tokens equals the per-sample compute
-    of decoding L tokens with GPT-2 key/value caching, i.e. the real inference cost.
+  - decode budget L = 3 GPT-2 subword tokens. This is the rounded-up mean
+    OnHW-words500 / private-word output length in the decoder's own units
+    (the ~6-character words tokenize to ~2.4 GPT-2 BPE tokens).
+  - inference uses the model's true greedy Hugging Face generation path with
+    key/value caching. Setting the minimum and maximum new-token counts to L
+    prevents random early EOS termination and makes the shape-based count
+    deterministic without requiring trained checkpoints.
   - auxiliary CTC head is NOT counted (hybrid_mode forced False), except for the
     CTC-posterior connector whose head feeds the connector itself and runs at
     inference.
@@ -49,16 +49,19 @@ CFG_ROOT = str(PROJ / "configs")
 # Rounded-up mean GPT-2 subword output length on the OnHW / private word datasets
 # (mean ~2.4 BPE tokens -> 3). The multimodal analogue of the 6-char recognizer
 # budget; see the module docstring and the thesis "Inference cost" paragraph.
-MEAN_BPE_OUT = 3
+DECODE_STEPS = 3
 
+# Keep artifact labels explicit where historical configuration names differ from thesis names.
+# The four-view K5 connector is an unreported legacy control. The thesis's two-view,
+# hidden-width-384 Gated Multi-View connector is the L2_kv_slim configuration.
 VARIANTS: list[tuple[str, str]] = [
     ("Linear",             "G1_minimal_connector/train-G1a-linear-onhw.yaml"),
     ("MLP",                "H1_hybrid_ctc_vlm/train-H1-mlp-onhw.yaml"),
     ("Pool-MLP",           "H1_hybrid_ctc_vlm_pooling/train-H1-pooling-onhw.yaml"),
     ("Conv-Pool",          "G1_minimal_connector/train-G1b-conv-onhw.yaml"),
     ("Q-Former",           "L1_mini_qformer/train-L1-mini-qformer-onhw.yaml"),
-    ("Gated Multi-View",   "K5_kv_multiview/train-K5-kv-onhw.yaml"),
-    ("KV Slim (L2)",       "L2_kv_slim/train-L2-kv-slim-onhw.yaml"),
+    ("Legacy K5 KV Multi-View", "K5_kv_multiview/train-K5-kv-onhw.yaml"),
+    ("Gated Multi-View (thesis L2)", "L2_kv_slim/train-L2-kv-slim-onhw.yaml"),
     ("CTC-Posterior (K2)", "K2_ctc_posterior/train-K2-lego-onhw.yaml"),
 ]
 
@@ -102,27 +105,69 @@ def build_vlm(cfgs: dict) -> VLMModel:
     return model
 
 
+def generate_for_profile(
+    model: VLMModel,
+    x: torch.Tensor,
+    len_x: torch.Tensor,
+) -> list[str]:
+    """Mirror the one-pass VLM generation path without its outer no-grad decorator.
+
+    FlopCounterMode's module tracker requires gradient-enabled connector outputs
+    for nn.TransformerEncoder-based Q-Former variants. No backward pass is run;
+    Hugging Face generation itself remains no-grad and uses the normal KV cache.
+    """
+    enc_states, enc_mask = model._encode(x, len_x)
+    if model.connector_type in ("ctc_posterior", "lego") and model.ctc_head is not None:
+        imu_tokens = model.connector(
+            enc_states,
+            enc_mask,
+            ctc_logits=model.ctc_head(enc_states),
+            lm_embed_weight=model._get_embed_fn().weight,
+        )
+    else:
+        imu_tokens = model.connector(enc_states, enc_mask)
+
+    prefix_emb = model.prompt_manager.get_prefix_embeds(
+        model._get_embed_fn(), x.size(0), x.device,
+    )
+    cond_emb = torch.cat([prefix_emb, imu_tokens], dim=1)
+    attn_mask = torch.ones(
+        x.size(0), cond_emb.size(1), device=x.device, dtype=torch.long,
+    )
+    return model._generate_from_condition(
+        cond_emb,
+        attn_mask,
+        prompt_text=model.prompt_manager.prompt_text,
+    )
+
+
 def profile_variant(name: str, cfg_path: str) -> dict:
     with open(cfg_path) as f:
         cfgs = yaml.safe_load(f)
 
     torch.manual_seed(42)
     model = build_vlm(cfgs)
+    model.max_new_tokens = DECODE_STEPS
+    model.num_beams = 1
+    model.lm.generation_config.min_new_tokens = DECODE_STEPS
+    model.lm.generation_config.use_cache = True
 
     # Bypass the training-only auxiliary CTC branch (not run at inference).
     # For the CTC-posterior connector the head IS the connector input, so it stays.
-    aux_ctc_params = 0
+    ctc_head_params = 0
     if model.ctc_head is not None:
-        aux_ctc_params = sum(p.numel() for p in model.ctc_head.parameters())
+        ctc_head_params = sum(p.numel() for p in model.ctc_head.parameters())
+    ctc_head_in_inference = (
+        model.connector_type in ("ctc_posterior", "lego") and model.ctc_head is not None
+    )
+    aux_ctc_params = 0 if ctc_head_in_inference else ctc_head_params
     model.hybrid_mode = False
 
     # Dummy shapes: SAME input convention as evaluate.py; decode budget = mean BPE out.
     T = 1024 if "word" in cfgs["dir_dataset"] else 4096
     x = torch.randn(1, cfgs["num_channel"], T)
     len_x = torch.tensor([T], dtype=torch.long)
-    L = MEAN_BPE_OUT
-    vocab = int(model.tokenizer.vocab_size)
-    labels = torch.randint(0, vocab, (1, L), dtype=torch.long)
+    L = DECODE_STEPS
 
     # Probe token counts (outside the FLOP counter)
     with torch.no_grad():
@@ -142,13 +187,9 @@ def profile_variant(name: str, cfg_path: str) -> dict:
     flops = 0
     err = None
     try:
-        # enable_grad (no backward is called): torch 2.9's FlopCounterMode attaches
-        # a ModuleTracker whose multi-grad hooks assert under no_grad when
-        # nn.TransformerEncoder takes its fused eval fastpath; enable_grad forces the
-        # standard decomposed attention path, which is hook-safe and FLOP-counted.
         with torch.enable_grad():
             with FlopCounterMode(display=False) as fc:
-                model(x, len_x, labels)
+                generate_for_profile(model, x, len_x)
         flops = int(fc.get_total_flops())
     except Exception as exc:
         err = f"{type(exc).__name__}: {exc}"
@@ -161,8 +202,11 @@ def profile_variant(name: str, cfg_path: str) -> dict:
         connector=model.connector_type,
         connector_params=sum(p.numel() for p in model.connector.parameters()),
         params_total=params_total, params_trainable=params_train,
+        ctc_head_params=ctc_head_params,
+        ctc_head_in_inference=ctc_head_in_inference,
         aux_ctc_params_excluded_from_flops=aux_ctc_params,
-        T=T, len_max=L, n_soft=int(model.prompt_manager.num_soft_tokens),
+        T=T, len_max=L, decode_method="greedy_generate_kv_cache",
+        n_soft=int(model.prompt_manager.num_soft_tokens),
         n_prompt=int(model.prompt_manager.num_prompt_tokens),
         n_imu_tokens=n_imu, n_target=L, n_seq_total=n_total,
         flops=flops, macs=flops // 2, error=err,
@@ -174,7 +218,10 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     out = []
-    print(f"Profiling {len(VARIANTS)} HWR-GPT variants at L={MEAN_BPE_OUT} (mean GPT-2 output)...")
+    print(
+        f"Profiling {len(VARIANTS)} HWR-GPT variants with true greedy "
+        f"generation at L={DECODE_STEPS}..."
+    )
     print(f"{'Variant':20s}  {'Params (M)':>11s}  {'MACs (G)':>10s}")
     print("-" * 48)
     for name, rel in VARIANTS:

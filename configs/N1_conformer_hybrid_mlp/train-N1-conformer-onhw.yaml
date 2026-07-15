@@ -4,8 +4,8 @@
 # Encoder: Conformer (d=256, ff=640, 2 layers, ~2.56M)  [vs BLConv ~2.46M]
 # Connector: MLP (256→768→768, ~790K)
 # CTC head on raw encoder features (before connector)
-# Trainable: ~4.3M (encoder 2.56M + MLP 790K + LoRA 885K + CTC 16K)
-# Comparison target: H1 (BLConv encoder, ~4.4M trainable, matched)
+# Trainable: ~5.0M (encoder 2.56M + MLP 790K + LoRA 1.62M + soft prompt 15K + CTC 16K)
+# Comparison target: H1 (BLConv encoder, ~5.1M trainable, closely matched)
 # Ablation: encoder architecture (Conformer vs CNN)
 # ==================================================================
 

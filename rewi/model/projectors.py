@@ -129,9 +129,9 @@ class ConvPoolProjector(nn.Module):
 
     ``Conv1d(d_enc, d_enc, k, stride=s) → GELU → Linear(d_enc, d_lm) → LN``
 
-    Param count:  ``d_enc × k × 1 + d_enc  +  d_enc × d_lm + d_lm  +  2 × d_lm``
+    Param count:  ``d_enc × d_enc × k + d_enc + d_enc × d_lm + d_lm + 2 × d_lm``
                   e.g.  512, k=5, s=4, d_lm=768:
-                        512×5 + 512 + 512×768 + 768 + 2×768 ≈ **397 K**
+                        512×512×5 + 512 + 512×768 + 768 + 2×768 ≈ **1.7 M**
     """
 
     def __init__(
@@ -139,7 +139,7 @@ class ConvPoolProjector(nn.Module):
     ):
         super().__init__()
         self.stride = stride
-        # Depthwise-style: groups=1 keeps it simple, low param
+        # Standard dense convolution; groups=1 couples all input channels.
         self.conv = nn.Conv1d(
             d_enc, d_enc, kernel_size=kernel_size, stride=stride,
             padding=kernel_size // 2, groups=1,
