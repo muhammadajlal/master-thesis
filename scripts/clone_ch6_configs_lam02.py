@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Clone the 23 in-scope Chapter 6 multimodal configs from lambda_ctc=0.6
+"""Clone the 21 active Chapter 6 multimodal configs from lambda_ctc=0.6
 to lambda_ctc=0.2 with distinct dir_work, and emit a manifest the
 training sbatch reads.
 
-The 23 configs are exactly the ones cited in vlm_results.tex tables:
+The 21 configs are the conditions retained in active vlm_results.tex tables:
   - tab:vlm-h1            (H1_mlp on private word; onhw already in H1 sweep)
   - tab:vlm-pooling-series (H1/H2/H3_pooling on onhw+word)
   - tab:contrastive-results (J1_mlp/J1_pooling on onhw+word)
-  - tab:vlm-phase6         (K1/K2/K3/K4 on onhw+word)
+  - tab:vlm-phase6         (K1/K2/K3 on onhw+word)
   - tab:vlm-l-series       (L1/L2 on onhw+word)
 
 Output:
-  configs/_lam02_ch6/<group>/<basename>_lam02.yaml   (23 files)
+  configs/_lam02_ch6/<group>/<basename>_lam02.yaml   (21 files)
   scripts/_lam02_ch6_manifest.txt                    (one path per line)
 """
 from __future__ import annotations
@@ -54,14 +54,14 @@ SOURCES = [
     "K2_ctc_posterior/train-K2-lego-word.yaml",
     "K3_ec_loss/train-K3-ec-onhw.yaml",
     "K3_ec_loss/train-K3-ec-word.yaml",
-    "K4_sea_contrastive/train-K4-sea-onhw.yaml",
-    "K4_sea_contrastive/train-K4-sea-word.yaml",
     # tab:vlm-l-series (param-matched 5.1M connectors)
     "L1_mini_qformer/train-L1-mini-qformer-onhw.yaml",
     "L1_mini_qformer/train-L1-mini-qformer-word.yaml",
     "L2_kv_slim/train-L2-kv-slim-onhw.yaml",
     "L2_kv_slim/train-L2-kv-slim-word.yaml",
 ]
+
+# Existing K4 clones are historical provenance and are intentionally excluded from this active training manifest.
 
 LAM_RE = re.compile(r"^(\s*hybrid_lambda_ctc:\s*)0\.6(\s*)$", flags=re.MULTILINE)
 DIRWORK_RE = re.compile(r"^(dir_work:\s*)(\S+)$", flags=re.MULTILINE)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dump CER/WER means for every experiment referenced in thesis tables."""
+"""Dump CER/WER means for active thesis experiments and excluded provenance runs."""
 import json, os, sys
 
 ROOT = "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2"
@@ -66,13 +66,14 @@ EXPS = [
     ("K1 CTC-MSE Stabilo","Ablations-MMLM/GPT-2/Hybrid/K1_ctc_mse/vlm__wi_word_hw6_meta"),
     ("K2 CTC-Posterior OnHW","Ablations-MMLM/GPT-2/Hybrid/K2_ctc_posterior/vlm__onhw_wi_word_rh"),
     ("K2 CTC-Posterior Stabilo","Ablations-MMLM/GPT-2/Hybrid/K2_ctc_posterior/vlm__wi_word_hw6_meta"),
-    ("K4 SEA OnHW","K4_sea_contrastive/vlm__onhw_wi_word_rh"),
-    ("K4 SEA Stabilo","K4_sea_contrastive/vlm__wi_word_hw6_meta"),
     ("K5 KV-MV OnHW","Ablations-MMLM/GPT-2/Hybrid/K5_kv_multiview/vlm__onhw_wi_word_rh"),
     ("K5 KV-MV Stabilo","Ablations-MMLM/GPT-2/Hybrid/K5_kv_multiview/vlm__wi_word_hw6_meta"),
     # t5
     ("T5 60-300 OnHW", "Ablations-MMLM/t5-small/multimodal_t5_small-60-300/t5-small__onhw_wi_word_rh"),
     ("T5 0-600 OnHW",  "Ablations-MMLM/t5-small/multimodal_t5_small-0-600_word/t5-small__onhw_wi_word_rh"),
+    # Historical K4 values are printed for Appendix provenance only, never as active RQ3 evidence.
+    ("EXCLUDED K4 OnHW","Ablations-MMLM/GPT-2/Hybrid-Contrastive/K4_sea_contrastive/vlm__onhw_wi_word_rh_lam02"),
+    ("EXCLUDED K4 private","Ablations-MMLM/GPT-2/Hybrid-Contrastive/K4_sea_contrastive/vlm__wi_word_hw6_meta"),
 ]
 
 rows = []

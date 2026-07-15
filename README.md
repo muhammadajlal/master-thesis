@@ -148,7 +148,8 @@ Studied dimensions:
 
 - **Decoder type**: CTC vs AR vs Hybrid vs LM-based vs VLM-based
 - **Connector capacity / architecture** (VLM): Q-Former / MLP / Pooling / KV multi-view at matched parameter budgets
-- **Modality-gap interventions**: contrastive (J2/J2p), CTC compress + MSE (K1), CTC posterior reconstruction (K2), hard-negative encoder (K3), SEA token-level contrastive (K4)
+- **Modality-gap interventions**: sequence-level contrastive alignment (J2/J2p), CTC compress + MSE (K1), CTC posterior reconstruction (K2), and hard-negative encoder regularization (K3)
+- **Excluded historical run**: K4 argmax-segment contrastive is retained for provenance but excluded from RQ3 because its unmasked comparison bank does not implement the intended positive-masked InfoNCE or SEA objective; see `REPRODUCIBILITY.md`
 - **Architectural swaps**: Conformer encoder (N1), ByT5 byte-level decoder (M1)
 - **Exposure-bias remedies (AR)**: scheduled sampling vs input corruption (uniform / bigram-right / bigram-left / self-confusion / adjacent-swap)
 - **Zero-shot transfer**: J-series VLM checkpoints evaluated on unseen OnHW equations

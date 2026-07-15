@@ -244,13 +244,28 @@ RESULTS_ROOT=../../results/hwr2
 | Sequence-level contrastive MLP/Pool | λ = 0.6: `configs/J2_contrastive_{mlp,pooling}/`; λ = 0.2: `configs/_lam02_ch6/J1_contrastive_{mlp,pooling}/` | λ = 0.6: `Ablations-MMLM/GPT-2/Hybrid-Contrastive/J2_contrastive_{mlp,pooling}/vlm__DATA`; λ = 0.2: `.../J1_contrastive_{mlp,pooling}/vlm__DATA_lam02`. **Do not use** `J1_contrastive_*/vlm__DATA` (no suffix): those λ = 0.6 base runs are superseded — see "Superseded contrastive runs" below |
 | Argmax compression + MSE | `configs/K1_ctc_mse/`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid/K1_ctc_mse/vlm__DATA{,_lam02}` |
 | Posterior reconstruction | `configs/K2_ctc_posterior/`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid/K2_ctc_posterior/vlm__DATA{,_lam02}` |
-| Argmax-segment contrastive alignment | `configs/K4_sea_contrastive/`; corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid-Contrastive/K4_sea_contrastive/vlm__DATA{,_lam02}` |
+| **K4 argmax-segment run -- EXCLUDED FROM RQ3** | `configs/K4_sea_contrastive/`; corresponding `_lam02_ch6` configs | Historical results retained under `Ablations-MMLM/GPT-2/Hybrid-Contrastive/K4_sea_contrastive/`; see the exclusion record below |
 | Lightweight Q-Former | `configs/L1_mini_qformer/`, `configs/_noctc_ch6/L1_mini_qformer/`, and corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid/L1_mini_qformer/vlm__DATA{,_noctc,_lam02}` |
 | Gated query connector | `configs/L2_kv_slim/`, `configs/_noctc_ch6/L2_kv_slim/`, and corresponding `_lam02_ch6` configs | `Ablations-MMLM/GPT-2/Hybrid/L2_kv_slim/vlm__DATA{,_noctc,_lam02}` |
 | ByT5 control | `configs/M1_byt5_hybrid_mlp/train-M1-byt5-{onhw,word}.yaml` | `Ablations-MMLM/byt5-small/Hybrid/M1_byt5_hybrid_mlp/vlm__DATA` |
 | Shallow-Conformer control | `configs/N1_conformer_hybrid_mlp/train-N1-conformer-{onhw,word}.yaml` | `Ablations-MMLM/GPT-2/Hybrid/N1_conformer_hybrid_mlp/vlm__DATA` |
 
 Brace notation in the table is shorthand for the listed literal alternatives; it is not a shell command. The result paths used by the paired comparisons in `scripts/chapter6_analysis.py` are encoded in that script. The alignment and auxiliary-CTC sensitivity paths are specified explicitly in the manifest above.
+
+### Excluded K4 argmax-segment run
+
+**Status: EXCLUDED FROM RQ3.** Source audit of `rewi/training/auxiliary_losses.py` showed that the separately prepended designated target also occurs in the comparison bank and that all same-token occurrences remain in the denominator. For normalized anchor `u`, token similarities `s_t`, bank occurrence counts `c_t`, target token `y`, and logit scale `alpha`, the as-run objective is
+
+`-alpha*s_y + log((1+c_y)*exp(alpha*s_y) + sum_{t!=y} c_t*exp(alpha*s_t))`.
+
+The historical run is mathematically defined, but it does not test positive-masked per-position InfoNCE or SEA and is not used in the thesis RQ3 answer.
+
+- Code: `rewi/training/auxiliary_losses.py:322-447`, `rewi/model/vlm_model.py:532-539`, `rewi/dataset/lm_collate.py:87-116`
+- Configs: `configs/K4_sea_contrastive/`, `configs/_lam02_ch6/K4_sea_contrastive/`
+- OnHW selected result: `Ablations-MMLM/GPT-2/Hybrid-Contrastive/K4_sea_contrastive/vlm__onhw_wi_word_rh_lam02/results.json`
+- Private-word selected result: `Ablations-MMLM/GPT-2/Hybrid-Contrastive/K4_sea_contrastive/vlm__wi_word_hw6_meta/results.json`
+
+The result files and configurations are retained for provenance and must not be silently relabeled, overwritten, or included in active Chapter 6 comparisons.
 
 ### Model naming: thesis name to `arch_de`
 
