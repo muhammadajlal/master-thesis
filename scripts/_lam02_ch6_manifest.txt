@@ -15,8 +15,6 @@ configs/_lam02_ch6/K2_ctc_posterior/train-K2-lego-onhw_lam02.yaml
 configs/_lam02_ch6/K2_ctc_posterior/train-K2-lego-word_lam02.yaml
 configs/_lam02_ch6/K3_ec_loss/train-K3-ec-onhw_lam02.yaml
 configs/_lam02_ch6/K3_ec_loss/train-K3-ec-word_lam02.yaml
-configs/_lam02_ch6/K4_sea_contrastive/train-K4-sea-onhw_lam02.yaml
-configs/_lam02_ch6/K4_sea_contrastive/train-K4-sea-word_lam02.yaml
 configs/_lam02_ch6/L1_mini_qformer/train-L1-mini-qformer-onhw_lam02.yaml
 configs/_lam02_ch6/L1_mini_qformer/train-L1-mini-qformer-word_lam02.yaml
 configs/_lam02_ch6/L2_kv_slim/train-L2-kv-slim-onhw_lam02.yaml

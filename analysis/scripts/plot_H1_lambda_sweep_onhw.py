@@ -6,7 +6,7 @@ Companion to plot_H1_lambda_sweep_word.py (private word). For each lambda in
 best-CER epoch). The lambda=0.6 point lives under
 Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__onhw_wi_word_rh; the other
 nine points live under H1_LambdaSweep/H1_hybrid_mlp_lamNN__onhw_wi_word_rh.
-Marks lambda=0.2 (solid) as the OnHW operating point.
+Marks lambda=0.2 (solid) as the selected OnHW loss weight.
 
 Outputs:
   - results/hwr2/H1_LambdaSweep/h1_lambda_sweep_onhw_metrics.csv
@@ -161,7 +161,7 @@ def main() -> None:
         Line2D([0], [0], color="black", linestyle=":", linewidth=1.5,
                label="MLP (no CTC)"),
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
-               label=rf"OnHW operating point $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
+               label=rf"selected OnHW weight $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
     ]
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.04),
                ncol=3, fontsize=10, frameon=False,

@@ -1,7 +1,7 @@
 
 #!/usr/bin/env python3
 """
-Modality Gap Analysis — All Experiments (H1, J1, J2, K1–K5)
+Modality Gap Analysis — Experiments Retained in the Thesis Evidence Chain
 ============================================================
 Produces:
   1. Summary table: cosine similarity + L2 distance for all experiments x datasets
@@ -45,7 +45,6 @@ EXPERIMENTS = [
     ("K1_ctc_mse",              "K1 (MSE)",             "local_alignment"),
     ("K2_ctc_posterior",        "K2 (CTC posterior)",   "architectural"),
     ("K3_ec_loss",              "K3 (EC loss)",         "regularization"),
-    ("K4_sea_contrastive",      "K4 (SEA token)",       "local_alignment"),
     ("K5_kv_multiview",         "K5 (KV inject)",       "architectural"),
     ("L1_mini_qformer",         "L1 (mini Q-Former)",   "architectural"),
     ("L2_kv_slim",              "L2 (KV slim)",         "architectural"),
@@ -286,7 +285,6 @@ def plot_cer_vs_gap():
         "K1 (MSE)":           {"onhw": 7.52, "hw6": 18.30},
         "K2 (CTC posterior)": {"onhw": 11.59, "hw6": 38.09},
         "K3 (EC loss)":       {"onhw": 7.66, "hw6": 19.15},
-        "K4 (SEA token)":     {"onhw": 7.38, "hw6": 18.18},
         "K5 (KV inject)":     {"onhw": 7.00, "hw6": 16.89},
     }
 

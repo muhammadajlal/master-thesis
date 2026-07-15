@@ -3,7 +3,7 @@
 
 Companion to plot_H1_lambda_sweep.py (OnHW WI word). For each lambda in
 {0.1..1.0}, read CER/WER from the canonical results.json (WER at the
-best-CER epoch). The lambda=0.6 point is the chapter operating point and
+best-CER epoch). The lambda=0.6 point is the selected private-word loss weight and
 lives under Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__wi_word_hw6_meta;
 lambda=0.2 reuses the transfer-table run under .../vlm__wi_word_hw6_meta_lam02;
 the other eight points live under H1_LambdaSweep/H1_hybrid_mlp_lamNN__wi_word_hw6_meta.
@@ -166,7 +166,7 @@ def main() -> None:
         Line2D([0], [0], color="black", linestyle=":", linewidth=1.5,
                label="MLP (no CTC)"),
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
-               label=rf"private-word operating point $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
+               label=rf"selected private-word weight $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
     ]
     if empirical_min != SELECTED_LAMBDA:
         handles.append(
