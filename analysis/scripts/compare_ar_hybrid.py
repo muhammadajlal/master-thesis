@@ -880,6 +880,22 @@ def plot_cosine_similarity_comparison(
         plt.close(fig)
         logger.info("Saved cosine similarity comparison: {}", path)
 
+    # Cache the raw grid items so the thesis grids can be re-rendered offline
+    # (different example selection, color scaling, or panel size) without a GPU
+    # re-run. Consumed by analysis/scripts/render_cosine_grid_offline.py.
+    try:
+        import pickle
+        cache_path = os.path.join(save_dir, "cosine_grid_cache.pkl")
+        with open(cache_path, "wb") as fh:
+            pickle.dump([
+                {"word": w, "sim_ar": sa, "chars_ar": ca,
+                 "sim_hyb": sh, "chars_hyb": ch}
+                for (w, sa, ca, sh, ch) in grid_items
+            ], fh)
+        logger.info("Cached cosine grid items: {}", cache_path)
+    except Exception as e:
+        logger.warning("Could not cache cosine grid items: {}", e)
+
     # Combined 2x2 thesis grids: two representative words in the main chapter
     # (beim, schon) and two in the appendix (erhält, erst). Selected by word so
     # the assignment is stable regardless of sample-selection order; falls back
