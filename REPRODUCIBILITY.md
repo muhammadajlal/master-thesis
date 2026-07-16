@@ -305,16 +305,17 @@ Every row below was verified by recomputing the thesis table values from the arc
 | Hybrid HWRFormer, λ = 0.1 | `ar_transformer_xs` | `configs/hybrid-xs/` | `train_element_word_hybrid_01_xs_{onhw_wi,onhw_wd,stabilo,stabilo_sent}/` |
 | Hybrid HWRFormer-L λ sweep (λ = 0.6 operating point) | `ar_transformer_s` | `configs/hybrid/` | `Baseline-Hybrid/train_element_word_hybrid_{01..10}/`, `train_element_word_hybrid_06_*/` |
 | Hybrid + noise, λ = 0.1 | `ar_transformer_xs` | `configs/HybridInputCorruption-XS-L01/` | `HybridInputCorruption-XS-L01_{uniform,bigram_left,bigram_right,self_confusion,adjacent_swap}/` |
-| Scheduled-sampling probe | see note | `configs/AR-NoTeacherForcing/`, `configs/AR-ScheduledSamplingFixed/` | `Baseline-AR-NoTeacherForcing-blconv_b/ar_transformer_s__DATA`, `Baseline-AR-ScheduledSamplingFixed-blconv_b/ar_transformer_s__DATA` |
+| Scheduled-sampling probe | `ar_transformer_xs` | `configs/_ss_xs_frozen/train-ar-{noTF,ssfixed}-{onhw-word,stabilo-word,stabilo-sent}.yaml` | `Baseline-AR-XS-{NoTeacherForcing,ScheduledSamplingFixed}-blconv_b/ar_transformer_xs__{onhw_wi_word_rh,wi_word_hw6_meta,wi_sent_hw6_meta}` |
 | Inference-time decoding study | `ar_transformer_xs` | `configs/decode_study/` | `decode_study_xs_full_{ar,hybrid}_noleak*/stage*__fold{0..4}/metrics.json` |
 
-> **Scheduled-sampling note.** The archived runs behind the thesis table were trained with
-> `arch_de: ar_transformer_s`, and the thesis reports them as **HWRFormer-L** — table, caption and
-> surrounding text agree with these results. The six retained configurations in
-> `configs/AR-NoTeacherForcing/` and `configs/AR-ScheduledSamplingFixed/` therefore use
-> `ar_transformer_s` and point to the matching archived result families. A temporary repointing to
-> unarchived `ar_transformer_xs` paths in commit `c035fbf` was superseded; the
-> `ar_transformer_s__*` result directories and generated fold YAMLs are authoritative.
+> **Scheduled-sampling note.** Table 5.4 uses the six immutable HWRFormer configurations in
+> `configs/_ss_xs_frozen/`: the immediate ramp `p: 0 -> 1` and fixed `p = 0.15` schedules on
+> OnHW WI, private words, and private sentences. Each corresponding `ar_transformer_xs__*`
+> result directory contains five generated fold configurations and a canonical `results.json`.
+> The delayed-ramp and delayed-abrupt configurations in the same directory are separate curriculum
+> controls and are intentionally excluded from the thesis. The older `ar_transformer_s` scheduled-
+> sampling configurations and result families are retained as historical HWRFormer-L artifacts but
+> are not reported in the thesis table.
 
 Preserve these YAMLs together with the generated fold configurations and `results.json`;
 directory names alone are not a substitute for the archived parameters.
