@@ -139,7 +139,7 @@ def plot(rows: list[dict]) -> None:
         ax.errorbar(
             P_VALUES, no_m, yerr=no_s,
             marker="s", color=NOISE_COLOR, linewidth=2, markersize=7, capsize=3,
-            label="HWRFormer + noise",
+            label="HWRFormer + noise injection",
         )
         ax.set_title(display, fontsize=14)
         ax.set_xlabel(r"Prefix perturbation rate $p_{\mathrm{replace}}$",
@@ -148,7 +148,7 @@ def plot(rows: list[dict]) -> None:
         ax.tick_params(axis="both", labelsize=12)
         ax.grid(True, alpha=0.3)
         if idx == 0:
-            ax.set_ylabel(r"Teacher-forced CER (%)", fontsize=14)
+            ax.set_ylabel(r"Oracle-prefix CER (%)", fontsize=14)
     # Single figure-level legend below the panels (no per-panel legend).
     from matplotlib.lines import Line2D
     fig.legend(
@@ -156,7 +156,7 @@ def plot(rows: list[dict]) -> None:
             Line2D([0], [0], color=AR_COLOR, marker="o", lw=2, markersize=7,
                    label="HWRFormer"),
             Line2D([0], [0], color=NOISE_COLOR, marker="s", lw=2, markersize=7,
-                   label=r"HWRFormer + noise ($p{=}0.15$)"),
+                   label="HWRFormer + noise injection"),
         ],
         loc="lower center", bbox_to_anchor=(0.5, -0.03), ncol=2,
         fontsize=13, frameon=False, columnspacing=2.0, handlelength=2.4,

@@ -4,7 +4,7 @@
 
 Codebase and experimental artifacts for a Master's thesis on **writer-independent (WI) online handwriting recognition (HWR) from IMU time series**. The work builds on the REWI baseline introduced in *"Robust and Efficient Writer-Independent IMU-Based Handwriting Recognition"* (Li et al., iWOAR 2025; arXiv:2502.20954).
 
-The thesis studies three families of decoder strategies for IMU HWR:
+The thesis studies six families of decoder strategies for IMU HWR:
 
 - **CTC** — CNN encoder + BiLSTM/Transformer head with CTC loss
 - **Autoregressive (AR)** — CNN encoder + Transformer decoder with cross-attention (the canonical baseline carries elementwise gating)
@@ -117,7 +117,7 @@ The sbatch script patches `idx_fold`, `dir_work`, and `dir_dataset` per-task.
 | YAML key | Purpose |
 |---|---|
 | `arch_en` | Encoder architecture (`blconv_b` is the canonical baseline) |
-| `arch_de` | Decoder architecture (`ar_transformer_s`, `t5-small`, `byt5-small`, `vlm`, ...) |
+| `arch_de` | Decoder architecture (`ar_transformer_xs`, `ar_transformer_s`, `t5-small`, `byt5-small`, `vlm`, ...) |
 | `idx_fold` | Fold index (0–4, or −1 for all-folds via `train_cv.py`) |
 | `dir_dataset` / `dir_work` | Dataset + output paths (patched by sbatch) |
 | `epoch` / `epoch_warmup` | 300 / 30 across all current experiments |
@@ -129,7 +129,7 @@ The sbatch script patches `idx_fold`, `dir_work`, and `dir_dataset` per-task.
 | `vlm_enabled`, `vlm.{lm_name, num_queries, ...}` | VLM mode |
 | `lm_name`, `lm_train_lm`, `lm_unfreeze_epoch`, `lr_enc/proj/lm` | T5/ByT5 mode |
 
-See `work/REWI_work/CLAUDE.md` (local — gitignored) for an in-depth code-tour.
+For the retained environment, exact thesis configuration mapping, and artifact provenance, see [ENVIRONMENT.md](ENVIRONMENT.md) and [REPRODUCIBILITY.md](REPRODUCIBILITY.md).
 
 ---
 
@@ -137,7 +137,7 @@ See `work/REWI_work/CLAUDE.md` (local — gitignored) for an in-depth code-tour.
 
 Replication-grade instructions, public-data download (OnHW500), one-command repro script, and offline HuggingFace handling are in [REPRODUCIBILITY.md](REPRODUCIBILITY.md).
 
-- **OnHW500** experiments are fully reproducible (configs in `configs/AR-Baseline/`, `configs/AR-InputCorruption/`, `configs/AR-Baseline-Equations/`, etc.).
+- **OnHW500** data preparation and the public training/evaluation pipeline are reproducible end-to-end. The exact thesis-reported configuration and result families are listed in `REPRODUCIBILITY.md`; other public-task configs are exploratory.
 - **Stabilo** datasets (`wi_word_hw6_meta`, `wi_sent_hw6_meta`) are private — results on Stabilo are reported but cannot be redistributed.
 
 ---
@@ -152,7 +152,7 @@ Studied dimensions:
 - **Excluded historical run**: K4 argmax-segment contrastive is retained for provenance but excluded from RQ3 because its unmasked comparison bank does not implement the intended positive-masked InfoNCE or SEA objective; see `REPRODUCIBILITY.md`
 - **Architectural swaps**: Conformer encoder (N1), ByT5 byte-level decoder (M1)
 - **Exposure-bias remedies (AR)**: scheduled sampling vs input corruption (uniform / bigram-right / bigram-left / self-confusion / adjacent-swap)
-- **Zero-shot transfer**: J-series VLM checkpoints evaluated on unseen OnHW equations
+- **Codebase-only exploratory transfer:** J-series VLM checkpoints evaluated on unseen OnHW equations; these runs are retained but are not reported in the thesis.
 
 For thesis-ready tables/figures and protocol text:
 - [docs/Master-Project-Report.pdf](docs/Master-Project-Report.pdf)

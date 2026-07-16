@@ -40,7 +40,7 @@ OUT_CSV = WORK / "analysis" / "single_corruption_recovery.csv"
 
 MODELS = [
     ("HWRFormer", "Baseline-AR-XS-blconv_b", "#1f77b4", "o"),
-    ("HWRFormer + noise", "Baseline-AR-XS-InputCorruption-uniform", "#d62728", "s"),
+    ("HWRFormer + noise injection", "Baseline-AR-XS-InputCorruption-uniform", "#d62728", "s"),
 ]
 DATASETS = [
     ("ar_transformer_xs__onhw_wi_word_rh", "onhw_wi_word", "OnHW WI word"),
@@ -165,7 +165,7 @@ def main() -> None:
             Line2D([0], [0], color="#1f77b4", marker="o", lw=2.2, markersize=7,
                    label="HWRFormer"),
             Line2D([0], [0], color="#d62728", marker="s", lw=2.2, markersize=7,
-                   label=r"HWRFormer + noise ($p{=}0.15$)"),
+                   label="HWRFormer + noise injection"),
         ],
         loc="lower center", bbox_to_anchor=(0.5, -0.03), ncol=2,
         fontsize=13, frameon=False, columnspacing=2.0, handlelength=2.4,

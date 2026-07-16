@@ -63,8 +63,8 @@ TASK_NOISE = "Noise (uniform p=0.15)"
 # the XS-architecture recognizer is HWRFormer, and the noise-injection
 # variant is the same architecture trained with uniform input corruption.
 LABEL_AR = "HWRFormer"
-LABEL_NOISE = r"HWRFormer + noise (uniform $p{=}0.15$)"
-LABEL_NOISE_SHORT = "HWRFormer + noise"
+LABEL_NOISE = "HWRFormer + noise injection"
+LABEL_NOISE_SHORT = LABEL_NOISE
 
 AR_COLOR = "#1f77b4"
 NOISE_COLOR = "#d62728"
@@ -81,6 +81,13 @@ DATASETS: list[tuple[str, str]] = [
     ("priv_word", "Private word"),
     ("priv_sent", "Private sentence"),
 ]
+
+TABLE_DATASET_LABELS = {
+    "onhw_wi_word": r"OnHW \gls{wi}",
+    "onhw_wd_word": r"OnHW \gls{wd}",
+    "priv_word": r"Priv.\ Word",
+    "priv_sent": r"Priv.\ Sent.",
+}
 
 
 def _safe_str(x) -> str:
@@ -540,7 +547,7 @@ def plot_ecdf_grid(
         handles=[
             Line2D([0], [0], color=AR_COLOR, lw=2.2, label=LABEL_AR),
             Line2D([0], [0], color=NOISE_COLOR, lw=2.2,
-                   label=r"HWRFormer + noise ($p{=}0.15$)"),
+                   label=LABEL_NOISE_SHORT),
             Line2D([0], [0], color="0.4", linestyle="--", lw=1.0,
                    label=r"per-model mean $\tilde{e}$"),
         ],
@@ -615,13 +622,12 @@ def write_appendix_ar_decomp(results: list[dict], out_path: Path) -> None:
     lines.append(r"\begin{table}[!htbp]")
     lines.append(r"\centering")
     lines.append(
-        r"\caption{Per-character-of-reference sub/ins/del rates for "
-        r"HWRFormer (baseline training, no noise injection) and HWRFormer + "
-        r"noise injection side by side, reported as the companion to "
-        r"\cref{tab:cascade-noise-mcnemar}. Rates are pooled over the five "
-        r"folds and the same paired sample set used in the main table. The "
-        r"main table reports the corresponding deltas (noise minus "
-        r"HWRFormer) in percentage points.}"
+        r"\caption[Operation-rate decomposition under noise injection.]"
+        r"{Per-character-of-reference substitution, insertion, and deletion "
+        r"rates for HWRFormer with and without noise injection. Rates are "
+        r"pooled over five folds on the paired sample set of "
+        r"\cref{tab:cascade-noise-mcnemar}, which reports the corresponding "
+        r"noise-minus-HWRFormer changes.}"
     )
     lines.append(r"\label{tab:cascade-noise-ar-decomp}")
     lines.append(r"\small")
@@ -631,7 +637,7 @@ def write_appendix_ar_decomp(results: list[dict], out_path: Path) -> None:
     lines.append(
         r"\multirow{2}{*}{Dataset} "
         r"& \multicolumn{3}{c}{HWRFormer (\%)} "
-        r"& \multicolumn{3}{c}{HWRFormer + noise (\%)} \\"
+        r"& \multicolumn{3}{c}{HWRFormer + noise injection (\%)} \\"
     )
     lines.append(r"\cmidrule(lr){2-4} \cmidrule(lr){5-7}")
     lines.append(
@@ -639,7 +645,7 @@ def write_appendix_ar_decomp(results: list[dict], out_path: Path) -> None:
         r"& {sub/ref} & {ins/ref} & {del/ref} \\"
     )
     lines.append(r"\midrule")
-    label_map = dict(DATASETS)
+    label_map = TABLE_DATASET_LABELS
     for res in results:
         ds_label = label_map.get(res["dataset_task"], res["dataset_task"])
         lines.append(
@@ -672,14 +678,10 @@ def write_appendix_magnitude(results: list[dict], out_path: Path) -> None:
     lines.append(r"\begin{table}[!htbp]")
     lines.append(r"\centering")
     lines.append(
-        r"\caption{Mean absolute paired length-normalized edit-distance "
-        r"change within the improved and worsened subsets, in percentage "
-        r"points, alongside the magnitude ratio impr.\,/\,wors. Companion "
-        r"to \cref{tab:cascade-noise-mcnemar}. On every dataset the "
-        r"improvements are larger in magnitude than the degradations, "
-        r"which is what allows the per-fold mean $\bar{\Delta\tilde{e}}$ "
-        r"to remain negative on private sentences even though more samples "
-        r"worsen than improve.}"
+        r"\caption[Conditional magnitude of paired noise effects.]"
+        r"{Mean absolute paired length-normalized edit-distance change within "
+        r"the improved and worsened subsets, in percentage points, with their "
+        r"magnitude ratio. Companion to \cref{tab:cascade-noise-mcnemar}.}"
     )
     lines.append(r"\label{tab:cascade-noise-magnitude}")
     lines.append(r"\small")
@@ -687,11 +689,11 @@ def write_appendix_magnitude(results: list[dict], out_path: Path) -> None:
     lines.append(r"\begin{tabular}{lSSS}")
     lines.append(r"\toprule")
     lines.append(
-        r"Dataset & {$|\Delta\tilde{e}|$ impr.\ (pp)} "
-        r"& {$|\Delta\tilde{e}|$ wors.\ (pp)} & {impr.\,/\,wors.} \\"
+        r"Dataset & {$|\Delta e|$ impr.\ (pp)} "
+        r"& {$|\Delta e|$ wors.\ (pp)} & {impr.\,/\,wors.} \\"
     )
     lines.append(r"\midrule")
-    label_map = dict(DATASETS)
+    label_map = TABLE_DATASET_LABELS
     for res in results:
         ds_label = label_map.get(res["dataset_task"], res["dataset_task"])
         impr = res["mean_abs_delta_e_norm_improved_pp"]
