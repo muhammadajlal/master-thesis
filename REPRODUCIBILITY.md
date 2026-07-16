@@ -66,10 +66,7 @@ maximum new-token counts to three so early EOS output cannot change the traced
 shape. The training-only auxiliary CTC head is excluded unless the CTC
 posterior is an inference-time connector input.
 
-The output is written to the project-level
-`results/thesis_vlm_macs.json`; the retained thesis artifact has SHA-256
-`8eb81196eed60335ff7850776047f216322d8f7560b71198d8aaca285ae38ed5`.
-The JSON was regenerated twice with an identical checksum. These are operation
+The script writes its generated output to the workspace-level `../../results/thesis_vlm_macs.json`. A byte-identical handover mirror is retained inside this repository at `results/thesis_vlm_macs.json`; both copies have SHA-256 `8eb81196eed60335ff7850776047f216322d8f7560b71198d8aaca285ae38ed5`. The workspace-level file is the canonical generation output, and the repository copy is the immutable handover artifact. The JSON was regenerated twice with an identical checksum. These are operation
 counts, not latency, peak-memory, or variable-length deployment measurements.
 
 **Row naming.** The artifact names `K5_kv_multiview` as `Legacy K5 KV Multi-View`;
@@ -100,6 +97,7 @@ This helper sanity-checks the public data and training pipeline by reproducing *
 
 
 It does not reproduce every thesis table. The exact Chapter 6 configuration and result mapping is recorded below.
+
 ## Getting `t5-small` weights (offline-first)
 
 Our code defaults to offline loading for HuggingFace models (`lm_local_files_only: true`).
@@ -220,6 +218,26 @@ bash scripts/repro/reproduce_tables.sh \
 
 ## Thesis experiment manifest
 
+### Thesis artifact provenance
+
+This table is the compact entry point from reader-facing evidence to the script and retained inputs that generate it. The detailed configuration-to-result mappings follow below. Paths are relative to this repository unless prefixed by `$RESULTS_ROOT`.
+
+| Thesis artifact family | Generator or verifier | Retained inputs / result family |
+|---|---|---|
+| Chapter 5 migration, gating, capacity, and scheduled-sampling tables | `evaluate.py` | Chapter 5 canonical `results.json` families listed below; scheduled sampling uses `configs/_ss_xs_frozen/` |
+| Noise-rate and noise-mode figures | `analysis/scripts/plot_corruption_p_sweep_dual.py`; `analysis/scripts/plot_corruption_modes_bars_dual.py` | `Baseline-AR-XS-InputCorruption-*` and matched HWRFormer-L result families |
+| Classical auxiliary-CTC weight-selection figure | `analysis/scripts/plot_lambda_sweep_dual.py` | `train_element_word_hybrid_{01..10}_xs_*` and HWRFormer-L `Baseline-Hybrid/` sweep results |
+| Paired noise table, ECDF figure, and Appendix E decomposition tables | `analysis/scripts/cascade_analysis.py` | `analysis/quant_all_val_predictions_ar_vs_noise_xs.csv` and its five-fold paired prediction exports |
+| Prefix-perturbation figure | `analysis/scripts/plot_prefix_perturbation.py` | Per-fold `eval_tf_perturbation_p{000,005,010,015,020}.json` files under the HWRFormer and noise-trained result families |
+| Single-corruption recovery figure | `analysis/scripts/plot_single_corruption_recovery.py` | Per-fold `eval_single_corruption.json` files under the same two result families |
+| Cosine, PCA, and attention diagnostics | `analysis/scripts/compare_ar_hybrid.py`; `analysis/scripts/render_cosine_grid_offline.py` | Retained Fold-0 checkpoints, prediction CSVs, and versioned sample-selection metadata |
+| RQ2 decoding table and calibration figures | `scripts/decode_study_thesis_analysis_xs_noleak.py` | Forty retained per-fold `metrics.json` files in the two `decode_study_xs_full_*_noleak` families |
+| Chapter 6 means, paired effects, intervals, and fold-variation summary | `scripts/chapter6_analysis.py` | Chapter 6 `results.json` families in the manifest below; deterministic JSON: `results/thesis_chapter6_analysis.json` |
+| HWR-GPT auxiliary-CTC sweep figures | `analysis/scripts/plot_H1_lambda_sweep.py`; `analysis/scripts/plot_H1_lambda_sweep_word.py` | H1 lambda-sweep results for OnHW and private words |
+| Sequence-alignment UMAP figures | `scripts/plot_contrastive_comparison_thesis.py`; `scripts/plot_v3c_contrastive_comparison_thesis.py` | Corrected J2 Fold-0 embedding dumps under `analysis/embedding_viz/` |
+| Hybrid-noise aggregate artifact | `analysis/scripts/hybrid_noise_summary.py` | Five noise modes, four datasets, and five folds; output `results/thesis_hybrid_noise_l01.json` |
+| Classical and HWR-GPT MAC rows | `analysis/scripts/mac_token_budget.py`; `analysis/scripts/vlm_macs_for_thesis.py` | `results/thesis_mac_token_budget.json` and the SHA-pinned HWR-GPT MAC artifact described above |
+
 All paths below are relative to the repository root. In result patterns, `DATA` denotes either `onhw_wi_word_rh` or `wi_word_hw6_meta`. A directory ending in `_noctc` denotes auxiliary CTC weight λ = 0, `_lam02` denotes λ = 0.2, and no suffix denotes λ = 0.6, unless the row states otherwise. Each terminal result directory contains `results.json`; the per-fold subdirectories preserve the generated training YAML and selected-checkpoint metadata.
 
 Set the archived result root as:
@@ -319,6 +337,17 @@ Every row below was verified by recomputing the thesis table values from the arc
 
 Preserve these YAMLs together with the generated fold configurations and `results.json`;
 directory names alone are not a substitute for the archived parameters.
+
+### Retained experiment families not reported in the thesis
+
+The repository contains exploratory and historical families beyond the final evidence chain. They are retained for provenance but must not be used to reconstruct a thesis table unless a manifest row above names them explicitly:
+
+- `configs/HybridInputCorruption-XS/` and matching `HybridInputCorruption-XS_*` results use hybrid settings other than the reported HWRFormer lambda = 0.1 matrix.
+- `configs/HybridInputCorruption/` and matching unsuffixed result families are HWRFormer-L hybrid-noise explorations and are not reported.
+- Configuration or result families containing `Equations` target the OnHW equations tasks and are not part of the thesis evaluation.
+- `configs/zero_shot/` and matching ZeroShot result families are exploratory transfer work and are not reported.
+- `configs/AR-SS-DelayedRamp/`, `configs/AR-SS-DelayedAbrupt/`, and delayed scheduled-sampling results are curriculum controls excluded from the final scheduled-sampling table.
+- Legacy `configs/AR-NoTeacherForcing/` and `configs/AR-ScheduledSamplingFixed/` use HWRFormer-L (`ar_transformer_s`). The thesis table instead uses the immutable HWRFormer (`ar_transformer_xs`) snapshot in `configs/_ss_xs_frozen/`.
 
 ### Superseded contrastive runs
 
