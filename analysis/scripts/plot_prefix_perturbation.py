@@ -149,9 +149,19 @@ def plot(rows: list[dict]) -> None:
         ax.grid(True, alpha=0.3)
         if idx == 0:
             ax.set_ylabel(r"Teacher-forced CER (%)", fontsize=14)
-        if idx == n_ds - 1:
-            ax.legend(loc="upper left", fontsize=12)
-    fig.tight_layout()
+    # Single figure-level legend below the panels (no per-panel legend).
+    from matplotlib.lines import Line2D
+    fig.legend(
+        handles=[
+            Line2D([0], [0], color=AR_COLOR, marker="o", lw=2, markersize=7,
+                   label="HWRFormer"),
+            Line2D([0], [0], color=NOISE_COLOR, marker="s", lw=2, markersize=7,
+                   label=r"HWRFormer + noise ($p{=}0.15$)"),
+        ],
+        loc="lower center", bbox_to_anchor=(0.5, -0.03), ncol=2,
+        fontsize=13, frameon=False, columnspacing=2.0, handlelength=2.4,
+    )
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
     OUT_FIG.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT_FIG, bbox_inches="tight")
     plt.close(fig)
