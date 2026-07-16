@@ -683,6 +683,58 @@ def plot_cosine_similarity(
     plt.close(fig)
 
 
+def _render_cosine_grid(
+    items: list,
+    out_path: str,
+    col_labels: tuple[str, str] = ("HWRFormer", "hybrid HWRFormer"),
+) -> None:
+    """Render a compact rows=words x cols=models grid of cosine-similarity
+    matrices at final thesis dimensions with a single shared colorbar.
+
+    items: list of (word, sim_ar, chars_ar, sim_hyb, chars_hyb), one per row.
+    All panels share the fixed [-1, 1] color scale (vmin/vmax below), so one
+    colorbar is honest across the whole grid. Green lines mark the uniformly
+    assigned reference-character bins (|word| equal frame divisions); the
+    explanation lives once in the figure caption, not inside the panels.
+    """
+    n = len(items)
+    if n == 0:
+        return
+    fig, axes = plt.subplots(
+        n, 2, figsize=(6.5, 3.05 * n + 0.35),
+        constrained_layout=True, squeeze=False,
+    )
+    im = None
+    for r, (word, sim_a, ch_a, sim_h, ch_h) in enumerate(items):
+        for c, (sim, chars) in enumerate([(sim_a, ch_a), (sim_h, ch_h)]):
+            ax = axes[r][c]
+            if sim is None or getattr(sim, "size", 0) == 0:
+                ax.set_axis_off()
+                continue
+            im = ax.imshow(sim, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
+            boundaries, _seg = _segments_from_char_labels(chars)
+            for b in boundaries[1:-1]:
+                ax.axhline(b - 0.5, color="lime", linewidth=0.5, alpha=0.7)
+                ax.axvline(b - 0.5, color="lime", linewidth=0.5, alpha=0.7)
+            ax.tick_params(axis="both", labelsize=8)
+            if r == 0:
+                ax.set_title(col_labels[c], fontsize=12, pad=8)
+            if r == n - 1:
+                ax.set_xlabel("Frame index", fontsize=10)
+            if c == 0:
+                ax.set_ylabel(f'"{word}"\nFrame index', fontsize=10)
+    if im is not None:
+        cbar = fig.colorbar(
+            im, ax=axes, shrink=0.85, label="Cosine similarity", pad=0.02,
+        )
+        cbar.set_label("Cosine similarity", fontsize=10)
+        cbar.ax.tick_params(labelsize=8)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Saved cosine similarity grid: {}", out_path)
+
+
 def plot_cosine_similarity_comparison(
     feats_ar: dict,
     feats_hyb: dict,
@@ -730,6 +782,7 @@ def plot_cosine_similarity_comparison(
                 "sample_index": item.get("sample_index", None),
             }
 
+    grid_items: list = []
     for sample_id in chosen:
         # AR
         mask_ar = feats_ar["sample_idx"] == sample_id
@@ -741,6 +794,13 @@ def plot_cosine_similarity_comparison(
         mask_hyb = feats_hyb["sample_idx"] == sample_id
         f_hyb = feats_hyb["features"][mask_hyb]
         c_hyb = [feats_hyb["char_labels"][i] for i, m in enumerate(mask_hyb) if m]
+
+        # Accumulate for the combined thesis grids (rendered after the loop).
+        grid_items.append((
+            str(word_ar),
+            cosine_similarity(f_ar) if f_ar.shape[0] else None, list(c_ar),
+            cosine_similarity(f_hyb) if f_hyb.shape[0] else None, list(c_hyb),
+        ))
 
         # Get difficulty info if available
         diff_info = diff_map.get(int(sample_id), {})
@@ -815,18 +875,37 @@ def plot_cosine_similarity_comparison(
             cbar.set_label("Cosine similarity", fontsize=13)
             cbar.ax.tick_params(labelsize=11)
 
-        # Per-panel titles already convey ground-truth and configuration. A single
-        # footnote documents that the green lines are uniformly assigned
-        # reference-character bins, not a measured alignment (audit F3).
-        fig.text(0.5, -0.02,
-                 "Green lines: uniformly assigned reference-character bins "
-                 "(|label| equal frame divisions), not a measured alignment.",
-                 ha="center", va="top", fontsize=10, color="0.35")
-
         path = os.path.join(save_dir, f"cosine_sim_sample{sample_id:04d}_{word_ar[:10]}.pdf")
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved cosine similarity comparison: {}", path)
+
+    # Combined 2x2 thesis grids: two representative words in the main chapter
+    # (beim, schon) and two in the appendix (erhält, erst). Selected by word so
+    # the assignment is stable regardless of sample-selection order; falls back
+    # to the first available items if a target word is absent.
+    def _pick(words: list[str]) -> list:
+        out = []
+        for w in words:
+            for it in grid_items:
+                if it[0].lower() == w.lower() and it[1] is not None and it[3] is not None:
+                    out.append(it)
+                    break
+        return out
+
+    valid = [it for it in grid_items if it[1] is not None and it[3] is not None]
+    main_items = _pick(["beim", "schon"])
+    if len(main_items) < 2:
+        main_items = valid[:2]
+    if len(main_items) >= 2:
+        _render_cosine_grid(
+            main_items[:2], os.path.join(save_dir, "cosine_grid_main.pdf"))
+    app_items = _pick(["erhält", "erst"])
+    if len(app_items) < 2:
+        app_items = [it for it in valid if it not in main_items[:2]][:2]
+    if len(app_items) >= 2:
+        _render_cosine_grid(
+            app_items[:2], os.path.join(save_dir, "cosine_grid_appendix.pdf"))
 
 
 # ──────── 3b. Diagonal Dominance Metrics (DD, Leak, M_off) ──────── #
@@ -1136,8 +1215,10 @@ def plot_attention_comparison(
                     title_suffix += (", " if diff_tag else "") + f"norm_LD={norm_ld}"
             title_suffix += "]"
 
+        # Generated near final thesis width so \includegraphics scales ~1:1
+        # and the labels stay legible instead of shrinking to a few points.
         fig, (ax1, ax2) = plt.subplots(
-            1, 2, figsize=(18, 6), dpi=150, constrained_layout=True,
+            1, 2, figsize=(9.0, 3.4), dpi=150, constrained_layout=True,
         )
 
         for ax, M, tgt, name in [
@@ -1148,17 +1229,17 @@ def plot_attention_comparison(
                 ax.set_axis_off()
                 continue
             im = ax.imshow(M, aspect="auto", origin="lower", cmap="viridis")
-            ax.set_xlabel("Encoder frame", fontsize=14)
-            ax.set_ylabel("Decoder token", fontsize=14)
-            ax.set_title(f'{name} — "{label}"', fontsize=20, pad=14)
+            ax.set_xlabel("Encoder frame", fontsize=11)
+            ax.set_ylabel("Decoder token", fontsize=11)
+            ax.set_title(f'{name} — "{label}"', fontsize=12, pad=8)
             if len(tgt) <= 30:
                 ax.set_yticks(range(len(tgt)))
-                ax.set_yticklabels(tgt, fontsize=11)
-            ax.tick_params(axis="both", labelsize=12)
+                ax.set_yticklabels(tgt, fontsize=9)
+            ax.tick_params(axis="both", labelsize=9)
 
         cbar = fig.colorbar(im, ax=[ax1, ax2], shrink=0.85, label="Attention weight", pad=0.02)
-        cbar.set_label("Attention weight", fontsize=13)
-        cbar.ax.tick_params(labelsize=11)
+        cbar.set_label("Attention weight", fontsize=10)
+        cbar.ax.tick_params(labelsize=8)
         # Suptitle removed: the per-panel titles ('AR-only — "<word>"' /
         # 'Hybrid — "<word>"') already carry ground-truth + configuration;
         # the suptitle was redundant in thesis figures.
