@@ -9,7 +9,7 @@ Inputs (per dataset, per checkpoint, per fold, per p in {0.00, 0.05, 0.10,
 
 Outputs:
     analysis/prefix_perturbation_sweep.csv         (long-format aggregate)
-    thesis/figures/prefix_perturbation_robustness.pdf  (2 rows x 2 cols)
+    thesis/figures/prefix_perturbation_robustness.pdf  (1 row x 4 cols)
 
 Run from work/REWI_work:
     python analysis/scripts/plot_prefix_perturbation.py
@@ -120,32 +120,36 @@ def _curve(rows: list[dict], task: str, arch: str) -> tuple[np.ndarray, np.ndarr
 
 
 def plot(rows: list[dict]) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8.2), sharex=True)
-    axes_flat = axes.flatten()
+    # 1x4 layout matching single_corruption_recovery.pdf for chapter
+    # consistency. Independent y-axes (no sharey) because the four datasets
+    # have substantially different CER scales.
+    n_ds = len(DATASETS)
+    fig, axes = plt.subplots(1, n_ds, figsize=(3.8 * n_ds, 3.8))
+    if n_ds == 1:
+        axes = [axes]
     for idx, (display, arch) in enumerate(DATASETS):
-        ax = axes_flat[idx]
+        ax = axes[idx]
         ar_m, ar_s = _curve(rows, "AR-only", arch)
         no_m, no_s = _curve(rows, "AR + noise (uniform p=0.15)", arch)
         ax.errorbar(
             P_VALUES, ar_m, yerr=ar_s,
-            marker="o", color=AR_COLOR, linewidth=2, capsize=3,
+            marker="o", color=AR_COLOR, linewidth=2, markersize=7, capsize=3,
             label="HWRFormer",
         )
         ax.errorbar(
             P_VALUES, no_m, yerr=no_s,
-            marker="s", color=NOISE_COLOR, linewidth=2, capsize=3,
-            label=r"HWRFormer + noise (uniform $p{=}0.15$)",
+            marker="s", color=NOISE_COLOR, linewidth=2, markersize=7, capsize=3,
+            label="HWRFormer + noise",
         )
         ax.set_title(display, fontsize=14)
+        ax.set_xlabel(r"Prefix perturbation rate $p_{\mathrm{replace}}$",
+                      fontsize=14)
         ax.set_xticks(P_VALUES)
         ax.tick_params(axis="both", labelsize=12)
         ax.grid(True, alpha=0.3)
-        if idx in (2, 3):
-            ax.set_xlabel(r"Prefix perturbation rate $p_{\mathrm{replace}}$",
-                          fontsize=14)
-        if idx in (0, 2):
+        if idx == 0:
             ax.set_ylabel(r"Teacher-forced CER (%)", fontsize=14)
-        if idx == 1:
+        if idx == n_ds - 1:
             ax.legend(loc="upper left", fontsize=12)
     fig.tight_layout()
     OUT_FIG.parent.mkdir(parents=True, exist_ok=True)
