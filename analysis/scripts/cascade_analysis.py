@@ -489,8 +489,6 @@ def plot_ecdf_grid(
                 r"Aligned per-ref-position error (%)", fontsize=10.5
             )
         ax_top.set_xlabel(r"Reference position $k$", fontsize=10)
-        if col == n_ds - 1:
-            ax_top.legend(loc="lower right", fontsize=8)
 
         # ----- Bottom row: per-model eCDF of e_tilde (HWRFormer vs HWRFormer+noise) -----
         ax_bot = axes[1, col]
@@ -542,12 +540,12 @@ def plot_ecdf_grid(
         handles=[
             Line2D([0], [0], color=AR_COLOR, lw=2.2, label=LABEL_AR),
             Line2D([0], [0], color=NOISE_COLOR, lw=2.2,
-                   label=LABEL_NOISE_SHORT),
+                   label=r"HWRFormer + noise ($p{=}0.15$)"),
             Line2D([0], [0], color="0.4", linestyle="--", lw=1.0,
                    label=r"per-model mean $\tilde{e}$"),
         ],
         loc="lower center", bbox_to_anchor=(0.5, -0.02), ncol=3,
-        fontsize=9, frameon=False, columnspacing=2.0, handlelength=2.4,
+        fontsize=11, frameon=False, columnspacing=2.0, handlelength=2.4,
     )
 
     fig.tight_layout(rect=[0, 0.04, 1, 1])
