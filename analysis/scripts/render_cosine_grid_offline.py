@@ -88,9 +88,16 @@ def render(items: list[dict], out_path: str, scale: str = "shared",
     fig, axes = plt.subplots(n, 2, figsize=(fig_w, fig_h),
                              constrained_layout=True, squeeze=False)
 
-    gmin = min(float(np.min(it["sim_ar"])) for it in items)
-    gmin = min(gmin, min(float(np.min(it["sim_hyb"])) for it in items))
-    gmin = np.floor(gmin * 10) / 10.0  # tidy shared lower bound
+    # Symmetric diverging bound centred at 0 so cosine 0 (orthogonal frames)
+    # maps to white; blue and red then honestly encode sign. Bound = 95th
+    # percentile of |off-diagonal| (the always-1 diagonal saturates red).
+    absoff = []
+    for it in items:
+        for m in (it["sim_ar"], it["sim_hyb"]):
+            off = m[~np.eye(m.shape[0], dtype=bool)]
+            absoff.append(np.abs(off).ravel())
+    vabs = float(np.percentile(np.concatenate(absoff), 95))
+    vabs = float(min(1.0, max(0.4, np.ceil(vabs * 10) / 10.0)))
 
     shared_im = None
     for r, it in enumerate(items):
@@ -100,7 +107,7 @@ def render(items: list[dict], out_path: str, scale: str = "shared",
                 [(it["sim_ar"], it["chars_ar"]), (it["sim_hyb"], it["chars_hyb"])]):
             ax = axes[r][c]
             if scale == "shared":
-                vmin, vmax = gmin, 1.0
+                vmin, vmax = -vabs, vabs
             elif scale == "row":
                 vmin, vmax = row_min, 1.0
             else:  # panel
