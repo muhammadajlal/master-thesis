@@ -196,14 +196,21 @@ def run_ar_eval(model, loader, cfg, device, max_samples: int | None):
     for x, y, len_x, len_y in loader:
         x = x.to(device)
         B = x.size(0)
-        max_len = int(len_y.max().item()) + 2
+        # Label-independent generation horizon (see rewi.training.loops.test):
+        # fixed cap + EOS early stop; long-output datasets need a larger
+        # decode_max_len in the config.
+        max_len = int(cfg.get("decode_max_len", 32))
 
         y_gen = torch.full((B, 1), BOS_ID, dtype=torch.long, device=device)
+        finished = torch.zeros(B, dtype=torch.bool, device=device)
         for _ in range(max_len):
             step_out = model(x, in_lengths=len_x, y_inp=y_gen)
             step_logits = step_out["ar_logits"] if isinstance(step_out, dict) else step_out
             nxt = step_logits[:, -1, :].argmax(-1, keepdim=True)
             y_gen = torch.cat([y_gen, nxt], dim=1)
+            finished |= nxt.squeeze(1).eq(EOS_ID)
+            if bool(finished.all()):
+                break
 
         y_gen = y_gen.detach().cpu().tolist()
         y_cpu = y.cpu()

@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from .ARDecoder import ARDecoder
 from .builders import build_decoder, build_encoder
+from .transformer import Transformer
 
 
 class BaseModel(nn.Module):
@@ -197,6 +198,14 @@ class BaseModel(nn.Module):
 
         # CTC path (per-timestep decoder)
         feats = self.encoder(x)  # (B, T', C')
+        if isinstance(self.decoder, Transformer) and in_lengths is not None:
+            # Self-attention must not attend to padded frames; recurrent CTC
+            # decoders (BiLSTM) are unaffected by padding beyond the CTC input
+            # lengths and keep their original call signature.
+            enc_lengths = torch.div(
+                in_lengths.to(feats.device), self.encoder.ratio_ds, rounding_mode='floor'
+            ).clamp(min=1, max=feats.size(1))
+            return self.decoder(feats, lengths=enc_lengths)
         return self.decoder(feats)
 
     def infer(self) -> None:
