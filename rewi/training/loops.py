@@ -994,7 +994,7 @@ def train_one_epoch(
                     loss = loss + dec_ctc_lambda * loss_dec_ctc
             else:
                 # CTC path
-                out = model(x)
+                out = model(x, in_lengths=len_x)
                 loss = fn_loss(out.permute((1, 0, 2)), y, len_x // model.ratio_ds, len_y)
 
         scaler.scale(loss).backward()
@@ -1456,7 +1456,7 @@ def test(
                 loss = fn_loss(logits.reshape(-1, logits.size(-1)), y_tgt.reshape(-1))
             else:
                 # CTC path
-                out = model(x)
+                out = model(x, in_lengths=len_x)
                 loss = fn_loss(out.permute((1, 0, 2)), y, len_x // model.ratio_ds, len_y)
 
             man.update_iteration(idx, loss.item())
@@ -1470,18 +1470,33 @@ def test(
             # AR greedy decoding
             if do_eval and isinstance(fn_loss, nn.CrossEntropyLoss):
                 B = x.size(0)
-                max_len = int(len_y.max().item()) + 2
+                # Label-independent generation horizon: fixed cap + EOS early
+                # stop. Never derive the horizon from ground-truth lengths.
+                # Word datasets: default 32 is safe (max OnHW label = 19).
+                # Long-output datasets (sentences) must set decode_max_len
+                # in the config (e.g. 128).
+                max_len = int(getattr(man.cfgs, 'decode_max_len', 32))
+                if int(len_y.max().item()) > max_len:
+                    logger.warning(
+                        "decode_max_len={} is shorter than the longest label ({}) in "
+                        "this batch; set decode_max_len in the config.",
+                        max_len, int(len_y.max().item()),
+                    )
                 device = x.device
 
                 tok = tokenizer
                 chars = getattr(man.cfgs, 'categories', None)
 
-                # Autoregressive generation
+                # Autoregressive generation (stops once every sequence emitted EOS)
                 y_gen = torch.full((B, 1), BOS_ID, dtype=torch.long, device=device)
+                finished = torch.zeros(B, dtype=torch.bool, device=device)
                 for _ in range(max_len):
                     step_logits = model(x, in_lengths=len_x, y_inp=y_gen)
                     nxt = step_logits[:, -1, :].argmax(-1, keepdim=True)
                     y_gen = torch.cat([y_gen, nxt], dim=1)
+                    finished |= nxt.squeeze(1).eq(EOS_ID)
+                    if bool(finished.all()):
+                        break
 
                 y_gen = y_gen.detach().cpu().tolist()
                 y_cpu = y.cpu()
@@ -1825,19 +1840,31 @@ def test_hybrid(
 
             # AR greedy
             B = x.size(0)
-            max_len = int(len_y.max().item()) + 2
+            # Label-independent generation horizon (see test()): fixed cap +
+            # EOS early stop; long-output datasets must set decode_max_len.
+            max_len = int(getattr(man.cfgs, 'decode_max_len', 32))
             if max_len_override is not None:
                 try:
                     max_len = int(max_len_override)
                 except Exception:
                     pass
+            if int(len_y.max().item()) > max_len:
+                logger.warning(
+                    "decode_max_len={} is shorter than the longest label ({}) in "
+                    "this batch; set decode_max_len in the config.",
+                    max_len, int(len_y.max().item()),
+                )
 
             # AR greedy decode from cached encoder memory
             y_gen = torch.full((B, 1), BOS_ID, dtype=torch.long, device=mem.device)
+            finished = torch.zeros(B, dtype=torch.bool, device=mem.device)
             for _ in range(max_len):
                 step_logits = model.decoder(y_gen, mem, enc_pad)
                 nxt = step_logits[:, -1, :].argmax(-1, keepdim=True)
                 y_gen = torch.cat([y_gen, nxt], dim=1)
+                finished |= nxt.squeeze(1).eq(EOS_ID)
+                if bool(finished.all()):
+                    break
 
             y_gen = y_gen.detach().cpu().tolist()
             y_cpu = y.detach().cpu()
