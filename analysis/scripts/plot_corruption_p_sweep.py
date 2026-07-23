@@ -90,7 +90,7 @@ def main() -> None:
         l1 = ax.plot(P_VALUES, cers, marker="o", color=cer_color, linewidth=2, label="CER")
         ax.set_ylabel("CER (%)", color=cer_color)
         ax.tick_params(axis="y", labelcolor=cer_color)
-        ax.set_xlabel(r"$p_{\mathrm{ic}}$")
+        ax.set_xlabel(r"$p_{\mathrm{ni}}$")
         ax.set_title(label, fontsize=11)
         ax.axvline(DEFAULT_P, linestyle=":", color="gray", linewidth=1.2)
         ax.grid(True, alpha=0.3)
