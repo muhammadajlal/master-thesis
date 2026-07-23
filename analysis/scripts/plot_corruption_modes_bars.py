@@ -20,6 +20,7 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType, no Type3 (Springer)
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Patch
