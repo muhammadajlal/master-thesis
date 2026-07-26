@@ -63,10 +63,10 @@ def main() -> None:
         ax = axes[i // 2, i % 2]
         c_imu = coords[imu_slice[0]:imu_slice[1]]
         c_text = coords[text_slice[0]:text_slice[1]]
-        ax.scatter(c_text[:, 0], c_text[:, 1], c="tab:green", alpha=0.20, s=100,
+        ax.scatter(c_text[:, 0], c_text[:, 1], c="tab:blue", alpha=0.20, s=100,
                    marker="o", label="Ground-truth text embeddings",
-                   edgecolors="tab:green", linewidths=0.5, zorder=1)
-        ax.scatter(c_imu[:, 0], c_imu[:, 1], c="tab:red", alpha=0.55, s=12,
+                   edgecolors="tab:blue", linewidths=0.5, zorder=1)
+        ax.scatter(c_imu[:, 0], c_imu[:, 1], c="tab:orange", alpha=0.55, s=12,
                    label="Projected IMU embeddings", zorder=2)
         ax.set_title(title, fontsize=12, fontweight="bold")
         if i // 2 == 1:
