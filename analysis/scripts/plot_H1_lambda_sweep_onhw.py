@@ -6,7 +6,7 @@ Companion to plot_H1_lambda_sweep_word.py (private word). For each lambda in
 best-CER epoch). The lambda=0.6 point lives under
 Ablations-MMLM/GPT-2/Hybrid/H1_hybrid_mlp/vlm__onhw_wi_word_rh; the other
 nine points live under H1_LambdaSweep/H1_hybrid_mlp_lamNN__onhw_wi_word_rh.
-Marks lambda=0.2 (solid) as the selected OnHW loss weight.
+Marks lambda=0.2 (solid) as the best-observed OnHW loss weight.
 
 Outputs:
   - results/hwr2/H1_LambdaSweep/h1_lambda_sweep_onhw_metrics.csv
@@ -73,6 +73,11 @@ def mean_sem(values: list[float]) -> tuple[float, float]:
     return mean, sem
 
 
+# Two-sided 95% Student-t half-width factor for df=4 (five folds). The folds are
+# fixed and dependent, so the resulting interval is descriptive, not confirmatory.
+T95_DF4 = 2.776
+
+
 def main() -> None:
     cer_per_lambda: list[list[float]] = []
     wer_per_lambda: list[list[float]] = []
@@ -91,12 +96,14 @@ def main() -> None:
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT_CSV, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["lambda_ctc", "n_folds", "cer_mean", "cer_sem", "wer_mean", "wer_sem"])
+        w.writerow(["lambda_ctc", "n_folds", "cer_mean", "cer_sem", "wer_mean", "wer_sem",
+                    "cer_ci95_half", "wer_ci95_half"])
         for lam, c, wv in zip(LAMBDA_VALUES, cer_per_lambda, wer_per_lambda):
             cm, cs = mean_sem(c)
             wm, ws = mean_sem(wv)
-            w.writerow([lam, len(c), f"{cm:.3f}", f"{cs:.3f}", f"{wm:.3f}", f"{ws:.3f}"])
-        w.writerow(["mlp_noCTC_ref", len(ref_cers), f"{ref_cer_mean:.3f}", "", f"{ref_wer_mean:.3f}", ""])
+            w.writerow([lam, len(c), f"{cm:.3f}", f"{cs:.3f}", f"{wm:.3f}", f"{ws:.3f}",
+                        f"{T95_DF4 * cs:.3f}", f"{T95_DF4 * ws:.3f}"])
+        w.writerow(["mlp_noCTC_ref", len(ref_cers), f"{ref_cer_mean:.3f}", "", f"{ref_wer_mean:.3f}", "", "", ""])
     print(f"wrote {OUT_CSV}")
 
     cer_stats = [mean_sem(c) for c in cer_per_lambda]
@@ -161,7 +168,7 @@ def main() -> None:
         Line2D([0], [0], color="black", linestyle=":", linewidth=1.5,
                label="MLP (no CTC)"),
         Line2D([0], [0], color=SELECTED_COLOR, linestyle="-", linewidth=1.8,
-               label=rf"selected OnHW weight $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
+               label=rf"best-observed OnHW weight $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
     ]
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.04),
                ncol=3, fontsize=10, frameon=False,
