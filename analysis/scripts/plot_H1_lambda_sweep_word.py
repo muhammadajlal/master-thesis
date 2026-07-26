@@ -98,13 +98,18 @@ def main() -> None:
     with open(OUT_CSV, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["lambda_ctc", "n_folds", "cer_mean", "cer_sem", "wer_mean", "wer_sem",
-                    "cer_ci95_half", "wer_ci95_half"])
+                    "cer_ci95_half", "wer_ci95_half",
+                    "cer_pdiff_vs_lam01", "cer_pdiff_ci95_half"])
+        base_c = cer_per_lambda[0]  # lambda = 0.1 (paired per-fold reference)
         for lam, c, wv in zip(LAMBDA_VALUES, cer_per_lambda, wer_per_lambda):
             cm, cs = mean_sem(c)
             wm, ws = mean_sem(wv)
+            pd = [x - y for x, y in zip(c, base_c)]
+            pm, ps = mean_sem(pd)
             w.writerow([lam, len(c), f"{cm:.3f}", f"{cs:.3f}", f"{wm:.3f}", f"{ws:.3f}",
-                        f"{T95_DF4 * cs:.3f}", f"{T95_DF4 * ws:.3f}"])
-        w.writerow(["mlp_noCTC_ref", len(ref_cers), f"{ref_cer_mean:.3f}", "", f"{ref_wer_mean:.3f}", "", "", ""])
+                        f"{T95_DF4 * cs:.3f}", f"{T95_DF4 * ws:.3f}",
+                        f"{pm:.3f}", f"{T95_DF4 * ps:.3f}"])
+        w.writerow(["mlp_noCTC_ref", len(ref_cers), f"{ref_cer_mean:.3f}", "", f"{ref_wer_mean:.3f}", "", "", "", "", ""])
     print(f"wrote {OUT_CSV}")
 
     cer_stats = [mean_sem(c) for c in cer_per_lambda]
