@@ -25,8 +25,9 @@ import torch.nn.functional as F
 class ConvSubsampler(nn.Module):
     """Convolutional front-end for temporal downsampling.
 
-    Two strided Conv1d layers reduce the temporal dimension by a
-    configurable factor (default 8x to match BLConv).
+    Strided Conv1d layers reduce the temporal dimension by a configurable
+    factor: three stride-2 layers for the default 8x (matching BLConv),
+    or two stride-2 layers for 4x.
 
     Input:  (B, C_in, T)
     Output: (B, T', d_model)
@@ -129,9 +130,11 @@ class ConvolutionModule(nn.Module):
 
 
 class MultiHeadSelfAttention(nn.Module):
-    """Multi-head self-attention with relative positional encoding (simplified).
+    """Multi-head self-attention module.
 
-    Uses standard nn.MultiheadAttention with LayerNorm pre-processing.
+    Uses standard nn.MultiheadAttention with LayerNorm pre-processing; no
+    explicit relative-position term is implemented (unlike the original
+    Conformer's relative positional MHSA).
     """
 
     def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1):
