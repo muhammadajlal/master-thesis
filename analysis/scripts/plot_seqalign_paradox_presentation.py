@@ -23,8 +23,10 @@ CONNECTORS = [
     ("Pool-MLP", "#d95f02"),
 ]
 # private words: (without alignment, with alignment)
+COS = {"MLP": (0.03, 0.27), "Pool-MLP": (0.06, 0.28)}      # cosine similarity
 GEOM = {"MLP": (16.1, 3.6), "Pool-MLP": (20.5, 4.1)}       # l2 distance
 RECOG = {"MLP": (17.20, 18.04), "Pool-MLP": (16.87, 17.52)}  # CER %
+COS_REL = {"MLP": r"$9.0\times$", "Pool-MLP": r"$4.7\times$"}
 GEOM_REL = {"MLP": "$-78\\,\\%$", "Pool-MLP": "$-80\\,\\%$"}
 RECOG_REL = {"MLP": "$+4.9\\,\\%$", "Pool-MLP": "$+3.9\\,\\%$"}
 
@@ -60,15 +62,19 @@ def panel(ax, data, rel, title, ylabel, fmt, ypad, good, dys=(0, 0)):
 
 
 def main() -> None:
-    fig, (ax_g, ax_r) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    fig, (ax_c, ax_g, ax_r) = plt.subplots(1, 3, figsize=(13.6, 3.9))
+    panel(ax_c, COS, COS_REL,
+          r"Cosine similarity $\uparrow$ (gap closes)",
+          "sensor--text cosine similarity", "{:.2f}", 0.055, good=True,
+          dys=(-15, 13))
     panel(ax_g, GEOM, GEOM_REL,
-          "Embedding geometry: gap closes",
+          r"$\ell_2$ distance $\downarrow$ (gap closes)",
           r"sensor--text $\ell_2$ distance", "{:.1f}", 3.0, good=True,
           dys=(-16, 14))
     panel(ax_r, RECOG, RECOG_REL,
-          "Recognition: error rises",
+          r"Private-word CER $\uparrow$ (worse)",
           "private-word CER (%)", "{:.2f}", 0.55, good=False)
-    ax_g.legend(fontsize=10.5, frameon=False, loc="upper right")
+    ax_c.legend(fontsize=10.5, frameon=False, loc="upper left")
     fig.tight_layout()
     fig.savefig(OUT, bbox_inches="tight")
     print(f"saved: {OUT}")
