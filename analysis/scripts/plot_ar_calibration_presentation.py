@@ -29,8 +29,8 @@ OUT = Path("/home/woody/iwso/iwso214h/imu-hwr/presentation/figures/"
 
 MODELS = [
     ("ar", "HWRFormer", "#1f77b4", "o"),
-    ("hybrid", "Hybrid HWRFormer", "#2ca02c", "s"),
     ("noise", "HWRFormer + noise injection", "#d62728", "^"),
+    ("hybrid", "Hybrid HWRFormer", "#2ca02c", "s"),
 ]
 DIRS = {"ar": BASE / "results/hwr2/decode_study_xs_full_ar",
         "hybrid": BASE / "results/hwr2/decode_study_xs_full_hybrid",
