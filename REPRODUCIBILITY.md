@@ -231,7 +231,8 @@ This table is the compact entry point from reader-facing evidence to the script 
 | Prefix-perturbation figure | `analysis/scripts/plot_prefix_perturbation.py` | Per-fold `eval_tf_perturbation_p{000,005,010,015,020}.json` files under the HWRFormer and noise-trained result families |
 | Single-corruption recovery figure | `analysis/scripts/plot_single_corruption_recovery.py` | Per-fold `eval_single_corruption.json` files under the same two result families |
 | Cosine, PCA, and attention diagnostics | `analysis/scripts/compare_ar_hybrid.py`; `analysis/scripts/render_cosine_grid_offline.py` | Retained Fold-0 checkpoints, prediction CSVs, and versioned sample-selection metadata |
-| RQ2 decoding table and calibration figures | `scripts/decode_study_thesis_analysis_xs_noleak.py` | Forty retained per-fold `metrics.json` files in the two `decode_study_xs_full_*_noleak` families |
+| RQ2 calibration figures | `scripts/decode_study_thesis_analysis_xs_noleak.py` | Forty retained per-fold `metrics.json` files in the two `decode_study_xs_full_*_noleak` families |
+| RQ2 decoding tables (WI cross-model at matched N-best = 4; cross-dataset transfer) | `analysis/scripts/summarize_decode_crossds.py` (gated aggregation; emits the exact LaTeX rows) | Per-fold `metrics.json`/`config.json`/`predictions.json` in `decode_study_xs_full_ar{,_wd,_privword,_privsent}`, `decode_study_xs_full_{noise,hybrid}`, `decode_study_xs_full_{ar,hybrid}_noleak_a0`, `decode_rescore_n4_{wi,wd,privword,privsent}`, and `decode_rescore_n4_wi_{noise,hybrid}` |
 | Chapter 6 means, paired effects, intervals, and fold-variation summary | `scripts/chapter6_analysis.py` | Chapter 6 `results.json` families in the manifest below; deterministic JSON: `results/thesis_chapter6_analysis.json` |
 | HWR-GPT auxiliary-CTC sweep figures | `analysis/scripts/plot_H1_lambda_sweep.py`; `analysis/scripts/plot_H1_lambda_sweep_word.py` | H1 lambda-sweep results for OnHW and private words |
 | Sequence-alignment UMAP figures | `scripts/plot_contrastive_comparison_thesis.py`; `scripts/plot_v3c_contrastive_comparison_thesis.py` | Corrected J2 Fold-0 embedding dumps under `analysis/embedding_viz/` |
@@ -338,9 +339,32 @@ Every row below was verified by recomputing the thesis table values from the arc
 Preserve these YAMLs together with the generated fold configurations and `results.json`;
 directory names alone are not a substitute for the archived parameters.
 
+### Per-dataset leak-free KenLM models (privacy-critical)
+
+The decoding study uses one character 5-gram KenLM per dataset and validation fold, stored as `<lmdir>/fold_<k>/{corpus.txt, char_5gram.arpa, char_5gram.binary}`:
+
+| Directory | Dataset |
+|---|---|
+| `lm_noleak/` | `onhw_wi_word_rh` |
+| `lm_noleak_wd/` | `onhw_wd_word_rh` |
+| `lm_noleak_privword/` | `wi_word_hw6_meta` |
+| `lm_noleak_privsent/` | `wi_sent_hw6_meta` |
+
+All four directories are **deliberately untracked** (`.gitignore` rule `lm_noleak*/`): the private-dataset variants contain raw private label text in `corpus.txt` and in the ARPA vocabulary, and must never reach a public remote. They are derived artifacts; regenerate deterministically with the vendored KenLM (`vendor/kenlm`):
+
+```bash
+python scripts/train_char_lm.py --dataset ../../data/<dataset> --per_fold --order 5 --outdir <lmdir>
+```
+
+The `--per_fold` corpus is built leak-free from the `val.json` partitions of all folds except the test fold (using `train.json[k]` keys would duplicate samples and inflate word frequencies; see the note in `scripts/train_char_lm.py`).
+
+Rescoring provenance: the decoding-study selection grid used `N_best in {8, 16, 32}`, but N-best generation sets the search beam, so the `stageC1_*_N8_*` runs decode at beam 8 rather than the calibrated beam 4. The reported operating point is therefore the matched re-run at `N_best = B_beam = 4` (`decode_rescore_n4_*` and `decode_rescore_n4_wi_{noise,hybrid}` families, produced by `slurm/decode_rescore_n4.sbatch` and `slurm/decode_rescore_n4_models_wi.sbatch`). The N=8 runs are retained as the documented grid point and are superseded for reporting because they combined wider search and list generation with reranking.
+
 ### Retained experiment families not reported in the thesis
 
 The repository contains exploratory and historical families beyond the final evidence chain. They are retained for provenance but must not be used to reconstruct a thesis table unless a manifest row above names them explicitly:
+
+- `decode_crossds_{hybrid,noise}_{wd,privword,privsent}` are complete five-fold decoding runs of the hybrid and noise-trained recognizers on the three transfer datasets (defense backup material). The thesis restricts the cross-dataset transfer analysis to plain HWRFormer; these families are measured but unreported, not untested.
 
 - `configs/HybridInputCorruption-XS/` and matching `HybridInputCorruption-XS_*` results use hybrid settings other than the reported HWRFormer lambda = 0.1 matrix.
 - `configs/HybridInputCorruption/` and matching unsuffixed result families are HWRFormer-L hybrid-noise explorations and are not reported.
