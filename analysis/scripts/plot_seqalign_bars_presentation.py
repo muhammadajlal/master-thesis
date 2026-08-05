@@ -72,8 +72,8 @@ def main() -> None:
     panel(ax_r, RECOG_WO, RECOG_W, RECOG_REL,
           r"Private-word CER $\uparrow$ (worse)", BAD,
           "private-word CER (%)", "{:.2f}", 21.5)
-    handles = [Patch(color=C_WO, label="without alignment"),
-               Patch(color=C_W, label="with alignment")]
+    handles = [Patch(color=C_WO, label="without contrastive alignment"),
+               Patch(color=C_W, label="with contrastive alignment")]
     fig.legend(handles=handles, loc="upper center", ncol=2, frameon=False,
                fontsize=10, bbox_to_anchor=(0.5, 1.02))
     fig.tight_layout(rect=(0, 0, 1, 0.90))
