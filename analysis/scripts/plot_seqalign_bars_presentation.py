@@ -64,10 +64,10 @@ def panel(ax, wo, w, rel, title, tcolor, ylabel, fmt, ymax):
 def main() -> None:
     fig, (ax_c, ax_g, ax_r) = plt.subplots(1, 3, figsize=(11.4, 3.3))
     panel(ax_c, COS_WO, COS_W, COS_REL,
-          r"Cosine similarity $\uparrow$ (gap closes)", GOOD,
+          r"Private-word cosine similarity $\uparrow$ (gap closes)", GOOD,
           "sensor--text cosine similarity", "{:.2f}", 0.36)
     panel(ax_g, GEOM_WO, GEOM_W, GEOM_REL,
-          r"$\ell_2$ distance $\downarrow$ (gap closes)", GOOD,
+          r"Private-word $\ell_2$ distance $\downarrow$ (gap closes)", GOOD,
           r"sensor--text $\ell_2$ distance", "{:.1f}", 25.5)
     panel(ax_r, RECOG_WO, RECOG_W, RECOG_REL,
           r"Private-word CER $\uparrow$ (worse)", BAD,
