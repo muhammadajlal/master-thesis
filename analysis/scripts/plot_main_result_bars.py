@@ -72,7 +72,7 @@ def panel(ax, datasets, series, ylabel, label_fs, ymax=None):
 
 
 def chart(name, datasets, models, figsize, label_fs=8.0, legend_ncol=None,
-          annotate=None):
+          annotate=None, legend_fs=10):
     """models: list of (name, color, cer_list, wer_list)."""
     fig, (ax_c, ax_w) = plt.subplots(1, 2, figsize=figsize)
     panel(ax_c, datasets, [(n, c, cer) for n, c, cer, _ in models],
@@ -85,9 +85,9 @@ def chart(name, datasets, models, figsize, label_fs=8.0, legend_ncol=None,
         annotate(ax_c, ax_w)
     handles = [Patch(facecolor=c, label=n) for n, c, _, _ in models]
     fig.legend(handles=handles, loc="upper center",
-               ncol=legend_ncol or len(models), frameon=False, fontsize=10,
-               bbox_to_anchor=(0.5, 1.03), columnspacing=1.6,
-               handlelength=1.5, handletextpad=0.5)
+               ncol=legend_ncol or len(models), frameon=False,
+               fontsize=legend_fs, bbox_to_anchor=(0.5, 1.03),
+               columnspacing=1.3, handlelength=1.4, handletextpad=0.5)
     fig.tight_layout(rect=(0, 0, 1, 0.90))
     out = f"{OUT_DIR}/{name}.pdf"
     fig.savefig(out, bbox_inches="tight")
@@ -103,7 +103,7 @@ NOISE = ("HWRFormer + noise injection", C_NOISE,
          [6.86, 13.52, 7.79, 7.09], [13.18, 36.05, 23.69, 18.87])
 HYBRID = ("Hybrid HWRFormer", C_HYBRID,
           [6.83, 13.39, 9.37, 9.38], [10.17, 27.80, 19.76, 17.08])
-FUSION = ("HWRFormer + KenLM fusion", C_FUSION,
+FUSION = ("HWRFormer + character 5-gram (KenLM)", C_FUSION,
           [6.80, 16.63, 8.96, 7.47], [10.36, 32.48, 17.16, 11.65])
 
 
@@ -113,7 +113,7 @@ def main() -> None:
     chart("bars_hybrid", DS4, [REWI, HWRF, NOISE, HYBRID], (13.2, 3.6),
           label_fs=7.4, legend_ncol=4)
     chart("bars_classical", DS4, [REWI, HWRF, NOISE, HYBRID, FUSION],
-          (13.6, 3.7), label_fs=6.8, legend_ncol=5)
+          (13.6, 3.7), label_fs=6.8, legend_ncol=5, legend_fs=9.0)
 
     decoding = [
         ("Greedy", C_GREEDY,
