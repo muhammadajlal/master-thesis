@@ -108,12 +108,12 @@ FUSION = ("HWRFormer + character 5-gram (KenLM)", C_FUSION,
 
 
 def main() -> None:
-    chart("bars_migration", DS4, [REWI, HWRF], (12.6, 3.6), label_fs=8.5)
-    chart("bars_noise", DS4, [REWI, HWRF, NOISE], (12.9, 3.6), label_fs=8.0)
-    chart("bars_hybrid", DS4, [REWI, HWRF, NOISE, HYBRID], (13.2, 3.6),
+    chart("bars_migration", DS4, [REWI, HWRF], (12.6, 4.1), label_fs=8.5)
+    chart("bars_noise", DS4, [REWI, HWRF, NOISE], (12.9, 4.1), label_fs=8.0)
+    chart("bars_hybrid", DS4, [REWI, HWRF, NOISE, HYBRID], (13.2, 4.1),
           label_fs=7.4, legend_ncol=4)
     chart("bars_classical", DS4, [REWI, HWRF, NOISE, HYBRID, FUSION],
-          (13.6, 3.7), label_fs=6.8, legend_ncol=5, legend_fs=9.0)
+          (13.6, 4.2), label_fs=6.8, legend_ncol=5, legend_fs=9.0)
 
     decoding = [
         ("Greedy", C_GREEDY,
@@ -125,7 +125,7 @@ def main() -> None:
         ("+ KenLM rescoring", C_RESCORE,
          [6.79, 18.06, 9.04, 8.14], [10.34, 34.08, 16.69, 12.17]),
     ]
-    chart("bars_decoding", DS4, decoding, (13.2, 3.6), label_fs=7.4,
+    chart("bars_decoding", DS4, decoding, (13.2, 4.1), label_fs=7.4,
           legend_ncol=4)
 
     gptinit = [
