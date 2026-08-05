@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Aggregate the dedicated single-hardware decoding TIMING pass.
+
+Sources: results/hwr2/decode_timing_v100_{wi,wd,privword,privsent} produced by
+slurm/decode_timing_v100.sbatch — plain HWRFormer, all four Table-5.13 cells
+per dataset, every run on one NVIDIA V100 (mixed-partition provenance of the
+canonical runs makes their runtime fields incomparable across cells; see the
+sbatch header).
+
+Evidence gates (all hard failures):
+  * exactly 5 folds per cell, metrics/config/predictions present;
+  * per-cell config values match the canonical method definitions
+    (METHOD_EXPECT from summarize_decode_crossds) incl. checkpoint family,
+    LM directory, and a uniform size_batch across every run;
+  * CER equality per fold against the canonical cell used by Table 5.13
+    (|delta| <= 1e-3 absolute rate; see CER_TOL comment): decoding is
+    deterministic per hardware, so the timing pass doubles as a regression
+    check — only runtime is taken from it.
+
+Outputs (deterministic; run twice -> byte-identical):
+  analysis/decode_crossds_out/decode_runtime_summary.csv
+  analysis/decode_crossds_out/table_rows_decode_runtime.tex
+"""
+
+import csv
+import importlib.util
+import json
+import statistics
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location(
+    "sdc", HERE / "summarize_decode_crossds.py")
+sdc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sdc)
+
+RESULTS = sdc.RESULTS
+OUTDIR = sdc.OUTDIR_DEFAULT
+FOLDS = sdc.FOLDS
+METHOD_EXPECT = sdc.METHOD_EXPECT
+DATASETS = sdc.DATASETS
+DATASET_ORDER = sdc.DATASET_ORDER
+METHOD_ROWS = sdc.METHOD_ROWS_5_13
+PLAIN_CKPT = sdc.PLAIN_CKPT_FAMILY
+
+TIMING_DIR = {ds: f"decode_timing_v100_{ds}" for ds in DATASET_ORDER}
+CER_TOL = 1e-3  # absolute rate. Decoding is deterministic per hardware, but the
+# canonical runs used mixed partitions (v100/rtx3080/a100) while the timing pass
+# is v100-only; different GPU kernels flip rare argmax ties. Observed drift:
+# 15/80 cells nonzero, max 4.5e-4 (0.045 pp). Config errors would exceed 1e-3.
+
+
+def fail(msg):
+    sys.exit(f"GATE FAILURE: {msg}")
+
+
+def load_run(study, tag, fold):
+    d = RESULTS / study / f"{tag}__fold{fold}"
+    m, c = d / "metrics.json", d / "config.json"
+    if not (m.exists() and c.exists() and (d / "predictions.json").exists()):
+        fail(f"missing files under {d}")
+    return json.load(open(m)), json.load(open(c))
+
+
+def main():
+    batch_sizes = set()
+    rows_long = []
+    means = {}  # (ds, method) -> mean ms
+    for ds in DATASET_ORDER:
+        spec_ds = DATASETS[ds]
+        for method, _label in METHOD_ROWS:
+            canon_study, tag = spec_ds["plain"][method]
+            per_fold = []
+            for fold in FOLDS:
+                tm, tc = load_run(TIMING_DIR[ds], tag, fold)
+                cm, _ = load_run(canon_study, tag, fold)
+                for k, v in METHOD_EXPECT[method].items():
+                    got = tc.get(k, tm.get("config", {}).get(k))
+                    if got != v:
+                        fail(f"{ds}/{method}/fold{fold}: config {k}={got}, expected {v}")
+                if PLAIN_CKPT not in str(tc.get("checkpoint", "")):
+                    fail(f"{ds}/{method}/fold{fold}: checkpoint family mismatch")
+                if method in ("fusion", "rescore") and spec_ds["lm_dir"] not in str(tc.get("lm_path", "")):
+                    fail(f"{ds}/{method}/fold{fold}: lm_path mismatch")
+                batch_sizes.add(tc.get("size_batch", tm.get("config", {}).get("size_batch")))
+                if tm["n_samples"] != cm["n_samples"]:
+                    fail(f"{ds}/{method}/fold{fold}: n_samples {tm['n_samples']} != canonical {cm['n_samples']}")
+                dcer = abs(tm["cer"] - cm["cer"])
+                if dcer > CER_TOL:
+                    fail(f"{ds}/{method}/fold{fold}: CER drift {dcer:.6f} vs canonical")
+                per_fold.append(tm["runtime_per_sample_ms"])
+                rows_long.append([ds, method, fold,
+                                  f"{tm['runtime_per_sample_ms']:.4f}",
+                                  f"{dcer:.6f}", tm["n_samples"]])
+            means[(ds, method)] = statistics.mean(per_fold)
+    if len(batch_sizes) != 1:
+        fail(f"non-uniform size_batch across runs: {sorted(batch_sizes)}")
+
+    OUTDIR.mkdir(parents=True, exist_ok=True)
+    with open(OUTDIR / "decode_runtime_summary.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["dataset", "method", "fold", "runtime_per_sample_ms",
+                    "abs_cer_delta_vs_canonical", "n_samples"])
+        w.writerows(rows_long)
+        w.writerow([])
+        w.writerow(["dataset", "method", "mean_runtime_per_sample_ms"])
+        for ds in DATASET_ORDER:
+            for method, _ in METHOD_ROWS:
+                w.writerow([ds, method, f"{means[(ds, method)]:.1f}"])
+
+    with open(OUTDIR / "table_rows_decode_runtime.tex", "w") as f:
+        f.write(f"% generated by summarize_decode_runtimes.py; size_batch={batch_sizes.pop()}\n")
+        for method, label in METHOD_ROWS:
+            cells = " & ".join(f"{means[(ds, method)]:.1f}" for ds in DATASET_ORDER)
+            f.write(f"{label} & {cells} \\\\\n")
+    print("OK: gates passed;", len(rows_long), "runs;",
+          "max |dCER| =", max(r[4] for r in rows_long))
+
+
+if __name__ == "__main__":
+    main()
