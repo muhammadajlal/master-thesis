@@ -191,9 +191,9 @@ def main() -> None:
         Line2D([0], [0], color=S_COLOR, linestyle=":", linewidth=1.2,
                label=r"HWRFormer-L AR-only reference (elementwise-gated)"),
         Line2D([0], [0], color=XS_COLOR, linestyle="-", linewidth=1.8,
-               label=r"HWRFormer selected $\lambda_{\mathrm{ctc}}{=}0.1$"),
+               label=r"HWRFormer retained $\lambda_{\mathrm{ctc}}{=}0.1$"),
         Line2D([0], [0], color=S_COLOR, linestyle="-", linewidth=1.8,
-               label=r"HWRFormer-L selected $\lambda_{\mathrm{ctc}}{=}0.6$"),
+               label=r"HWRFormer-L retained $\lambda_{\mathrm{ctc}}{=}0.6$"),
     ]
     fig.legend(
         handles=legend_handles,
