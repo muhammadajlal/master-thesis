@@ -166,6 +166,11 @@ def main() -> None:
 
     ax_cer.set_ylabel("CER (%)", fontsize=14.5)
     ax_wer.set_ylabel("WER (%)", fontsize=14.5)
+    # 5-unit WER ticks with headroom so the top tick (45) sits above the
+    # no-CTC reference line instead of the axis ending mid-air at 40
+    from matplotlib.ticker import MultipleLocator
+    ax_wer.yaxis.set_major_locator(MultipleLocator(5))
+    ax_wer.set_ylim(top=45.3)
     ax_cer.set_title(r"HWR-GPT (MLP + CTC): CER vs $\lambda_{\mathrm{ctc}}$ (private word)", fontsize=12)
     ax_wer.set_title(r"HWR-GPT (MLP + CTC): WER vs $\lambda_{\mathrm{ctc}}$ (private word)", fontsize=12)
 
