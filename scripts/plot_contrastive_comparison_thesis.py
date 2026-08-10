@@ -68,13 +68,16 @@ def main() -> None:
                    edgecolors="tab:blue", linewidths=0.5, zorder=1)
         ax.scatter(c_imu[:, 0], c_imu[:, 1], c="tab:orange", alpha=0.55, s=12,
                    label="Projected IMU embeddings", zorder=2)
-        ax.set_title(title, fontsize=12, fontweight="bold")
+        ax.set_title(title, fontsize=18, fontweight="bold")
         if i // 2 == 1:
-            ax.set_xlabel("UMAP dim 1", fontsize=10)
+            ax.set_xlabel("UMAP dim 1", fontsize=15)
         if i % 2 == 0:
-            ax.set_ylabel("UMAP dim 2", fontsize=10)
-        ax.legend(fontsize=12, loc="upper right", markerscale=1.5)
-        ax.tick_params(labelsize=8)
+            ax.set_ylabel("UMAP dim 2", fontsize=15)
+        # panel 0: upper-right would occlude the collapsed IMU cluster at
+        # larger legend sizes; lower right is empty in that panel
+        legend_loc = "lower right" if i == 0 else "upper right"
+        ax.legend(fontsize=14, loc=legend_loc, markerscale=1.5)
+        ax.tick_params(labelsize=13)
 
     plt.tight_layout()
     OUT_PDF.parent.mkdir(parents=True, exist_ok=True)

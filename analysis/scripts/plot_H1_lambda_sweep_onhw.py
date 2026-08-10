@@ -155,11 +155,12 @@ def main() -> None:
                    color=SELECTED_COLOR, alpha=0.22, zorder=1)
         ax.axvline(SELECTED_LAMBDA, color=SELECTED_COLOR, linestyle="-",
                    linewidth=1.8, alpha=0.95, zorder=2)
-        ax.set_xlabel(r"$\lambda_{\mathrm{ctc}}$", fontsize=12)
+        ax.set_xlabel(r"$\lambda_{\mathrm{ctc}}$", fontsize=14.5)
         ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=13)
 
-    ax_cer.set_ylabel("CER (%)", fontsize=12)
-    ax_wer.set_ylabel("WER (%)", fontsize=12)
+    ax_cer.set_ylabel("CER (%)", fontsize=14.5)
+    ax_wer.set_ylabel("WER (%)", fontsize=14.5)
     ax_cer.set_title(r"HWR-GPT (MLP + CTC): CER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
     ax_wer.set_title(r"HWR-GPT (MLP + CTC): WER vs $\lambda_{\mathrm{ctc}}$ (OnHW WI word)", fontsize=12)
 
@@ -176,7 +177,7 @@ def main() -> None:
                label=rf"best-observed OnHW weight $\lambda_{{\mathrm{{ctc}}}}={SELECTED_LAMBDA}$"),
     ]
     fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, -0.04),
-               ncol=3, fontsize=10, frameon=False,
+               ncol=3, fontsize=12.5, frameon=False,
                handlelength=2.2, columnspacing=1.8)
 
     fig.tight_layout(rect=[0, 0.16, 1, 1])

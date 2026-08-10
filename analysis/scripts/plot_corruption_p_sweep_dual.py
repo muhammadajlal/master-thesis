@@ -150,34 +150,36 @@ def main() -> None:
                 ax.text(
                     0.5, 0.5, "no data",
                     transform=ax.transAxes, ha="center", va="center",
-                    fontsize=10, color="0.45", style="italic",
+                    fontsize=13, color="0.45", style="italic",
                 )
-                ax.set_xticks(P_VALUES)
+                ax.set_xticks([0.0, 0.1, 0.2, 0.3])
+                ax.set_xticks([0.05, 0.15], minor=True)
                 continue
 
             _draw_metric(ax, P_VALUES, cer_means, cer_sems, CER_COLOR, "o", "-")
-            ax.tick_params(axis="y", labelcolor=CER_COLOR, labelsize=9.0)
+            ax.tick_params(axis="y", labelcolor=CER_COLOR, labelsize=12.5)
             ax.axvline(DEFAULT_P, linestyle="--", color="#d62728",
                        linewidth=1.8, alpha=0.75, zorder=4)
-            ax.grid(True, alpha=0.3, linewidth=0.6)
+            ax.grid(True, which="both", alpha=0.3, linewidth=0.6)
             ax.set_axisbelow(True)
-            ax.set_xticks(P_VALUES)
-            ax.tick_params(axis="x", labelsize=9.0)
+            ax.set_xticks([0.0, 0.1, 0.2, 0.3])
+            ax.set_xticks([0.05, 0.15], minor=True)
+            ax.tick_params(axis="x", labelsize=12.5)
 
             ax2 = ax.twinx()
             _draw_metric(ax2, P_VALUES, wer_means, wer_sems, WER_COLOR, "s", "--")
-            ax2.tick_params(axis="y", labelcolor=WER_COLOR, labelsize=9.0)
+            ax2.tick_params(axis="y", labelcolor=WER_COLOR, labelsize=12.5)
 
             if row_idx == 0:
-                ax.set_title(ds_label, fontsize=11.5)
+                ax.set_title(ds_label, fontsize=15.5)
             if row_idx == 1:
-                ax.set_xlabel(r"$p_{\mathrm{replace}}$", fontsize=10.5)
+                ax.set_xlabel(r"$p_{\mathrm{replace}}$", fontsize=14.5)
             if col == 0:
-                ax.set_ylabel(f"{ROW_TITLES[row_idx]}\nCER (%)", fontsize=10.5, color=CER_COLOR)
+                ax.set_ylabel(f"{ROW_TITLES[row_idx]}\nCER (%)", fontsize=14.0, color=CER_COLOR)
             else:
-                ax.set_ylabel("CER (%)", fontsize=9.5, color=CER_COLOR)
+                ax.set_ylabel("CER (%)", fontsize=13.0, color=CER_COLOR)
             if col == len(DATASETS) - 1:
-                ax2.set_ylabel("WER (%)", fontsize=10.0, color=WER_COLOR)
+                ax2.set_ylabel("WER (%)", fontsize=13.5, color=WER_COLOR)
             else:
                 ax2.set_ylabel("")
 
@@ -194,7 +196,7 @@ def main() -> None:
         loc="lower center",
         bbox_to_anchor=(0.5, -0.015),
         ncol=3,
-        fontsize=10,
+        fontsize=13,
         frameon=False,
         handlelength=2.2,
         columnspacing=1.8,

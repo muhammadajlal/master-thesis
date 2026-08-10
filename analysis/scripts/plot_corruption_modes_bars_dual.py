@@ -156,7 +156,7 @@ def main() -> None:
                 ax.text(
                     0.5, 0.5, "no data",
                     transform=ax.transAxes, ha="center", va="center",
-                    fontsize=10, color="0.45", style="italic",
+                    fontsize=13, color="0.45", style="italic",
                 )
 
             ax.set_xticks(bar_xs)
@@ -164,16 +164,16 @@ def main() -> None:
             ax.set_ylim(0, col_ymax[col])
             ax.spines["top"].set_visible(False)
             ax.spines["right"].set_visible(False)
-            ax.tick_params(axis="y", labelsize=9.5)
+            ax.tick_params(axis="y", labelsize=12.5)
             ax.grid(axis="y", alpha=0.3, linewidth=0.6)
             ax.set_axisbelow(True)
 
             if row == 0:
-                ax.set_title(ds_label, fontsize=11.5)
+                ax.set_title(ds_label, fontsize=15.5)
             if col == 0:
-                ax.set_ylabel(f"{ROW_TITLES[row]}\nCER (%)", fontsize=11.0)
+                ax.set_ylabel(f"{ROW_TITLES[row]}\nCER (%)", fontsize=14.0)
             else:
-                ax.set_ylabel("CER (%)", fontsize=10.0)
+                ax.set_ylabel("CER (%)", fontsize=13.0)
 
     handles = [Patch(facecolor=c, edgecolor="black", label=lab) for _, lab, c in SERIES]
     fig.legend(
@@ -181,7 +181,7 @@ def main() -> None:
         loc="lower center",
         bbox_to_anchor=(0.5, -0.015),
         ncol=len(SERIES),
-        fontsize=10.0,
+        fontsize=13.0,
         frameon=False,
         handlelength=1.6,
         handletextpad=0.6,
