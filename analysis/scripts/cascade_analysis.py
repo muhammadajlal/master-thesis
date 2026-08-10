@@ -489,16 +489,18 @@ def plot_ecdf_grid(
                 sub["err_rate"].to_numpy() * 100.0,
                 marker=marker, color=color, linewidth=2, markersize=4, label=leg,
             )
-        ax_top.set_title(label, fontsize=11)
+        ax_top.set_title(label, fontsize=16)
         ax_top.grid(True, alpha=0.3)
+        ax_top.tick_params(labelsize=13.5)
         if col == 0:
             ax_top.set_ylabel(
-                r"Aligned per-ref-position error (%)", fontsize=10.5
+                r"Aligned per-ref-position error (%)", fontsize=12
             )
-        ax_top.set_xlabel(r"Reference position $k$", fontsize=10)
+        ax_top.set_xlabel(r"Reference position $k$", fontsize=14.5)
 
         # ----- Bottom row: per-model eCDF of e_tilde (HWRFormer vs HWRFormer+noise) -----
         ax_bot = axes[1, col]
+        ax_bot.tick_params(labelsize=13.5)
         ds_samples = per_sample[per_sample["dataset_task"] == dataset_task]
         for task, color, leg in [
             (TASK_AR, AR_COLOR, LABEL_AR),
@@ -518,10 +520,10 @@ def plot_ecdf_grid(
         ax_bot.set_ylim(0.0, 1.02)
         ax_bot.grid(True, alpha=0.3)
         ax_bot.set_xlabel(
-            r"$\tilde{e} = d(\hat{y}, y) / \max(1, |y|)$", fontsize=10,
+            r"$\tilde{e} = d(\hat{y}, y) / \max(1, |y|)$", fontsize=14.5,
         )
         if col == 0:
-            ax_bot.set_ylabel(r"$P(\tilde{e}_i \leq x)$", fontsize=10.5)
+            ax_bot.set_ylabel(r"$P(\tilde{e}_i \leq x)$", fontsize=14)
 
         # Inset (bottom-left: free space below the exact-match plateau the
         # curves jump to at x=0; avoids the top-left where the curves sit).
@@ -535,7 +537,7 @@ def plot_ecdf_grid(
         )
         ax_bot.text(
             0.97, 0.03, text, transform=ax_bot.transAxes,
-            ha="right", va="bottom", fontsize=8.5,
+            ha="right", va="bottom", fontsize=12,
             bbox=dict(boxstyle="round,pad=0.25", facecolor="white",
                       edgecolor="0.7", alpha=0.92),
         )
@@ -552,7 +554,7 @@ def plot_ecdf_grid(
                    label=r"per-model mean $\tilde{e}$"),
         ],
         loc="lower center", bbox_to_anchor=(0.5, -0.02), ncol=3,
-        fontsize=11, frameon=False, columnspacing=2.0, handlelength=2.4,
+        fontsize=15, frameon=False, columnspacing=2.0, handlelength=2.4,
     )
 
     fig.tight_layout(rect=[0, 0.04, 1, 1])
