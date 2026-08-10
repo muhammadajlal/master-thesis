@@ -275,7 +275,7 @@ def plot_pca(
     ax.set_title(f"PC1 + PC2 = {pca.explained_variance_ratio_[:2].sum():.1%}", fontsize=18, pad=10)
     ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%})", fontsize=16)
     ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%})", fontsize=16)
-    ax.tick_params(axis="both", which="major", labelsize=12)
+    ax.tick_params(axis="both", which="major", labelsize=14)
     if xlim is not None:
         ax.set_xlim(*xlim)
     if ylim is not None:
@@ -285,8 +285,8 @@ def plot_pca(
     max_legend = 40
     legend_chars = unique_chars[:max_legend]
     handles = [Line2D([0], [0], marker='o', color='w', markerfacecolor=char_to_color[c],
-                       markersize=7, label=c if c != '' else '<blank>') for c in legend_chars]
-    ax.legend(handles=handles, fontsize=8, ncol=4, loc='upper right', framealpha=0.75)
+                       markersize=8, label=c if c != '' else '<blank>') for c in legend_chars]
+    ax.legend(handles=handles, fontsize=11, ncol=4, loc='upper right', framealpha=0.75)
 
     # Fixed 6x6 canvas (no bbox_inches='tight') so both panels render at
     # identical physical size when embedded side-by-side. Return the PCA
