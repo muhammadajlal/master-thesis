@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the thesis and the companion paper."
+title: "Alignment-Stable Attention for Writer-Independent IMU Handwriting Recognition"
+type: software
+authors:
+  - family-names: Ajlal
+    given-names: Muhammad
+    orcid: "https://orcid.org/0009-0003-5966-6130"
+repository-code: "https://github.com/muhammadajlal/master-thesis"
+license: MIT
+year: 2026
+references:
+  - type: thesis
+    title: "Alignment-Stable Attention for Writer-Independent IMU Handwriting Recognition"
+    authors:
+      - family-names: Ajlal
+        given-names: Muhammad
+    institution:
+      name: "Friedrich-Alexander-Universität Erlangen-Nürnberg, Pattern Recognition Lab"
+    year: 2026
+  - type: conference-paper
+    title: "Mitigating Exposure Bias in IMU Handwriting Recognition with Noise Injection and Hybrid CTC–AR Training"
+    authors:
+      - family-names: Ajlal
+        given-names: Muhammad
+      - family-names: Li
+        given-names: Jindong
+      - family-names: Zanca
+        given-names: Dario
+      - family-names: Christlein
+        given-names: Vincent
+      - family-names: Eskofier
+        given-names: Björn
+    collection-title: "ECML PKDD Workshops: 11th Workshop on Advanced Analytics and Learning on Temporal Data (AALTD)"
+    year: 2026
+    repository-code: "https://github.com/muhammadajlal/HWRFormer"

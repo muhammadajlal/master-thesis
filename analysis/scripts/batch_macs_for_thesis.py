@@ -31,8 +31,8 @@ from evaluate import get_macs_params  # noqa: E402
 # We pick ONE config per (arch, task) and rely on T=1024/4096 hardcoding in
 # get_macs_params to make MACs comparable across same-task datasets.
 CONFIGS: list[tuple[str, str]] = [
-    # --- REWI / BiLSTM-CTC (uses configs/train.yaml as canonical) ----------
-    ("REWI BiLSTM-CTC | word",          "configs/train.yaml"),
+    # --- REWI / BiLSTM-CTC (uses configs/legacy/train.yaml as canonical) ----------
+    ("REWI BiLSTM-CTC | word",          "configs/legacy/train.yaml"),
 
     # --- Transformer-CTC (s) ----------------------------------------------
     ("Transformer-CTC s | word",        "configs/AR-Baseline/train-transformer-ctc-onhw-word.yaml"),
@@ -44,10 +44,10 @@ CONFIGS: list[tuple[str, str]] = [
 
     # --- AR Transformer (s) ----------------------------------------------
     ("AR s ungated  | OnHW word",       "configs/AR-Baseline/train-ar-ungated-onhw-word.yaml"),
-    ("AR s elem     | OnHW word",       "configs/train_element_word.yaml"),
-    ("AR s elem     | priv sent",       "configs/train_sent.yaml"),
-    ("AR s headwise | priv word",       "configs/train_head_word.yaml"),
-    ("AR s headwise | priv sent",       "configs/train_head_sent.yaml"),
+    ("AR s elem     | OnHW word",       "configs/legacy/train_element_word.yaml"),
+    ("AR s elem     | priv sent",       "configs/legacy/train_sent.yaml"),
+    ("AR s headwise | priv word",       "configs/legacy/train_head_word.yaml"),
+    ("AR s headwise | priv sent",       "configs/legacy/train_head_sent.yaml"),
 
     # --- AR Transformer (xs) ---------------------------------------------
     ("AR xs elem     | OnHW word",      "configs/AR-Baseline/train-ar-baseline-xs-onhw-word.yaml"),

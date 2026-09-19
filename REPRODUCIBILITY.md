@@ -38,7 +38,12 @@ pinned in `environment-lock.txt`. Install the pinned Python packages with:
 
 ```bash
 python -m pip install -r environment-lock.txt
+export REPO=$(pwd)
 ```
+
+All configurations reference paths through `${REPO}`, `${DATA_ROOT}` (default
+`${REPO}/data`) and `${RESULTS_ROOT}` (default `${REPO}/results`); the
+placeholders are expanded by `rewi.utils.load_cfg` when a config is read.
 
 The key retained versions are Python 3.12.10, PyTorch 2.9.1+cu128,
 Transformers 4.57.3, PEFT 0.18.1, JiWER 4.0.0, NumPy 2.2.5, SciPy 1.17.0,
@@ -242,10 +247,14 @@ This table is the compact entry point from reader-facing evidence to the script 
 
 All paths below are relative to the repository root. In result patterns, `DATA` denotes either `onhw_wi_word_rh` or `wi_word_hw6_meta`. A directory ending in `_noctc` denotes auxiliary CTC weight λ = 0, `_lam02` denotes λ = 0.2, and no suffix denotes λ = 0.6, unless the row states otherwise. Each terminal result directory contains `results.json`; the per-fold subdirectories preserve the generated training YAML and selected-checkpoint metadata.
 
-Set the archived result root as:
+Result paths are given below `$RESULTS_ROOT/hwr2`, where `RESULTS_ROOT` is the same
+environment variable the configs use (`${RESULTS_ROOT}`; default `${REPO}/results`).
+On the thesis workspace the archived root was the sibling directory of the code:
 
 ```bash
-RESULTS_ROOT=../../results/hwr2
+export REPO=$(pwd)
+export DATA_ROOT=$REPO/../../data
+export RESULTS_ROOT=$REPO/../../results
 ```
 
 ### Chapter 6 configurations and results
@@ -402,8 +411,8 @@ generated from the `J2_*` dumps under `analysis/embedding_viz/`.
 The deterministic Chapter 6 analysis validates five folds per central condition and reproduces means, paired fold differences, fold signs, and two-sided 95% Student t intervals:
 
 ```bash
-python scripts/chapter6_analysis.py --results-root ../../results/hwr2
-python scripts/chapter6_analysis.py --results-root ../../results/hwr2 --json
+python scripts/chapter6_analysis.py --results-root $RESULTS_ROOT/hwr2
+python scripts/chapter6_analysis.py --results-root $RESULTS_ROOT/hwr2 --json
 ```
 
 Run the command twice and compare the output before submission. The intervals are exploratory because operating-point selection and reporting use the same validation folds.
@@ -411,7 +420,7 @@ Run the command twice and compare the output before submission. The intervals ar
 ## Producing the thesis result artifacts
 
 - Training (per fold): `python main.py -c <config.yaml>`
-- Sequential CV wrapper: `python scripts/others/train_cv.py -c <config.yaml> -m main.py` (requires `idx_fold: -1`)
+- Sequential CV wrapper: `python train_cv.py -c <config.yaml>` (requires `idx_fold: -1`)
 - Aggregation and MAC/parameter export: `python evaluate.py -c <config.yaml>`; this writes `<dir_work>/results.json`
 
 For an auditable submission, record the code revision with `git rev-parse HEAD` and preserve any intentional uncommitted patch. The restricted handover must include the private inputs, exact YAMLs, generated per-fold configurations, selected-checkpoint metadata, all canonical `results.json` files, the analysis scripts, and package/environment information. Public-data replication and private-data verification should produce the same table-level means up to documented hardware non-determinism.
