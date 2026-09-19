@@ -30,7 +30,7 @@ are kept for provenance but need data that is not released.
 
 | Thesis condition | Config directory | Result family under `${RESULTS_ROOT}/hwr2/` |
 |---|---|---|
-| REWI reference | `legacy/train.yaml`, `Baseline-REWI/` | `blconv_bilstm_wide_no_tokenizer/`, `Baseline-REWI/` |
+| REWI reference | `examples/rewi_ctc_onhw_wi.yaml`, `Baseline-REWI/` | `Baseline-REWI/` |
 | HWRFormer (elementwise / ungated / headwise) | `AR-Baseline/train-ar-baseline-xs-*`, `train-ar-xs-ungated-*`, `train-ar-xs-headwise-*` | `Baseline-AR-XS-blconv_b/`, `Baseline-AR-XS-Ungated/`, `Baseline-AR-XS-HeadwiseGating/` |
 | HWRFormer-L capacity control | `AR-Baseline/train-ar-baseline-*`, `AR-Baseline-WD/` | `Baseline-AR-ElementwiseGating*/` |
 | Parameter-matched CNN-Transformer-CTC | `AR-Baseline/train-transformer-xs-ctc-*-matched-masked.yaml` | `Baseline-Transformer-XS-CTC-Matched-Masked/` |
