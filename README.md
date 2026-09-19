@@ -116,13 +116,26 @@ and verify against `model-assets.sha256`.
 
 ## Dataset
 
-**OnHW-words500** (public): download the right-handed writer-independent
-(`Words500_indep_R`) and writer-dependent (`Words500_dep_R`) releases from
-Fraunhofer IIS
+**OnHW-words500** (public): from the Fraunhofer IIS OnHW page
 (<https://www.iis.fraunhofer.de/de/ff/lv/dataanalytics/anwproj/schreibtrainer/onhw-dataset.html>)
-and convert each with `scripts/onhw.ipynb` (set `dir_raw`, `dir_out` and
-`writer_indep` at the top of the notebook). The result is the MSCOCO-like layout
-the loaders expect:
+download the two **right-handed** OnHW-words500 archives, `OnHW-words500_indep.zip`
+(writer-independent) and `OnHW-words500_dep.zip` (writer-dependent); the `_L`
+archives are the left-handed variants and are not used. Extract each archive and
+run `scripts/onhw.ipynb` once per split, setting the three variables in the first
+code cell:
+
+| Run | `dir_raw` | `dir_out` | `writer_indep` |
+|---|---|---|---|
+| WI | folder that contains the five fold directories of `OnHW-words500_indep` | `${DATA_ROOT}/onhw_wi_word_rh` | `True` |
+| WD | folder that contains the five fold directories of `OnHW-words500_dep` | `${DATA_ROOT}/onhw_wd_word_rh` | `False` |
+
+Each fold directory holds the released pickles (`all_x_dat_{train,val}_imu.pkl`,
+`all_{train,val}_gt.pkl`, `{train,val}_ids.pkl`). The notebook drops empty
+sequences and sequences longer than 1,024 timesteps, writes one 13-channel CSV per
+sample and builds the per-fold `train.json` / `val.json`; the official fold
+boundaries are preserved. (The exploratory equation configs use the
+`OnHW-equations_{indep,dep}.zip` archives the same way.) The result is the
+MSCOCO-like layout the loaders expect:
 
 ```
 ${DATA_ROOT}/onhw_wi_word_rh/
