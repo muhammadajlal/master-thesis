@@ -11,8 +11,10 @@ Hybrid CTC–AR Training"* (AALTD @ ECML PKDD 2026; standalone release:
 
 Online handwriting recognition from an inertial sensor pen: a 13-channel IMU
 time series is mapped to text. The thesis starts from the recurrent CNN-BiLSTM-CTC
-recognizer **REWI** (Li et al., iWOAR 2025) and studies two decoder families under
-a shared 1D CNN encoder, on the public **OnHW-words500** benchmark
+recognizer **REWI** ([Li et al., iWOAR 2025](https://doi.org/10.1007/978-3-032-13312-0_16);
+this codebase extends their [implementation](https://github.com/jindongli24/REWI))
+and studies two decoder families under a shared 1D CNN encoder, on the public
+**OnHW-words500** benchmark
 (writer-independent and writer-dependent splits) and on two private STABILO
 word/sentence datasets:
 
@@ -30,11 +32,18 @@ word/sentence datasets:
 
 ![HWRFormer architecture](figures/hwrformer_architecture.png)
 
-*HWRFormer and hybrid training: the shared 1D CNN encoder feeds the AR
-Transformer decoder, which consumes its own previous predictions at inference
-(dashed loop); during hybrid training an auxiliary CTC head on the encoder adds
-an alignment loss. The REWI reference (same encoder, BiLSTM + CTC decoder) is
-shown in `figures/architecture.png`.*
+*HWRFormer: the 1D CNN encoder feeds a Transformer decoder with masked
+self-attention, cross-attention and an SDPA output gate; at inference the decoder
+consumes its own previous characters (dashed loop). The dashed CTC head is the
+training-only auxiliary objective of hybrid CTC–AR training.*
+
+![HWR-GPT architecture](figures/hwr_gpt_architecture.png)
+
+*HWR-GPT: the same encoder and a connector produce sensor-derived prefix tokens
+that, together with trainable soft prompts and a fixed instruction, condition a
+frozen GPT-2 adapted with LoRA. The optional CTC head on the encoder is the
+auxiliary supervision studied in Chapter 6. The REWI reference (same encoder with
+a BiLSTM + CTC decoder) is shown in `figures/architecture.png`.*
 
 ## Results
 
@@ -259,7 +268,3 @@ MIT — see [LICENSE.txt](LICENSE.txt). The code builds on
   year      = {2026},
 }
 ```
-
-REWI baseline: Li, J., Hamann, T., Barth, J., Kämpf, P., Zanca, D., Eskofier, B.
-*Robust and Efficient Writer-Independent IMU-Based Handwriting Recognition*,
-iWOAR 2025, LNCS 16292. <https://doi.org/10.1007/978-3-032-13312-0_16>
