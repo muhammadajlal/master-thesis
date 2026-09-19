@@ -11,7 +11,7 @@ arch_de: "t5-small"
 d_cnn: 512
 
 # Pretrained LM settings (probe defaults)
-lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+lm_name: "${REPO}/assets/hf_models/t5-small"
 lm_local_files_only: true
 lm_train_lm: true      # true: fine-tune entire LM from epoch 0; false: freeze LM weights
 lm_unfreeze_epoch: 0   # At which epoch to unfreeze LM if lm_train_lm is false initially
@@ -41,8 +41,8 @@ aug: false
 ctc_decoder: best_path
 
 # Data / paths
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/multimodal_t5_small-0-600_1e-4
+dir_dataset: ${DATA_ROOT}/wi_sent_hw6_meta
+dir_work: ${RESULTS_ROOT}/hwr2/multimodal_t5_small-0-600_1e-4
 checkpoint: null
 
 # Runtime
@@ -81,7 +81,7 @@ size_batch: 64
 # Tokenizer settings (legacy; LM uses ByT5 tokenizer internally)
 tokenizer:
   type: sentencepiece
-  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  model: ${REPO}/tokenizer/bpe100.model
   vocab_size: 100
 use_bpe: false
 

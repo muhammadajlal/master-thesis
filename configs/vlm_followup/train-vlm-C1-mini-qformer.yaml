@@ -102,8 +102,8 @@ concat:
 ctc_decoder: best_path
 d_cnn: 512
 device: cuda
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_followup_C1_mini_qformer/vlm__wi_word_hw6_meta
+dir_dataset: ${DATA_ROOT}/wi_word_hw6_meta
+dir_work: ${RESULTS_ROOT}/hwr2/Ablations-MMLM/GPT-2/AR-only/vlm_followup_C1_mini_qformer/vlm__wi_word_hw6_meta
 epoch: 300
 epoch_warmup: 30
 export_val_full: true
@@ -126,7 +126,7 @@ seed: 42
 size_batch: 8
 test: false
 tokenizer:
-  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  model: ${REPO}/tokenizer/bpe100.model
   type: sentencepiece
   vocab_size: 100
 use_bpe: false
@@ -135,7 +135,7 @@ vlm:
   connector_type: qformer
   freeze_lm: true
   label_smoothing: 0.1
-  lm_name: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2
+  lm_name: ${REPO}/assets/hf_models/gpt2
   local_files_only: true
   lora_alpha: 32
   lora_dropout: 0.1

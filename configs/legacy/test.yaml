@@ -3,12 +3,12 @@ arch_en: blconv_b
 aug: true # whether to perform data augmentation for train set
 cache: false # whether to cache the whole dataset into rams
 # Bypassed by SLURM script env variable
-checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv_ARDecoder_no_tokenizer/ar_transformer_s__wi_word_hw6_meta/fold_0/0/checkpoints/299.pth # path to checkpoint to load
+checkpoint: ${RESULTS_ROOT}/hwr2/blconv_ARDecoder_no_tokenizer/ar_transformer_s__wi_word_hw6_meta/fold_0/0/checkpoints/299.pth # path to checkpoint to load
 ctc_decoder: best_path
 device: cpu
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta 
+dir_dataset: ${DATA_ROOT}/wi_word_hw6_meta 
 # Bypassed by SLURM script env variable
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/qualitative_outputs_new # Bypassed by SLURM script env variable
+dir_work: ${REPO}/qualitative_outputs_new # Bypassed by SLURM script env variable
 
 
 qualitative: true
@@ -21,8 +21,8 @@ qual_indices_by_fold:
   3: []
   4: []
 
-qual_csv: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/quant_all_val_predictions_new.csv
-qual_outdir: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/qualitative_analysis_outputs/fold_0
+qual_csv: ${REPO}/quant_all_val_predictions_new.csv
+qual_outdir: ${REPO}/qualitative_analysis_outputs/fold_0
 qual_seed: 42
 qual_n_correct: 5
 qual_n_nearmiss: 5

@@ -128,7 +128,7 @@ def _ordered_cfg(base: dict, mode: str, dataset: str) -> dict:
     cfg["input_corruption"] = ic
 
     # Retarget dir_work
-    out_root = "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2"
+    out_root = "${RESULTS_ROOT}/hwr2"
     cfg["dir_work"] = f"{out_root}/HybridInputCorruption_{mode}/ar_transformer_s__{dataset}"
 
     # Belt-and-suspenders: ensure dual_head/AR settings consistent

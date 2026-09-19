@@ -22,7 +22,7 @@ DATASET=${DATASET:-}
 # Examples:
 #   export TEST_YAML=hybrid/train_element_word_06.yaml
 #   export TEST_YAML=experiments/onhw_wi_ar_pretrained.yaml
-TEST_YAML=${TEST_YAML:-train_element_word.yaml}
+TEST_YAML=${TEST_YAML:-legacy/train_element_word.yaml}
 
 # Optional: override which checkpoint filename to use if the YAML's checkpoint is null
 CKPT_NAME=${CKPT_NAME:-best_cer.pth}

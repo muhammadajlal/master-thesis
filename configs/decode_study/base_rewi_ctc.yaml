@@ -14,10 +14,10 @@ gating_type: elementwise
 categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"]
 
 # ── Checkpoint (REWI baseline CTC, fold 0) ──────────────────────
-checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv_bilstm_wide_no_tokenizer/bilstm_wide__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth
+checkpoint: ${RESULTS_ROOT}/hwr2/blconv_bilstm_wide_no_tokenizer/bilstm_wide__onhw_wi_word_rh/fold_0/0/checkpoints/best_cer.pth
 
 # ── Dataset ──────────────────────────────────────────────────────
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wi_word_rh
+dir_dataset: ${DATA_ROOT}/onhw_wi_word_rh
 idx_fold: 0
 cache: true
 
@@ -46,4 +46,4 @@ length_bonus: 0.0
 nbest_size: 16
 
 # ── Output ───────────────────────────────────────────────────────
-outdir: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/decode_study
+outdir: ${RESULTS_ROOT}/hwr2/decode_study

@@ -14,7 +14,7 @@ set -x
 
 # ---- Params you can tweak ----
 # Specify the YAML config file to use (path relative to configs/)
-TRAIN_YAML=${TRAIN_YAML:-train-vlm-gpt2.yaml}
+TRAIN_YAML=${TRAIN_YAML:-legacy/train-vlm-gpt2.yaml}
 
 # Dataset name (can still be overridden)
 DATASET=${DATASET:-onhw_wi_word_rh}  # onhw_wi_word_rh | wi_word_hw6_meta etc.

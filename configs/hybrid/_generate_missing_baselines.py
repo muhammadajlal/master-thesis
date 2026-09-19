@@ -23,8 +23,8 @@ import yaml
 HERE = Path(__file__).resolve().parent
 BASE = HERE / "train_element_word_06_stabilo.yaml"
 
-DATA_ROOT = "/home/woody/iwso/iwso214h/imu-hwr/data"
-OUT_ROOT = "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2"
+DATA_ROOT = "${DATA_ROOT}"
+OUT_ROOT = "${RESULTS_ROOT}/hwr2"
 
 # Categories from existing AR-InputCorruption configs per dataset.
 CATS_LATIN = [

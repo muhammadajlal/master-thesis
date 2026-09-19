@@ -17,7 +17,7 @@ set -x
 TRAIN_RUN=${TRAIN_RUN:-multimodal_t5_small_FreezeLM}
 
 # Which beam config to use: test-t5-small_beam4.yaml or test-t5-small_beam4_lp08.yaml
-BEAM_CFG=${BEAM_CFG:-test-t5-small_beam4.yaml}
+BEAM_CFG=${BEAM_CFG:-legacy/test-t5-small_beam4.yaml}
 
 # Length penalty suffix for output folder (derived from BEAM_CFG)
 if [[ "$BEAM_CFG" == *"lp08"* ]]; then

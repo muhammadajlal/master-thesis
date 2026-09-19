@@ -41,7 +41,7 @@ export PROJ
 DATA=$WORK/imu-hwr/data/${DATASET}
 
 # Base inference YAML
-BASE_YAML="$PROJ/configs/test_rescore_ctc.yaml"
+BASE_YAML="$PROJ/configs/legacy/test_rescore_ctc.yaml"
 
 # Output root (separate directory)
 # Default includes run name to avoid mixing outputs across runs.

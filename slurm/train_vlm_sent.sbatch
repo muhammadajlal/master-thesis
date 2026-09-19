@@ -12,7 +12,7 @@ set -euo pipefail
 set -x
 
 # ---- Configuration ----
-TRAIN_YAML=${TRAIN_YAML:-train-vlm-gpt2-sent-v1.1.yaml}
+TRAIN_YAML=${TRAIN_YAML:-legacy/train-vlm-gpt2-sent-v1.1.yaml}
 DATASET=${DATASET:-wi_sent_hw6_meta}
 
 WORK=/home/woody/iwso/iwso214h

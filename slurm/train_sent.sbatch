@@ -30,7 +30,7 @@ ARCH_DE=$(
 python3 - "$PROJ" <<'PY'
 import yaml, os, sys
 proj = sys.argv[1]
-p = os.path.join(proj, "configs", "train.yaml")
+p = os.path.join(proj, "configs", "legacy", "train.yaml")
 with open(p, "r") as f:
     cfg = yaml.safe_load(f)
 print(cfg.get("arch_de", "unknown"))
@@ -73,7 +73,7 @@ export PYTHONPATH="$PROJ:${PYTHONPATH:-}"
 
 # Make a per-fold temp config and patch it safely with Python (PyYAML)
 TMPCFG="${SLURM_TMPDIR:-/tmp}/train_${DATASET}_fold${FOLD}.yaml"
-cp "$PROJ/configs/train_sent.yaml" "$TMPCFG"
+cp "$PROJ/configs/legacy/train_sent.yaml" "$TMPCFG"
 
 python3 - <<PY
 import yaml

@@ -10,7 +10,7 @@ arch_en: "blconv_l"
 d_cnn: 512
 
 # Pretrained LM settings — FROZEN base + LoRA adapters
-lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/t5-small"
+lm_name: "${REPO}/assets/hf_models/t5-small"
 lm_local_files_only: true
 lm_train_lm: false
 lm_unfreeze_epoch: -1
@@ -43,8 +43,8 @@ aug: false
 ctc_decoder: best_path
 
 # Data / paths
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/t5_final_E2_bridge/t5-small__wi_sent_hw6_meta
+dir_dataset: ${DATA_ROOT}/wi_sent_hw6_meta
+dir_work: ${RESULTS_ROOT}/hwr2/t5_final_E2_bridge/t5-small__wi_sent_hw6_meta
 checkpoint: null
 
 # Runtime
@@ -76,7 +76,7 @@ grad_accum_steps: 2
 # Tokenizer (legacy)
 tokenizer:
   type: sentencepiece
-  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  model: ${REPO}/tokenizer/bpe100.model
   vocab_size: 100
 use_bpe: false
 

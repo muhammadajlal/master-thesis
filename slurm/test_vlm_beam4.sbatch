@@ -12,7 +12,7 @@ set -euo pipefail
 set -x
 
 # ---- Configuration ----
-TRAIN_YAML=${TRAIN_YAML:-test-vlm-beam4.yaml}
+TRAIN_YAML=${TRAIN_YAML:-legacy/test-vlm-beam4.yaml}
 DATASET=${DATASET:-onhw_wi_word_rh}
 
 # Source model results (v2 checkpoints)

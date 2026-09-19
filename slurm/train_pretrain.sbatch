@@ -11,7 +11,7 @@ set -euo pipefail
 set -x
 
 # ---- Params you can tweak ----
-PRETRAIN_YAML=${PRETRAIN_YAML:-pretrain_decoder_sent.yaml}
+PRETRAIN_YAML=${PRETRAIN_YAML:-legacy/pretrain_decoder_sent.yaml}
 
 WORK=/home/woody/iwso/iwso214h
 PROJ=$WORK/imu-hwr/work/REWI_work

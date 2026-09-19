@@ -23,7 +23,7 @@ export PROJ
 DATA=$WORK/imu-hwr/data/${DATASET}
 
 # Base inference YAML (must exist)
-BASE_YAML="$PROJ/configs/test_sent.yaml"
+BASE_YAML="$PROJ/configs/legacy/test_sent.yaml"
 
 # Output root for inference artifacts
 OUT_ROOT="$PROJ/inference_results_sent"

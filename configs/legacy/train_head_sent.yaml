@@ -5,10 +5,10 @@ cache: true # whether to cache the whole dataset into rams
 checkpoint: null # path to checkpoint to load
 ctc_decoder: best_path
 device: cuda
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
-#dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/head_sent_no_tokenizer_init/ar_transformer_s__wi_sent_hw6_meta
-#dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv/blconv_b__wi_onhw_wd_word_rh
+dir_dataset: ${DATA_ROOT}/wi_sent_hw6_meta
+#dir_work: ${RESULTS_ROOT}/hwr2/blconv/blconv_b__wi_word_hw6_meta
+dir_work: ${RESULTS_ROOT}/hwr2/head_sent_no_tokenizer_init/ar_transformer_s__wi_sent_hw6_meta
+#dir_work: ${RESULTS_ROOT}/hwr2/blconv/blconv_b__wi_onhw_wd_word_rh
 
 epoch: 300
 # We also can set epoch_warmup to 10 for more quick debugging.
@@ -28,7 +28,7 @@ test: false
 
 tokenizer:
   type: sentencepiece
-  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  model: ${REPO}/tokenizer/bpe100.model
   vocab_size: 100
 use_bpe: false
 # Only for transformer decoder

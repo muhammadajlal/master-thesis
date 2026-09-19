@@ -1,0 +1,55 @@
+# REWI reference: 1D CNN (blconv_b) + BiLSTM (bilstm_wide) + CTC, OnHW-words500 WI
+# Copied from configs/legacy/train.yaml (thesis canonical configuration).
+# Paths use ${DATA_ROOT} / ${RESULTS_ROOT} / ${REPO}; idx_fold -1 = run all folds via train_cv.py.
+arch_de: 'bilstm_wide' # decoder architecture
+arch_en: 'blconv_b'
+aug: true # whether to perform data augmentation for train set
+cache: true # whether to cache the whole dataset into rams
+checkpoint: null # path to checkpoint to load
+ctc_decoder: best_path
+device: cuda
+dir_dataset: ${DATA_ROOT}/onhw_wi_word_rh
+dir_work: ${RESULTS_ROOT}/hwr2/blconv_bilstm_wide_no_tokenizer/bilstm_wide__onhw_wi_word_rh
+
+epoch: 300
+epoch_warmup: 30
+freeze: false # whether to freeze the encoder
+freq_eval: 5 # frequency (epoch) to evaulate model performance on val set
+freq_log: 50 # frequency (iteration) to log information
+freq_save: 1 # frequency (epoch) to save model checkpoint
+save_best_only: true # whether to save only the best checkpoints during training
+export_val_full: true # whether to export full val set decoding results during training
+idx_fold: -1
+len_seq: 0
+lr: 0.001
+num_channel: 13
+num_worker: 16
+seed: 42
+size_batch: 64
+test: false
+
+tokenizer:
+  type: sentencepiece
+  model: ${REPO}/tokenizer/bpe100.model
+  vocab_size: 100
+use_bpe: false
+
+use_gated_attention: false
+gating_type: elementwise # options: "elementwise", "headwise"
+
+concat:
+  enabled: false
+  items_min: 2
+  items_max: 6
+  max_T: 4096
+  same_writer: true
+  writer_key: "id_writer"
+  p_concat: 0.5
+  use_separator: false
+  disable_base_aug_in_concat: true
+
+
+
+categories: ["", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "Ä", "Ö", "Ü", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "ä", "ö", "ü", "ß"] # including seperation label "" for CTC
+
+ 

@@ -33,8 +33,8 @@ checkpoint: null
 ctc_decoder: best_path
 device: cuda
 
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_word_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/train_element_word_hybrid_06_xs_stabilo/ar_transformer_xs__wi_word_hw6_meta
+dir_dataset: ${DATA_ROOT}/wi_word_hw6_meta
+dir_work: ${RESULTS_ROOT}/hwr2/train_element_word_hybrid_06_xs_stabilo/ar_transformer_xs__wi_word_hw6_meta
 
 epoch: 300
 epoch_warmup: 30
@@ -56,7 +56,7 @@ use_amp: true
 
 tokenizer:
   type: sentencepiece
-  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  model: ${REPO}/tokenizer/bpe100.model
   vocab_size: 100
 use_bpe: false
 

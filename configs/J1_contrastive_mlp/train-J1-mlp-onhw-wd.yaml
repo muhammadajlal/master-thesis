@@ -20,7 +20,7 @@ checkpoint: null
 aug: true
 
 vlm:
-  lm_name: "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models/gpt2"
+  lm_name: "${REPO}/assets/hf_models/gpt2"
   local_files_only: true
 
   connector_type: mlp
@@ -58,8 +58,8 @@ vlm:
   lambda_contrast: 1.0
   contrast_temperature: 0.07
 
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/onhw_wd_word_rh
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/Ablations-MMLM/GPT-2/Hybrid-Contrastive/J1_contrastive_mlp/vlm__onhw_wd_word_rh
+dir_dataset: ${DATA_ROOT}/onhw_wd_word_rh
+dir_work: ${RESULTS_ROOT}/hwr2/Ablations-MMLM/GPT-2/Hybrid-Contrastive/J1_contrastive_mlp/vlm__onhw_wd_word_rh
 idx_fold: 0
 
 device: cuda
@@ -88,7 +88,7 @@ test: false
 
 tokenizer:
   type: sentencepiece
-  model: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe100.model
+  model: ${REPO}/tokenizer/bpe100.model
   vocab_size: 100
 use_bpe: false
 

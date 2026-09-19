@@ -2,15 +2,15 @@ arch_de: ar_transformer_s # decoder architecture
 arch_en: blconv_b
 aug: true # whether to perform data augmentation for train set
 cache: false # whether to cache the whole dataset into rams
-checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv_ARDecoder_no_tokenizer/ar_transformer_s__wi_sent_hw6_meta/fold_0/0/checkpoints/299.pth # path to checkpoint to load
+checkpoint: ${RESULTS_ROOT}/hwr2/blconv_ARDecoder_no_tokenizer/ar_transformer_s__wi_sent_hw6_meta/fold_0/0/checkpoints/299.pth # path to checkpoint to load
 ctc_decoder: best_path
 device: cpu
-dir_dataset: /home/woody/iwso/iwso214h/imu-hwr/data/wi_sent_hw6_meta
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/inference_results_sent
+dir_dataset: ${DATA_ROOT}/wi_sent_hw6_meta
+dir_work: ${REPO}/inference_results_sent
 
 qualitative: false
-qual_csv: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/fold_0.csv
-qual_outdir: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/qualitative_outputs
+qual_csv: ${REPO}/fold_0.csv
+qual_outdir: ${REPO}/qualitative_outputs
 qual_seed: 42
 qual_n_correct: 5
 qual_n_nearmiss: 5

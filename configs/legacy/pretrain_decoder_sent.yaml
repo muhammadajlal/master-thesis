@@ -9,12 +9,12 @@
 # --- RunManager basics ---
 idx_fold: 0
 # Put outputs under results/ (same convention as training)
-dir_work: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_decoder_sent/run_1514217
+dir_work: ${RESULTS_ROOT}/hwr2/pretrain_decoder_sent/run_1514217
 
 # Resume support (continues from <dir_work>/<idx_fold>/checkpoints/last.pth)
 resume: true
 # Optional explicit path (overrides auto last.pth lookup)
-# resume_checkpoint: /home/woody/iwso/iwso214h/imu-hwr/results/hwr2/pretrain_decoder_sent/run_1514217/0/checkpoints/last.pth
+# resume_checkpoint: ${RESULTS_ROOT}/hwr2/pretrain_decoder_sent/run_1514217/0/checkpoints/last.pth
 
 test: false
 epoch: 100
@@ -27,7 +27,7 @@ freq_save: 1
 
 # --- Data ---
 # One sentence per line (already normalized + de-leaked against wi_sent_hw6_meta)
-sentlist_path: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/dictionaries/sent/mixed_en_de_no_wi_sent_hw6_meta.txt
+sentlist_path: ${REPO}/assets/dictionaries/sent/mixed_en_de_no_wi_sent_hw6_meta.txt
 val_ratio: 0.01
 max_words: null          # set e.g. 200000 for faster pretrain
 
@@ -41,7 +41,7 @@ tokenizer:
   # IMPORTANT: this matches the existing CNN-AR "no tokenizer" pipeline.
   # It uses indices of cfgs.categories (from the referenced YAML) and appends PAD/BOS/EOS.
   type: categories
-  categories_from_yaml: /home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/configs/train_element_sent.yaml
+  categories_from_yaml: ${REPO}/configs/train_element_sent.yaml
   categories_key: categories
 
 # What to do with sentences containing characters outside the categories vocab:
