@@ -36,6 +36,7 @@ from rewi.dataset.utils import fn_collate
 from rewi.evaluate import evaluate
 from rewi.model import BaseModel, DualHeadModel
 from rewi.training.utils import build_ar_batch
+from rewi.utils import load_cfg
 
 # Reuse the same checkpoint-key migration as the decoding-study harness so old
 # state dicts (legacy MHA naming) load cleanly.
@@ -54,8 +55,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_config(path: str) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
+    """Load a YAML config with ${REPO}/${DATA_ROOT}/${RESULTS_ROOT} expanded."""
+    return load_cfg(path)
 
 
 def build_dual_or_base(cfg: dict, device: torch.device, vocab_dec, PAD_ID, BOS_ID, EOS_ID):

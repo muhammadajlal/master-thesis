@@ -1,6 +1,7 @@
 # rewi/model/pretrainedLM.py
 from __future__ import annotations
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from typing import List
 
 import torch
@@ -13,7 +14,9 @@ from loguru import logger
 
 @dataclass
 class LMConfig:
-    name: str = "/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/assets/hf_models"
+    # Local HF model directory (configs normally set `lm_name` explicitly).
+    name: str = field(default_factory=lambda: os.path.join(
+        os.environ.get("REPO", "."), "assets", "hf_models", "t5-small"))
     train_lm: bool = False
     max_new_tokens: int = 128
     num_beams: int = 1

@@ -1,9 +1,13 @@
+import os
+
 import sentencepiece as spm
+
 vocab_size = 500
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 for fk in ["0","1","2","3","4"]:
-    corpus = f"/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe_corpus_fold_{fk}.txt"
-    prefix = f"/home/woody/iwso/iwso214h/imu-hwr/work/REWI_work/tokenizer/bpe{vocab_size}_fold_{fk}"
+    corpus = os.path.join(HERE, f"bpe_corpus_fold_{fk}.txt")
+    prefix = os.path.join(HERE, f"bpe{vocab_size}_fold_{fk}")
     spm.SentencePieceTrainer.Train(
         input=corpus,
         model_prefix=prefix,

@@ -1,3 +1,13 @@
+"""Aggregate cross-validation results and export model complexity.
+
+Globs `train_*.json` under the config's `dir_work`, selects the best validation
+CER epoch per fold, and writes `<dir_work>/results.json` with the 5-fold
+mean/std of CER and WER plus parameter counts and inference MACs
+(`torch.utils.flop_counter.FlopCounterMode`).
+
+Usage:
+    python evaluate.py -c configs/examples/hwrformer_onhw_wi.yaml
+"""
 import argparse
 import json
 import os
@@ -18,6 +28,7 @@ from rewi.model.multimodal_lm_model import MultimodalLMModel
 from rewi.model.pretrainedLM import LMConfig
 from rewi.model.vlm_model import VLMModel
 from rewi.tokenizer import BPETokenizer
+from rewi.utils import load_cfg
 
 import time
 
@@ -467,8 +478,7 @@ def main(path_cfg: str) -> None:
     Args:
         path_cfg (str): Path to the configuration YAML file.
     '''
-    with open(path_cfg, 'r') as f:
-        cfgs = yaml.safe_load(f)
+    cfgs = load_cfg(path_cfg)
 
     os.makedirs(cfgs['dir_work'], exist_ok=True)
 

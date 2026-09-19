@@ -55,7 +55,7 @@ from rewi.model import BaseModel, build_encoder
 from rewi.model.dual_head import DualHeadModel
 from rewi.model.ARDecoder import ARDecoder
 from rewi.tokenizer import BPETokenizer
-from rewi.utils import seed_everything
+from rewi.utils import load_cfg, seed_everything
 from rewi.analysis.metrics import lev_dist, normalized_lev_dist, character_error_rate
 
 from rewi.decoding.lm import CharLM, load_lm
@@ -107,8 +107,7 @@ def parse_args() -> argparse.Namespace:
 
 def load_config(args: argparse.Namespace) -> dict:
     """Load YAML config and apply CLI overrides."""
-    with open(args.config, "r") as f:
-        cfg = yaml.safe_load(f)
+    cfg = load_cfg(args.config)
 
     # CLI overrides
     overrides = {

@@ -1,8 +1,22 @@
+"""Run k-fold cross-validation training sequentially.
+
+Generates one config per fold from a base config with ``idx_fold: -1``, runs
+``main.py`` on each, and removes the temporary configs afterwards. Path
+placeholders (``${REPO}``, ``${DATA_ROOT}``, ``${RESULTS_ROOT}``) are resolved
+before the per-fold configs are written.
+
+Usage:
+    python train_cv.py -c configs/examples/hwrformer_onhw_wi.yaml
+"""
 import argparse
 import json
 import os
+import sys
 
 import yaml
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rewi.utils import load_cfg  # noqa: E402
 
 
 def train_cv(cfgs: dict, path_main: str) -> None:
@@ -29,7 +43,7 @@ def train_cv(cfgs: dict, path_main: str) -> None:
         with open(path_temp, 'w') as f:
             yaml.safe_dump(cfgs, f)
 
-        command.append(f'python {path_main} -c {path_temp}')
+        command.append(f'{sys.executable} {path_main} -c {path_temp}')
 
     command = seperator.join(command) + f' && rm -rf {dir_temp}'
     print(command)
@@ -41,18 +55,17 @@ if __name__ == '__main__':
         description='Run handwriting recognition model with cross validation.'
     )
     parser.add_argument(
-        '-c', '--config', help='Path to the YAML file of configuration.'
+        '-c', '--config', required=True, help='Path to the YAML file of configuration.'
     )
     parser.add_argument(
         '-m',
         '--main',
         help='Path to the Python script for training.',
-        default='main.py',
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py'),
     )
     args = parser.parse_args()
 
-    with open(args.config, 'r') as f:
-        cfgs = yaml.safe_load(f)
+    cfgs = load_cfg(args.config)
 
     assert (
         cfgs['idx_fold'] == -1

@@ -8,8 +8,8 @@ This script provides:
 - Cross-validation fold support
 
 Usage:
-    python main.py -c configs/train.yaml      # Training
-    python main.py -c configs/test.yaml       # Evaluation
+    python main.py -c configs/legacy/train.yaml      # Training
+    python main.py -c configs/legacy/test.yaml       # Evaluation
 
 Configuration:
     See configs/ directory for example YAML configurations.
@@ -37,7 +37,7 @@ from rewi.loss import CTCLoss
 from rewi.manager import RunManager
 from rewi.model import BaseModel, build_encoder
 from rewi.model import DualHeadModel
-from rewi.utils import seed_everything, seed_worker
+from rewi.utils import load_cfg, seed_everything, seed_worker
 
 # LM-specific modules
 from rewi.model.multimodal_lm_model import MultimodalLMModel
@@ -1438,8 +1438,6 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    with open(args.config, 'r') as f:
-        cfgs = yaml.safe_load(f)
-        cfgs = argparse.Namespace(**cfgs)
+    cfgs = argparse.Namespace(**load_cfg(args.config))
 
     main(cfgs)

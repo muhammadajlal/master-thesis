@@ -4,12 +4,14 @@ import torch, yaml
 from types import SimpleNamespace
 
 from rewi.model import BaseModel
+from rewi.utils import load_cfg
 from rewi.dataset import HRDataset
 from rewi.evaluate import evaluate
 from rewi.tokenizer import BPETokenizer  # used iff use_bpe: true
 
 # -------- set your checkpoint here --------
-CKPT_PATH = "/home/woody/iwso/iwso214h/imu-hwr/results/hwr2/blconv_ARDecoder_no_tokenizer/ar_transformer_s__wi_sent_hw6_meta/fold_3/3/checkpoints/254.pth"
+CKPT_PATH = os.path.join(os.environ.get("RESULTS_ROOT", "results"),
+    "hwr2/blconv_ARDecoder_no_tokenizer/ar_transformer_s__wi_sent_hw6_meta/fold_3/3/checkpoints/254.pth")
 # -----------------------------------------
 
 def pick_device(cli_device: str | None, yaml_device: str | None) -> str:
@@ -281,8 +283,7 @@ def main():
                     help="Directory to write GT/Pred CSVs for quality runs")
     args = ap.parse_args()
 
-    with open(args.config, "r") as f:
-        cfg = SimpleNamespace(**yaml.safe_load(f))
+    cfg = SimpleNamespace(**load_cfg(args.config))
 
     device_str = pick_device(args.device, getattr(cfg, "device", None))
     device = torch.device(device_str)

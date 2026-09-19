@@ -46,6 +46,7 @@ from rewi.dataset.lm_collate import vlm_collate
 from rewi.dataset.utils import fn_collate
 from rewi.model import build_encoder
 from rewi.model.vlm_model import VLMModel
+from rewi.utils import load_cfg
 from torch.utils.data import DataLoader
 
 
@@ -105,8 +106,7 @@ class EmbeddingCollector:
 
 def load_vlm_from_checkpoint(config_path: str, ckpt_path: str, device: str = "cpu") -> VLMModel:
     """Load VLM model from config + checkpoint."""
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
+    cfg = load_cfg(config_path)
 
     vlm_cfg = cfg.get("vlm", {})
     encoder = build_encoder(cfg["num_channel"], cfg["arch_en"], cfg.get("len_seq", 0))
@@ -159,8 +159,7 @@ def load_vlm_from_checkpoint(config_path: str, ckpt_path: str, device: str = "cp
 
 def load_dataset(config_path: str, fold: int = 0):
     """Load dataset from config."""
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
+    cfg = load_cfg(config_path)
 
     dir_dataset = cfg["dir_dataset"]
     categories = cfg["categories"]
@@ -470,8 +469,7 @@ def _load_and_extract(config_path, ckpt_path, fold, batch_size, device, max_samp
         logger.info("Loading {} dataset (fold {})...", label, fold)
         ds, _ = load_dataset(config_path, fold=fold)
 
-        with open(config_path) as _f:
-            _cfg = yaml.safe_load(_f)
+        _cfg = load_cfg(config_path)
         categories = _cfg["categories"]
         hf_tok = model.tokenizer
         pad_id = 0  # CTC blank / PAD

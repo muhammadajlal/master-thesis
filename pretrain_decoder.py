@@ -1,3 +1,13 @@
+"""Text-only pretraining of the autoregressive character decoder.
+
+Trains the AR Transformer decoder as a character language model on a word or
+sentence list (see REPRODUCIBILITY.md, "Legacy pretrained AR decoder helper")
+and writes `best_loss.pth`, which `main.py` can load through
+`pretrained_decoder_checkpoint`.
+
+Usage:
+    python pretrain_decoder.py -c configs/legacy/pretrain_decoder_word_xs.yaml
+"""
 import argparse
 import json
 import math
@@ -14,6 +24,7 @@ from torch.utils.data import DataLoader, Dataset
 from rewi.manager import RunManager
 from rewi.model import build_decoder
 from rewi.tokenizer import BPETokenizer, CharTokenizer
+from rewi.utils import load_cfg
 
 
 def _seed_all(seed: int) -> None:
@@ -326,8 +337,7 @@ def main(cfgs: argparse.Namespace) -> None:
             src_yaml = tok_cfg.get("categories_from_yaml")
             if not src_yaml:
                 raise ValueError("tokenizer.type=categories requires tokenizer.categories or tokenizer.categories_from_yaml")
-            with open(src_yaml, "r") as f:
-                y = yaml.safe_load(f)
+            y = load_cfg(src_yaml)
             key = tok_cfg.get("categories_key", "categories")
             categories = y.get(key)
         if not isinstance(categories, list) or not categories:
@@ -602,8 +612,6 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", required=True, help="Path to YAML config")
     args = parser.parse_args()
 
-    with open(args.config, "r") as f:
-        cfgs = yaml.safe_load(f)
-        cfgs = argparse.Namespace(**cfgs)
+    cfgs = argparse.Namespace(**load_cfg(args.config))
 
     main(cfgs)
